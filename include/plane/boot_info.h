@@ -3,6 +3,16 @@
 
 #include <stdint.h>
 
+/* Video */
+struct plane_video_info {
+	uint32_t *framebuffer_addr;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pitch;
+	uint8_t  bpp;
+};
+
+/* Memory Map */
 #define PLANE_MAX_MEMMAP_ENTRIES 128
 
 enum plane_mem_type {
@@ -24,15 +34,21 @@ struct plane_mem_region {
 	uint32_t type;
 };
 
-struct boot_info {
-	uint32_t *framebuffer_addr;
-	uint64_t framebuffer_width;
-	uint64_t framebuffer_height;
-	uint64_t framebuffer_pitch;
-	uint8_t  framebuffer_bpp;
+struct plane_mem_info {
+	uint64_t entry_count;
+	struct plane_mem_region map[PLANE_MAX_MEMMAP_ENTRIES];
+};
 
-	uint64_t memmap_entries_count;
-	struct plane_mem_region memmap[PLANE_MAX_MEMMAP_ENTRIES];
+struct boot_info {
+	struct plane_video_info video;
+	struct plane_mem_info   mem;
+	
+	/*
+	 * and more ...
+	 * struct plane_acpi_info  acpi;
+	 * struct plane_smp_info   smp;
+	 * char cmdline[256];
+	 */
 };
 
 #endif /* PLANE_BOOT_INFO_H */

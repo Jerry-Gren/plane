@@ -43,7 +43,7 @@ static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARK
 /* in main.c */
 extern void kmain(struct boot_info *info);
 
-void boot_limine_collect_framebuffer(struct boot_info *b_info) {
+static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	if (framebuffer_request.response == NULL ||
 	    framebuffer_request.response->framebuffer_count < 1) {
 		hal_cpu_hang();
@@ -72,14 +72,14 @@ void boot_limine_collect_framebuffer(struct boot_info *b_info) {
 	/* fetch the first framebuffer */
    	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
 	
-	b_info->framebuffer_addr   = (uint32_t *)fb->address;
-	b_info->framebuffer_width  = fb->width;
-	b_info->framebuffer_height = fb->height;
-	b_info->framebuffer_pitch  = fb->pitch;
-	b_info->framebuffer_bpp    = fb->bpp;
+	video->framebuffer_addr = (uint32_t *)fb->address;
+	video->width            = fb->width;
+	video->height           = fb->height;
+	video->pitch            = fb->pitch;
+	video->bpp              = fb->bpp;
 }
 
-void boot_limine_collect_memmap(struct boot_info *b_info) {
+static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
 	if (memmap_request.response == NULL) {
 		hal_cpu_hang();
 	}
@@ -91,36 +91,36 @@ void boot_limine_collect_memmap(struct boot_info *b_info) {
 	 * };
 	 */
 	uint64_t count = memmap_request.response->entry_count;
-	for (uint64_t i = 0; i < count && b_info->memmap_entries_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
+	for (uint64_t i = 0; i < count && mem->entry_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
 		struct limine_memmap_entry *entry = memmap_request.response->entries[i];
-		uint64_t index = b_info->memmap_entries_count;
+		uint64_t index = mem->entry_count;
 
-		b_info->memmap[index].base = entry->base;
-		b_info->memmap[index].length = entry->length;
+		mem->map[index].base = entry->base;
+		mem->map[index].length = entry->length;
 
 		switch (entry->type) {
 			case LIMINE_MEMMAP_USABLE:
-				b_info->memmap[index].type = PLANE_MEM_USABLE; break;
+				mem->map[index].type = PLANE_MEM_USABLE; break;
 			case LIMINE_MEMMAP_RESERVED:
-				b_info->memmap[index].type = PLANE_MEM_RESERVED; break;
+				mem->map[index].type = PLANE_MEM_RESERVED; break;
 			case LIMINE_MEMMAP_ACPI_RECLAIMABLE:
-				b_info->memmap[index].type = PLANE_MEM_ACPI_RECLAIMABLE; break;
+				mem->map[index].type = PLANE_MEM_ACPI_RECLAIMABLE; break;
 			case LIMINE_MEMMAP_ACPI_NVS:
-				b_info->memmap[index].type = PLANE_MEM_ACPI_NVS; break;
+				mem->map[index].type = PLANE_MEM_ACPI_NVS; break;
 			case LIMINE_MEMMAP_BAD_MEMORY:
-				b_info->memmap[index].type = PLANE_MEM_BAD_MEMORY; break;
+				mem->map[index].type = PLANE_MEM_BAD_MEMORY; break;
 			case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:
-				b_info->memmap[index].type = PLANE_MEM_BOOTLOADER_RECLAIMABLE; break;
+				mem->map[index].type = PLANE_MEM_BOOTLOADER_RECLAIMABLE; break;
 			case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:
-				b_info->memmap[index].type = PLANE_MEM_EXECUTABLE_AND_MODULES; break;
+				mem->map[index].type = PLANE_MEM_EXECUTABLE_AND_MODULES; break;
 			case LIMINE_MEMMAP_FRAMEBUFFER:
-				b_info->memmap[index].type = PLANE_MEM_FRAMEBUFFER; break;
+				mem->map[index].type = PLANE_MEM_FRAMEBUFFER; break;
 			case LIMINE_MEMMAP_RESERVED_MAPPED:
-				b_info->memmap[index].type = PLANE_MEM_RESERVED_MAPPED; break;
+				mem->map[index].type = PLANE_MEM_RESERVED_MAPPED; break;
 			default:
-				b_info->memmap[index].type = PLANE_MEM_RESERVED; break;
+				mem->map[index].type = PLANE_MEM_RESERVED; break;
 		}
-		b_info->memmap_entries_count++;
+		mem->entry_count++;
 	}
 }
 
@@ -132,9 +132,8 @@ void _start(void) {
 
 	struct boot_info b_info = {0};
 	
-	boot_limine_collect_framebuffer(&b_info);
-
-	boot_limine_collect_memmap(&b_info);
+	boot_limine_collect_framebuffer(&b_info.video);
+	boot_limine_collect_memmap(&b_info.mem);
 	
 	kmain(&b_info);
 
