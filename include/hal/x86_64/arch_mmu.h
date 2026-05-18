@@ -7,6 +7,12 @@
 #define PAGE_PWT             (1 << 3)
 #define PAGE_PS              (1 << 7)
 
+/* Page table indices */
+#define PML4_INDEX(vaddr) (((vaddr) >> 39) & 0x1ff)
+#define PDPT_INDEX(vaddr) (((vaddr) >> 30) & 0x1ff)
+#define PD_INDEX(vaddr)   (((vaddr) >> 21) & 0x1ff)
+#define PT_INDEX(vaddr)   (((vaddr) >> 12) & 0x1ff)
+
 /* X86_64 specific page sizes */
 #ifdef __ASSEMBLER__
     #define ARCH_PAGE_SIZE         0x1000        /* 4KB base page */
@@ -32,6 +38,26 @@
 
     #define KERNEL_VMA_BASE        0xffffffff80000000ULL
     #define FRAMEBUFFER_VMA_BASE   0xffffffffc0000000ULL
+#endif
+
+#if (KERNEL_VMA_BASE & 0x1FFFFF) != 0
+    #error "KERNEL_VMA_BASE must be 2MB aligned!"
+#endif
+
+#if (FRAMEBUFFER_VMA_BASE & 0x1FFFFF) != 0
+    #error "FRAMEBUFFER_VMA_BASE must be 2MB aligned!"
+#endif
+
+#if KERNEL_VMA_BASE == FRAMEBUFFER_VMA_BASE
+    #error "Kernel and Framebuffer cannot share the same VMA base!"
+#endif
+
+#define VMA_DIFF (KERNEL_VMA_BASE > FRAMEBUFFER_VMA_BASE ? \
+                 (KERNEL_VMA_BASE - FRAMEBUFFER_VMA_BASE) : \
+                 (FRAMEBUFFER_VMA_BASE - KERNEL_VMA_BASE))
+
+#if VMA_DIFF < 0x2000000ULL
+    #error "Kernel and Framebuffer VMA bases are too close! Risk of overlap."
 #endif
 
 #endif /* HAL_ARCH_MMU_H */

@@ -6,8 +6,9 @@
 
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
 
-extern uint64_t boot_fb_pd[];
-extern uint64_t boot_pml4[];
+extern uint64_t early_pml4[];
+extern uint64_t early_pd_kernel[];
+extern uint64_t early_pd_fb[];
 
 void *hal_mmu_map_early_framebuffer(uint64_t phys_addr, uint64_t size) {
     uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
@@ -16,11 +17,18 @@ void *hal_mmu_map_early_framebuffer(uint64_t phys_addr, uint64_t size) {
     uint64_t fb_aligned_size = ALIGN(size + page_offset, ARCH_LARGE_PAGE_SIZE);
     uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
 
+    uint64_t *target_pd = early_pd_fb;
+#if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(FRAMEBUFFER_VMA_BASE)
+    target_pd = early_pd_kernel;
+#endif
+
+    uint64_t start_idx = PD_INDEX(FRAMEBUFFER_VMA_BASE);
+
     for (uint64_t i = 0; i < pages_needed; i++) {
         uint64_t offset = i * ARCH_LARGE_PAGE_SIZE;
         uint64_t current_vaddr = FRAMEBUFFER_VMA_BASE + offset;
         
-        boot_fb_pd[i] = (phys_base + offset) | FB_PAGE_FLAGS;
+        target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
         hal_mmu_invalidate_tlb(current_vaddr);
     }
 
@@ -28,6 +36,6 @@ void *hal_mmu_map_early_framebuffer(uint64_t phys_addr, uint64_t size) {
 }
 
 void hal_mmu_remove_identity_mapping(void) {
-    boot_pml4[0] = 0;
+    early_pml4[0] = 0;
     hal_mmu_flush_tlb_all();
 }

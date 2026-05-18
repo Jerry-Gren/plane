@@ -72,14 +72,16 @@ mb2_info:  .long 0
 
 /* Section bss */
 .section .boot.bss, "aw", @nobits
-.global boot_fb_pd
-.global boot_pml4
+.global early_pml4
+.global early_pd_kernel
+.global early_pd_fb
 .align 4096
-boot_pml4:      .skip 4096
-boot_pdpt_low:  .skip 4096
-boot_pdpt_high: .skip 4096
-boot_pd:        .skip 4096
-boot_fb_pd:     .skip 4096
+early_pml4:       .skip 4096
+early_pdpt_ident: .skip 4096
+early_pdpt_high:  .skip 4096
+early_pd_ident:   .skip 4096
+early_pd_kernel:  .skip 4096
+early_pd_fb:      .skip 4096
 
 .align 16
 stack_bottom:
@@ -138,23 +140,33 @@ _start:
 
     /* setup page table */
     /* PML4 */
-    mov $boot_pml4, %edi
-    mov $boot_pdpt_low, %eax
+    mov $early_pml4, %edi
+
+    mov $early_pdpt_ident, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, 0(%edi) /* PML4[0] -> boot_pdpt_low */
-    mov $boot_pdpt_high, %eax
+    mov %eax, 0(%edi) /* PML4[0] -> early_pdpt_ident */
+
+    mov $early_pdpt_high, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, 511*8(%edi) /* PML4[511] -> boot_pdpt_high */
+    mov %eax, (PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
+
     /* PDPT */
-    mov $boot_pd, %eax
+    mov $early_pdpt_ident, %edi
+    mov $early_pd_ident, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov $boot_pdpt_low, %edi
-    mov %eax, 0(%edi) /* boot_pdpt_low[0] -> boot_pd */
-    mov $boot_pdpt_high, %edi
-    mov %eax, 510*8(%edi) /* boot_pdpt_high[510] -> boot_pd */
-    mov $boot_fb_pd, %eax
+    mov %eax, 0(%edi) /* early_pdpt_ident[0] -> early_pd_ident */
+
+    mov $early_pdpt_high, %edi
+    mov $early_pd_kernel, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, 511*8(%edi) /* boot_pdpt_high[511] -> boot_fb_pd*/
+    mov %eax, (PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
+
+#if PDPT_INDEX(KERNEL_VMA_BASE) != PDPT_INDEX(FRAMEBUFFER_VMA_BASE)
+    mov $early_pd_fb, %eax
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov %eax, (PDPT_INDEX(FRAMEBUFFER_VMA_BASE) * 8)(%edi)
+#endif
+
     /* PDT */
     # mov $boot_pd, %edi
     # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_PS), %eax
@@ -170,16 +182,33 @@ _start:
     add $(ARCH_LARGE_PAGE_SIZE - 1), %eax
     shr $ARCH_LARGE_PAGE_SHIFT, %eax
     mov %eax, %ecx
-    mov $boot_pd, %edi
+
+    cmp $512, %ecx
+    jbe .Lpages_ok
+    mov $512, %ecx
+.Lpages_ok:
+
+    push %ecx
+    mov $early_pd_ident, %edi
     mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
-.Lfill_pd:
+.Lfill_ident_pd:
     mov %eax, (%edi)
     add $ARCH_LARGE_PAGE_SIZE, %eax
     add $8, %edi
-    loop .Lfill_pd
+    loop .Lfill_ident_pd
+    pop %ecx
+
+    mov $early_pd_kernel, %edi
+    add $(PD_INDEX(KERNEL_VMA_BASE) * 8), %edi
+    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
+.Lfill_kernel_pd:
+    mov %eax, (%edi)
+    add $ARCH_LARGE_PAGE_SIZE, %eax
+    add $8, %edi
+    loop .Lfill_kernel_pd
 
     /* CR3 = PML4 */
-    mov $boot_pml4, %eax
+    mov $early_pml4, %eax
     mov %eax, %cr3
     /* enable PAE */
     mov %cr4, %eax

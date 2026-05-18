@@ -132,7 +132,7 @@ endif
 
 qemu: iso
 	@echo "  QEMU    $(ISO_NAME)"
-	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d -monitor stdio
+	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d -serial stdio
 
 clean:
 	@echo "  CLEAN"

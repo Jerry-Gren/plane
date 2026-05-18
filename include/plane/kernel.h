@@ -39,15 +39,15 @@
 extern void printk(const char *fmt, ...);
 extern void panic(const char *fmt, ...) __noreturn;
 
-#define BUG() do { \
-    printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
-    panic("Kernel BUG!"); \
+#define BUG() do {                                                              \
+    printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__);      \
+    panic("Kernel BUG!");                                                       \
 } while (0)
 
-#define BUG_ON(condition) do { \
-    if (unlikely(condition)) { \
-        BUG(); \
-    } \
+#define BUG_ON(condition) do {      \
+    if (unlikely(condition)) {      \
+        BUG();                      \
+    }                               \
 } while (0)
 
 #define DO_ONCE_LITE_IF(condition, func, ...) ({        \
