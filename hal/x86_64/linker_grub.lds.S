@@ -1,3 +1,5 @@
+#include <hal/x86_64/arch_mmu.h>
+
 /* Tell the linker that we want an x86_64 ELF64 output file */
 OUTPUT_FORMAT(elf64-x86-64)
 
@@ -39,25 +41,25 @@ SECTIONS {
     } :boot_data
 
     /* Virtual address */
-    . += 0xffffffff80000000;
+    . += KERNEL_VMA_BASE;
 
     . = ALIGN(4K);
-    .text : AT(ADDR(.text) - 0xffffffff80000000) {
+    .text : AT(ADDR(.text) - KERNEL_VMA_BASE) {
         *(.text .text.*)
     } :text
 
     . = ALIGN(4K);
-    .rodata : AT(ADDR(.rodata) - 0xffffffff80000000) {
+    .rodata : AT(ADDR(.rodata) - KERNEL_VMA_BASE) {
         *(.rodata .rodata.*)
     } :rodata
 
     . = ALIGN(4K);
-    .data : AT(ADDR(.data) - 0xffffffff80000000) {
+    .data : AT(ADDR(.data) - KERNEL_VMA_BASE) {
         *(.data .data.*)
     } :data
 
     . = ALIGN(4K);
-    .bss : AT(ADDR(.bss) - 0xffffffff80000000) {
+    .bss : AT(ADDR(.bss) - KERNEL_VMA_BASE) {
         __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)

@@ -1,3 +1,5 @@
+#include <hal/x86_64/arch_mmu.h>
+
 /* Tell the linker that we want an x86_64 ELF64 output file */
 OUTPUT_FORMAT(elf64-x86-64)
 
@@ -21,7 +23,7 @@ SECTIONS
     /* and because that is what the Limine spec mandates. */
     /* Any address in this region will do, but often 0xffffffff80000000 is chosen as */
     /* that is the beginning of the region. */
-    . = 0xffffffff80000000;
+    . = KERNEL_VMA_BASE;
 
     /* Define a section to contain the Limine requests and assign it to its own PHDR */
     .limine_requests : {

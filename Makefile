@@ -38,7 +38,7 @@ endif
 ifeq ($(CONFIG_BOOT_GRUB),y)
     SRC_DIRS += boot/multiboot2
 	ifeq ($(CONFIG_X86_64),y)
-        EXTRA_S_FILES += hal/x86_64/boot/multiboot2_entry.S
+        SRC_DIRS += hal/x86_64/boot/multiboot2
     endif
     LINKER_SCRIPT := hal/x86_64/linker_grub.lds
 endif
@@ -48,7 +48,8 @@ endif
 # endif
 
 C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
-S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S)) $(EXTRA_S_FILES)
+ALL_S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S))
+S_FILES := $(filter-out %.lds.S, $(ALL_S_FILES))
 OBJS := $(C_FILES:.c=.o) $(S_FILES:.S=.o)
 KERNEL := plane.elf
 
@@ -59,6 +60,10 @@ all: $(KERNEL)
 $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 	@echo "  LD      $@"
 	@$(LD) -T $(LINKER_SCRIPT) $(OBJS) -o $@
+
+%.lds: %.lds.S
+	@echo "  CPP     $@"
+	@$(CC) -E -P -x c -D__ASSEMBLER__ $(CFLAGS) $< -o $@
 
 %.o: %.c include/generated/autoconf.h
 	@echo "  CC      $<"
@@ -127,11 +132,12 @@ endif
 
 qemu: iso
 	@echo "  QEMU    $(ISO_NAME)"
-	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d
+	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d -monitor stdio
 
 clean:
 	@echo "  CLEAN"
 	@find kernel klib hal boot drivers -type f -name "*.o" -delete
+	@find hal -type f -name "*.lds" -delete
 	@rm -f $(KERNEL) $(ISO_NAME)
 	@rm -rf $(ISO_DIR)
 

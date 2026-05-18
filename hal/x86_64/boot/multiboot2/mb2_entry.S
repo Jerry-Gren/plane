@@ -1,6 +1,8 @@
 #define ASM_FILE           1
 #include <multiboot2.h>
 
+#include <plane/mm.h>
+
 /* Macros */
 #define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
 #define MB2_ARCH_I386      MULTIBOOT_ARCHITECTURE_I386
@@ -13,9 +15,9 @@
 #define CR0_PAGING_ENABLE  (1 << 31)
 #define CR0_PROTECTED_MODE (1 << 0)
 
-#define PAGE_PRESENT       (1 << 0)
-#define PAGE_READWRITE     (1 << 1)
-#define PAGE_HUGE          (1 << 7)
+# /* DO NOT MODIFY THESE TWO LINES */
+# #define X86_PD_PAGE_SIZE  0x200000
+# #define X86_PD_PAGE_SHIFT 21
 
 #define GDT_PRESENT        (1 << 7)
 #define GDT_NOT_SYS        (1 << 4)
@@ -33,8 +35,6 @@
 #define PAT_WC                0x01
 #define PAT1_SHIFT            8
 #define PAT1_MASK_CLEAR       0xffff00ff
-
-#define KERNEL_VMA_BASE       0xffffffff80000000
 
 /* Multiboot2 header */
 .code32
@@ -72,11 +72,14 @@ mb2_info:  .long 0
 
 /* Section bss */
 .section .boot.bss, "aw", @nobits
+.global boot_fb_pd
+.global boot_pml4
 .align 4096
-boot_pml4:  .skip 4096
-boot_pdpt:  .skip 4096
-boot_pd:    .skip 4096
-boot_fb_pd: .skip 4096
+boot_pml4:      .skip 4096
+boot_pdpt_low:  .skip 4096
+boot_pdpt_high: .skip 4096
+boot_pd:        .skip 4096
+boot_fb_pd:     .skip 4096
 
 .align 16
 stack_bottom:
@@ -100,7 +103,7 @@ _start:
     sub %edi, %ecx
     shr $2, %ecx
     xor %eax, %eax
-    rep stosl
+    rep stosl /* length can be divide without remainder */
 
     /* initialize the stack pointer */
     mov $stack_top, %esp
@@ -134,23 +137,24 @@ _start:
     jz .Lno_long_mode
 
     /* setup page table */
-    /* PML4 ->  PDPT */
-    mov $boot_pdpt, %eax
-    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
+    /* PML4 */
     mov $boot_pml4, %edi
-    mov %eax, (%edi)           /* lower half, PML4[0] = PDPT */
-    mov %eax, 511*8(%edi)      /* higher half, PML4[511] = PDPT */
-    /* PDPT -> PDT */
-    mov $boot_pdpt, %edi
-    /* 1GB */
+    mov $boot_pdpt_low, %eax
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov %eax, 0(%edi) /* PML4[0] -> boot_pdpt_low */
+    mov $boot_pdpt_high, %eax
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov %eax, 511*8(%edi) /* PML4[511] -> boot_pdpt_high */
+    /* PDPT */
     mov $boot_pd, %eax
-    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
-    mov %eax, 0x00(%edi)           /* PDPT[0] -> boot_pd[0] (0~1GB) */
-    mov %eax, 510*8(%edi)          /* PDPT[510] -> boot_pd[0] */
-    /* Framebuffer */
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov $boot_pdpt_low, %edi
+    mov %eax, 0(%edi) /* boot_pdpt_low[0] -> boot_pd */
+    mov $boot_pdpt_high, %edi
+    mov %eax, 510*8(%edi) /* boot_pdpt_high[510] -> boot_pd */
     mov $boot_fb_pd, %eax
-    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
-    mov %eax, 511*8(%edi)
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov %eax, 511*8(%edi) /* boot_pdpt_high[511] -> boot_fb_pd*/
     /* PDT */
     # mov $boot_pd, %edi
     # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_HUGE), %eax
@@ -163,14 +167,14 @@ _start:
     jae .Lmax_found
     mov %edx, %eax
 .Lmax_found:
-    add $0x1fffff, %eax
-    shr $21, %eax
+    add $(ARCH_LARGE_PAGE_SIZE - 1), %eax
+    shr $ARCH_LARGE_PAGE_SHIFT, %eax
     mov %eax, %ecx
     mov $boot_pd, %edi
-    mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_HUGE), %eax
+    mov $(PAGE_PRESENT | PAGE_RW | PAGE_HUGE), %eax
 .Lfill_pd:
     mov %eax, (%edi)
-    add $0x200000, %eax
+    add $ARCH_LARGE_PAGE_SIZE, %eax
     add $8, %edi
     loop .Lfill_pd
 
@@ -221,24 +225,25 @@ _start:
 
 .section .text
 realm64:
+    /* initialize sp */
+    movabs $KERNEL_VMA_BASE, %rax
+    add %rax, %rsp
+
+    and $-16, %rsp
+
+    /* clear .bss */
+    movabs $__bss_start, %rdi
+    movabs $__bss_end, %rcx
+    sub %rdi, %rcx
+    xor %rax, %rax
+    rep stosb             /* ensure every byte is cleared */
+
+    /* prepare for params */
     movabs $mb2_magic, %rax
     mov (%rax), %edi      /* arg 1: rdi = Magic */
     
     movabs $mb2_info, %rax
     mov (%rax), %esi      /* arg 2: rsi = Info Structure Address */
-
-    movabs $KERNEL_VMA_BASE, %rax
-    add %rax, %rsp
-
-    /* arg 3: rdx = boot_fb_pd higher half virtual address */
-    movabs $boot_fb_pd, %rdx
-    add %rax, %rdx
-
-    /* arg 4: rcx = boot_pml4 higher half virtual address */
-    movabs $boot_pml4, %rcx
-    add %rax, %rcx
-
-    and $-16, %rsp
 
     movabs $mb2_entry, %rax
     call *%rax

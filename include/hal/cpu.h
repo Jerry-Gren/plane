@@ -5,4 +5,4 @@
 
 void hal_cpu_hang(void) __noreturn;
 
-#endif /* PLANE_HAL_CPU_H */
+#endif /* HAL_CPU_H */

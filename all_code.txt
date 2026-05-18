@@ -1,0 +1,2420 @@
+Kconfig:
+```
+mainmenu "PlanE Configuration"
+
+config X86_64
+    bool "Target x86_64 architecture"
+    default y
+
+menu "Boot Options"
+
+choice
+    prompt "Boot Protocol"
+    default BOOT_LIMINE
+    help
+      Select the boot protocol and bootloader to package the OS.
+
+    config BOOT_LIMINE
+        bool "Limine Boot Protocol"
+        help
+          Use Limine bootloader. Requires xorriso to build the ISO.
+
+    config BOOT_GRUB
+        bool "GRUB (Multiboot2) Protocol"
+        help
+          Use GRUB bootloader. Requires grub-mkrescue to build the ISO.
+endchoice
+
+endmenu
+
+menu "Drivers"
+    config BLK_DEV_NVME
+        bool "NVMe Support"
+        default n
+endmenu
+```
+
+Makefile:
+```
+ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
+CC := x86_64-elf-gcc
+LD := x86_64-elf-ld
+
+override CFLAGS += \
+	-I$(ROOT_DIR)/include \
+	-std=gnu11 \
+	-Wall -Wextra -Werror \
+	-ffreestanding \
+	-fno-stack-protector \
+	-fno-stack-check \
+	-fno-lto \
+	-fno-PIC \
+	-m64 \
+	-march=x86-64 \
+	-mabi=sysv \
+	-mcmodel=kernel \
+	-mno-80387 \
+	-mno-mmx \
+	-mno-sse \
+	-mno-sse2 \
+	-mno-red-zone
+
+-include .config
+
+SRC_DIRS := kernel klib
+
+ifeq ($(CONFIG_X86_64),y)
+    SRC_DIRS += hal/x86_64
+endif
+
+ifeq ($(CONFIG_BOOT_LIMINE),y)
+    SRC_DIRS += boot/limine
+    LINKER_SCRIPT := hal/x86_64/linker_limine.lds
+endif
+
+ifeq ($(CONFIG_BOOT_GRUB),y)
+    SRC_DIRS += boot/multiboot2
+	ifeq ($(CONFIG_X86_64),y)
+        EXTRA_S_FILES += hal/x86_64/boot/multiboot2_entry.S
+    endif
+    LINKER_SCRIPT := hal/x86_64/linker_grub.lds
+endif
+
+# ifeq ($(CONFIG_BLK_DEV_NVME),y)
+#     SRC_DIRS += drivers/block
+# endif
+
+C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
+S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S)) $(EXTRA_S_FILES)
+OBJS := $(C_FILES:.c=.o) $(S_FILES:.S=.o)
+KERNEL := plane.elf
+
+.PHONY: all clean menuconfig iso qemu
+
+all: $(KERNEL)
+
+$(KERNEL): $(OBJS) $(LINKER_SCRIPT)
+	@echo "  LD      $@"
+	@$(LD) -T $(LINKER_SCRIPT) $(OBJS) -o $@
+
+%.o: %.c include/generated/autoconf.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.S
+	@echo "  AS      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+include/generated/autoconf.h: .config
+	@mkdir -p include/generated
+	@genconfig --header-path include/generated/autoconf.h
+
+menuconfig:
+	@MENUCONFIG_STYLE="monochrome" menuconfig
+	@genconfig --header-path include/generated/autoconf.h
+
+# ISO / QEMU
+ISO_NAME := plane.iso
+ISO_DIR  := build/iso_root
+ifeq ($(CONFIG_BOOT_LIMINE),y)
+LIMINE_EXE := tools/limine_bin/limine
+$(LIMINE_EXE):
+	@echo "  HOSTCC  Limine Deploy Tool"
+	@$(MAKE) -s -C tools/limine_bin
+iso: $(KERNEL) $(LIMINE_EXE)
+	@echo "  MKISO   $(ISO_NAME) [Limine]"
+	@rm -rf $(ISO_DIR)
+	@mkdir -p $(ISO_DIR)/boot/limine
+	@mkdir -p $(ISO_DIR)/EFI/BOOT
+	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@cp tools/limine_bin/limine-bios.sys $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/limine-bios-cd.bin $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/limine-uefi-cd.bin $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/BOOTX64.EFI $(ISO_DIR)/EFI/BOOT/
+	@cp tools/limine_bin/BOOTIA32.EFI $(ISO_DIR)/EFI/BOOT/
+	@echo "timeout: 3" > $(ISO_DIR)/boot/limine/limine.conf
+	@echo "/PlanE" >> $(ISO_DIR)/boot/limine/limine.conf
+	@echo "    protocol: limine" >> $(ISO_DIR)/boot/limine/limine.conf
+	@echo "    path: boot():/boot/$(KERNEL)" >> $(ISO_DIR)/boot/limine/limine.conf
+	@xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin \
+		-no-emul-boot -boot-load-size 4 -boot-info-table \
+		--efi-boot boot/limine/limine-uefi-cd.bin \
+		-efi-boot-part --efi-boot-image --protective-msdos-label \
+		$(ISO_DIR) -o $(ISO_NAME) > /dev/null 2>&1
+	@$(LIMINE_EXE) bios-install $(ISO_NAME) > /dev/null 2>&1
+endif
+
+ifeq ($(CONFIG_BOOT_GRUB),y)
+iso: $(KERNEL)
+	@echo "  MKISO   $(ISO_NAME) [GRUB/Multiboot2]"
+	@rm -rf $(ISO_DIR)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@# GEN grub.cfg
+	@echo "set timeout=3" > $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "insmod all_video" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "set gfxmode=auto" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "set gfxpayload=keep" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "menuentry \"PlanE\" {" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    multiboot2 /boot/$(KERNEL)" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    boot" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "}" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@grub-mkrescue -o $(ISO_NAME) $(ISO_DIR) > /dev/null 2>&1
+endif
+
+qemu: iso
+	@echo "  QEMU    $(ISO_NAME)"
+	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d
+
+clean:
+	@echo "  CLEAN"
+	@find kernel klib hal boot drivers -type f -name "*.o" -delete
+	@rm -f $(KERNEL) $(ISO_NAME)
+	@rm -rf $(ISO_DIR)
+
+distclean: clean
+	@echo "  DISTCLEAN"
+	@rm -rf build/ include/generated/* .config .config.old
+	@$(MAKE) -s -C tools/limine_bin clean
+```
+
+boot/limine/limine_entry.c:
+```
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <limine.h>
+
+#include <hal/cpu.h>
+
+#include <plane/boot_info.h>
+
+// Set the base revision to 6, this is recommended as this is the latest
+// base revision described by the Limine boot protocol specification.
+// See specification for further info.
+
+__attribute__((used, section(".limine_requests")))
+static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
+
+// The Limine requests can be placed anywhere, but it is important that
+// the compiler does not optimise them away, so, usually, they should
+// be made volatile or equivalent, _and_ they should be accessed at least
+// once or marked as used with the "used" attribute as done here.
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_framebuffer_request framebuffer_request = {
+	.id = LIMINE_FRAMEBUFFER_REQUEST_ID,
+	.revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST_ID,
+    .revision = 0
+};
+
+// Finally, define the start and end markers for the Limine requests.
+// These can also be moved anywhere, to any .c file, as seen fit.
+
+__attribute__((used, section(".limine_requests_start")))
+static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
+
+__attribute__((used, section(".limine_requests_end")))
+static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
+
+/* in main.c */
+extern void kmain(struct boot_info *info);
+
+static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
+	if (framebuffer_request.response == NULL ||
+	    framebuffer_request.response->framebuffer_count < 1) {
+		hal_cpu_hang();
+	}
+	/* struct limine_framebuffer {
+	 *     LIMINE_PTR(void *) address;
+	 *     uint64_t width;
+	 *     uint64_t height;
+	 *     uint64_t pitch;
+	 *     uint16_t bpp;
+	 *     uint8_t memory_model;
+	 *     uint8_t red_mask_size;
+	 *     uint8_t red_mask_shift;
+	 *     uint8_t green_mask_size;
+	 *     uint8_t green_mask_shift;
+	 *     uint8_t blue_mask_size;
+	 *     uint8_t blue_mask_shift;
+	 *     uint8_t unused[7];
+	 *     uint64_t edid_size;
+	 *     LIMINE_PTR(void *) edid;
+	 *     // Response revision 1
+	 *     uint64_t mode_count;
+	 *     LIMINE_PTR(struct limine_video_mode **) modes;
+	 * };
+	 */
+	/* fetch the first framebuffer */
+   	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
+	
+	video->framebuffer_addr = (uint32_t *)fb->address;
+	video->width            = fb->width;
+	video->height           = fb->height;
+	video->pitch            = fb->pitch;
+	video->bpp              = fb->bpp;
+}
+
+static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
+	if (memmap_request.response == NULL) {
+		hal_cpu_hang();
+	}
+	/*
+	 * struct limine_memmap_entry {
+	 *     uint64_t base;
+	 *     uint64_t length;
+	 *     uint64_t type;
+	 * };
+	 */
+	uint64_t count = memmap_request.response->entry_count;
+	for (uint64_t i = 0; i < count && mem->entry_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
+		struct limine_memmap_entry *entry = memmap_request.response->entries[i];
+		uint64_t index = mem->entry_count;
+
+		mem->map[index].base = entry->base;
+		mem->map[index].length = entry->length;
+
+		switch (entry->type) {
+			case LIMINE_MEMMAP_USABLE:
+				mem->map[index].type = PLANE_MEM_USABLE; break;
+			case LIMINE_MEMMAP_RESERVED:
+				mem->map[index].type = PLANE_MEM_RESERVED; break;
+			case LIMINE_MEMMAP_ACPI_RECLAIMABLE:
+				mem->map[index].type = PLANE_MEM_ACPI_RECLAIMABLE; break;
+			case LIMINE_MEMMAP_ACPI_NVS:
+				mem->map[index].type = PLANE_MEM_ACPI_NVS; break;
+			case LIMINE_MEMMAP_BAD_MEMORY:
+				mem->map[index].type = PLANE_MEM_BAD_MEMORY; break;
+			case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:
+				mem->map[index].type = PLANE_MEM_BOOTLOADER_RECLAIMABLE; break;
+			case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:
+				mem->map[index].type = PLANE_MEM_EXECUTABLE_AND_MODULES; break;
+			case LIMINE_MEMMAP_FRAMEBUFFER:
+				mem->map[index].type = PLANE_MEM_FRAMEBUFFER; break;
+			case LIMINE_MEMMAP_RESERVED_MAPPED:
+				mem->map[index].type = PLANE_MEM_RESERVED_MAPPED; break;
+			default:
+				mem->map[index].type = PLANE_MEM_RESERVED; break;
+		}
+		mem->entry_count++;
+	}
+}
+
+void _start(void) {
+	/* Ensure the bootloader actually understands our base revision */
+	if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
+		hal_cpu_hang();
+	}
+
+	struct boot_info b_info = {0};
+	
+	boot_limine_collect_framebuffer(&b_info.video);
+	boot_limine_collect_memmap(&b_info.mem);
+	
+	kmain(&b_info);
+
+	hal_cpu_hang();
+}
+```
+
+boot/multiboot2/mb2_entry.c:
+```
+#include <stdint.h>
+#include <stddef.h>
+#include <multiboot2.h>
+
+#include <hal/mmu.h>
+#include <hal/cpu.h>
+
+#include <plane/boot_info.h>
+#include <plane/kernel.h>
+#include <plane/mm.h>
+
+/* in main.c */
+extern void kmain(struct boot_info *info);
+
+/* in string.c */
+extern void *memset(void *s, int c, size_t n);
+
+/* in linker_grub.lds */
+extern uint8_t __bss_start[];
+extern uint8_t __bss_end[];
+
+extern uint64_t boot_fb_pd[];
+extern uint64_t boot_pml4[];
+
+/* This struct is not present in official multiboot2.h */
+struct multiboot_info_base {
+    uint32_t total_size;
+    uint32_t reserved;
+};
+
+static void boot_mb2_collect_framebuffer(struct plane_video_info *video, struct multiboot_tag_framebuffer *fb_tag) {
+	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
+	
+	/* struct multiboot_tag_framebuffer_common
+	 * {
+	 *     multiboot_uint32_t type;
+	 *     multiboot_uint32_t size;
+	 * 
+	 *     multiboot_uint64_t framebuffer_addr;
+	 *     multiboot_uint32_t framebuffer_pitch;
+	 *     multiboot_uint32_t framebuffer_width;
+	 *     multiboot_uint32_t framebuffer_height;
+	 *     multiboot_uint8_t framebuffer_bpp;
+	 *     multiboot_uint8_t framebuffer_type;
+	 *     multiboot_uint16_t reserved;
+	 * }
+	 */
+	uint64_t phys_addr = fb_common->framebuffer_addr;
+	
+	video->width  = fb_common->framebuffer_width;
+	video->height = fb_common->framebuffer_height;
+	video->pitch  = fb_common->framebuffer_pitch;
+	video->bpp    = fb_common->framebuffer_bpp;
+
+	uint64_t phys_base = ALIGN_DOWN(phys_addr, HUGE_PAGE_SIZE);
+	uint64_t page_offset = phys_addr - phys_base;
+
+	uint64_t fb_size = (uint64_t)video->pitch * video->height;
+	uint64_t fb_aligned_size = ALIGN(fb_size + page_offset, HUGE_PAGE_SIZE);
+	uint64_t pages_needed = fb_aligned_size / HUGE_PAGE_SIZE;
+
+	hal_mmu_map_early_framebuffer(phys_base, pages_needed, boot_fb_pd);
+
+	video->framebuffer_addr = (uint32_t *)(FRAMEBUFFER_VMA_BASE + page_offset);
+}
+
+static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {
+	multiboot_memory_map_t *entry = mmap_tag->entries;
+	uint32_t entry_size = mmap_tag->entry_size;
+	uint32_t data_size = mmap_tag->size - sizeof(struct multiboot_tag_mmap);
+	uint32_t entry_count = data_size / entry_size;
+
+	for (uint32_t i = 0; i < entry_count && mem->entry_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
+		uint64_t index = mem->entry_count;
+
+		/*
+		 * struct multiboot_mmap_entry
+		 * {
+		 *     multiboot_uint64_t addr;
+		 *     multiboot_uint64_t len;
+		 *     multiboot_uint32_t type;
+		 *     multiboot_uint32_t zero;
+		 * }
+		 * typedef struct multiboot_mmap_entry multiboot_memory_map_t;
+		 */
+		mem->map[index].base = entry->addr;
+		mem->map[index].length = entry->len;
+
+		switch (entry->type) {
+			case MULTIBOOT_MEMORY_AVAILABLE:
+				mem->map[index].type = PLANE_MEM_USABLE; break;
+			case MULTIBOOT_MEMORY_ACPI_RECLAIMABLE:
+				mem->map[index].type = PLANE_MEM_ACPI_RECLAIMABLE; break;
+			case MULTIBOOT_MEMORY_NVS:
+				mem->map[index].type = PLANE_MEM_ACPI_NVS; break;
+			case MULTIBOOT_MEMORY_BADRAM:
+				mem->map[index].type = PLANE_MEM_BAD_MEMORY; break;
+			case MULTIBOOT_MEMORY_RESERVED:
+			default:
+				mem->map[index].type = PLANE_MEM_RESERVED; break;
+		}
+
+		/* the zero field is discarded */
+
+		mem->entry_count++;
+
+		entry = (multiboot_memory_map_t *)((uint8_t *)entry + entry_size);
+	}
+}
+
+void mb2_entry(uint64_t magic, uint64_t info_addr) {
+
+	/* clear .bss */
+	memset(__bss_start, 0, __bss_end - __bss_start);
+
+	/* check magic number passed by multiboot2 */
+	if (magic != MULTIBOOT2_BOOTLOADER_MAGIC) {
+		hal_cpu_hang();
+	}
+
+	struct boot_info b_info = {0};
+
+	uint64_t info_vaddr = info_addr + KERNEL_VMA_BASE;
+	struct multiboot_tag *tag = (struct multiboot_tag *)(info_vaddr + sizeof(struct multiboot_info_base));
+
+	while (tag->type != MULTIBOOT_TAG_TYPE_END) {
+		
+		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
+			struct multiboot_tag_framebuffer *fb_tag = (struct multiboot_tag_framebuffer *)tag;
+			boot_mb2_collect_framebuffer(&b_info.video, fb_tag);
+		}
+
+		else if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
+			struct multiboot_tag_mmap *mmap_tag = (struct multiboot_tag_mmap *)tag;
+			boot_mb2_collect_mmap(&b_info.mem, mmap_tag);
+		}
+
+		tag = (struct multiboot_tag *)((uint8_t *)tag + ALIGN(tag->size, MULTIBOOT_TAG_ALIGN));
+	}
+
+	/* ensure we got a framebuffer */
+	if (b_info.video.framebuffer_addr == NULL) {
+		hal_cpu_hang();
+	}
+
+	/* delete 0~1GB equal mapping */
+	/* TODO: kick this task to mmu */
+	boot_pml4[0] = 0;
+	hal_mmu_flush_tlb_all();
+
+	kmain(&b_info);
+
+	hal_cpu_hang();
+}
+```
+
+hal/x86_64/linker_grub.lds:
+```
+/* Tell the linker that we want an x86_64 ELF64 output file */
+OUTPUT_FORMAT(elf64-x86-64)
+
+/* We want the symbol _start to be our entry point */
+ENTRY(_start)
+
+/* Define the program headers we want so the bootloader gives us the right */
+/* MMU permissions; this also allows us to exert more control over the linking */
+/* process. */
+PHDRS
+{
+    boot_text PT_LOAD FLAGS(5);
+    boot_data PT_LOAD FLAGS(6);
+    text      PT_LOAD FLAGS(5);
+    rodata    PT_LOAD FLAGS(4);
+    data      PT_LOAD FLAGS(6);
+}
+
+SECTIONS {
+    /* Physical address */
+    . = 1M;
+
+    .boot.text : {
+        KEEP(*(.multiboot_header))
+        *(.boot.text)
+    } :boot_text
+
+    . = ALIGN(4K);
+    .boot.data : {
+        *(.boot.rodata)
+        *(.boot.data)
+    } :boot_data
+
+    . = ALIGN(4K);
+    .boot.bss : {
+        __boot_bss_start = .;
+        *(.boot.bss)
+        __boot_bss_end = .;
+    } :boot_data
+
+    /* Virtual address */
+    . += 0xffffffff80000000;
+
+    . = ALIGN(4K);
+    .text : AT(ADDR(.text) - 0xffffffff80000000) {
+        *(.text .text.*)
+    } :text
+
+    . = ALIGN(4K);
+    .rodata : AT(ADDR(.rodata) - 0xffffffff80000000) {
+        *(.rodata .rodata.*)
+    } :rodata
+
+    . = ALIGN(4K);
+    .data : AT(ADDR(.data) - 0xffffffff80000000) {
+        *(.data .data.*)
+    } :data
+
+    . = ALIGN(4K);
+    .bss : AT(ADDR(.bss) - 0xffffffff80000000) {
+        __bss_start = .;
+        *(.bss .bss.*)
+        *(COMMON)
+        __bss_end = .;
+    } :data
+
+    /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */
+    /DISCARD/ : {
+        *(.eh_frame*)
+        *(.note .note.*)
+    }
+}
+```
+
+hal/x86_64/linker_limine.lds:
+```
+/* Tell the linker that we want an x86_64 ELF64 output file */
+OUTPUT_FORMAT(elf64-x86-64)
+
+/* We want the symbol _start to be our entry point */
+ENTRY(_start)
+
+/* Define the program headers we want so the bootloader gives us the right */
+/* MMU permissions; this also allows us to exert more control over the linking */
+/* process. */
+PHDRS
+{
+    limine_requests PT_LOAD;
+    text            PT_LOAD;
+    rodata          PT_LOAD;
+    data            PT_LOAD;
+}
+
+SECTIONS
+{
+    /* We want to be placed in the topmost 2GiB of the address space, for optimisations */
+    /* and because that is what the Limine spec mandates. */
+    /* Any address in this region will do, but often 0xffffffff80000000 is chosen as */
+    /* that is the beginning of the region. */
+    . = 0xffffffff80000000;
+
+    /* Define a section to contain the Limine requests and assign it to its own PHDR */
+    .limine_requests : {
+        KEEP(*(.limine_requests_start))
+        KEEP(*(.limine_requests))
+        KEEP(*(.limine_requests_end))
+    } :limine_requests
+
+    /* Move to the next memory page for .text */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+    .text : {
+        *(.text .text.*)
+    } :text
+
+    /* Move to the next memory page for .rodata */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+    .rodata : {
+        *(.rodata .rodata.*)
+    } :rodata
+
+    /* Add a .note.gnu.build-id output section in case a build ID flag is added to the */
+    /* linker command. */
+    .note.gnu.build-id : {
+        *(.note.gnu.build-id)
+    } :rodata
+
+    /* Move to the next memory page for .data */
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
+    .data : {
+        *(.data .data.*)
+    } :data
+
+    /* NOTE: .bss needs to be the last thing mapped to :data, otherwise lots of */
+    /* unnecessary zeros will be written to the binary. */
+    /* If you need, for example, .init_array and .fini_array, those should be placed */
+    /* above this. */
+    .bss : {
+        *(.bss .bss.*)
+        *(COMMON)
+    } :data
+
+    /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */
+    /DISCARD/ : {
+        *(.eh_frame*)
+        *(.note .note.*)
+    }
+}
+```
+
+hal/x86_64/mmu.c:
+```
+#include <hal/mmu.h>
+#include <hal/x86_64/arch_mmu.h>
+
+#include <plane/mm.h>
+
+#define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_HUGE)
+
+void hal_mmu_invalidate_tlb(uintptr_t vaddr) {
+	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");
+}
+
+void hal_mmu_flush_tlb_all(void) {
+	__asm__ volatile (
+		"mov %%cr3, %%rax\n\t"
+		"mov %%rax, %%cr3\n\t"
+		: /* no input */
+		: /* no output */
+		: "rax", "memory"
+	);
+}
+
+void hal_mmu_map_early_framebuffer(uint64_t phys_base, uint64_t pages_needed, void *early_page_table) {
+    uint64_t *pd = (uint64_t *)early_page_table;
+    
+    for (uint64_t i = 0; i < pages_needed; i++) {
+        uint64_t offset = i * HUGE_PAGE_SIZE;
+        uint64_t current_vaddr = FRAMEBUFFER_VMA_BASE + offset;
+        
+        pd[i] = (phys_base + offset) | FB_PAGE_FLAGS;
+        hal_mmu_invalidate_tlb(current_vaddr);
+    }
+}
+```
+
+hal/x86_64/cpu.c:
+```
+#include <hal/cpu.h>
+
+void hal_cpu_hang(void) {
+	for (;;) {
+		__asm__ volatile ("cli; hlt");
+	}
+}
+```
+
+hal/x86_64/boot/multiboot2_entry.S:
+```
+#define ASM_FILE           1
+#include <multiboot2.h>
+
+/* Macros */
+#define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
+#define MB2_ARCH_I386      MULTIBOOT_ARCHITECTURE_I386
+#define MB2_TAG_END_TYPE   MULTIBOOT_HEADER_TAG_END
+#define MB2_TAG_FB_TYPE    MULTIBOOT_HEADER_TAG_FRAMEBUFFER
+
+#define CR4_PAE_ENABLE     (1 << 5)
+#define EFER_MSR           0xc0000080
+#define EFER_LM_ENABLE     (1 << 8)
+#define CR0_PAGING_ENABLE  (1 << 31)
+#define CR0_PROTECTED_MODE (1 << 0)
+
+/* DO NOT MODIFY THIS TWO LINES */
+#define X86_PD_PAGE_SIZE  0x200000
+#define X86_PD_PAGE_SHIFT 21
+
+#define PAGE_PRESENT      (1 << 0)
+#define PAGE_READWRITE    (1 << 1)
+#define PAGE_HUGE         (1 << 7)
+
+#define GDT_PRESENT        (1 << 7)
+#define GDT_NOT_SYS        (1 << 4)
+#define GDT_EXEC           (1 << 3)
+#define GDT_RW             (1 << 1)
+#define GDT_GRAN_4K        (1 << 7)
+#define GDT_LONG_MODE      (1 << 5)
+#define GDT_SZ_32          (1 << 6)
+
+#define CPUID_EXTENSIONS      0x80000000
+#define CPUID_EXT_FEATURES    0x80000001
+#define CPUID_EDX_EXT_FEAT_LM (1 << 29)
+
+#define MSR_IA32_CR_PAT       0x277
+#define PAT_WC                0x01
+#define PAT1_SHIFT            8
+#define PAT1_MASK_CLEAR       0xffff00ff
+
+#define KERNEL_VMA_BASE       0xffffffff80000000
+
+/* Multiboot2 header */
+.code32
+.section .multiboot_header
+.align 8
+header_start:
+    .long MB2_MAGIC              /* magic number (multiboot 2) */
+    .long MB2_ARCH_I386          /* architecture 0 (protected mode i386) */
+    .long header_end - header_start
+    /* checksum */
+    .long - (MB2_MAGIC + MB2_ARCH_I386 + (header_end - header_start))
+
+    /* insert optional multiboot tags here */
+    /* framebuffer tag */
+    .align 8
+    .word MB2_TAG_FB_TYPE /* type */
+    .word 0               /* flags */
+    .long 20              /* size */
+    .long 0               /* width (0 = Let GRUB decide) */
+    .long 0               /* height (0 = Let GRUB decide) */
+    .long 32              /* depth */
+
+    /* required end tag */
+    .align 8
+    .word MB2_TAG_END_TYPE /* type */
+    .word 0                /* flags */
+    .long 8                /* size */
+header_end:
+
+/* Section data */
+.section .boot.data, "aw"
+.align 4
+mb2_magic: .long 0
+mb2_info:  .long 0
+
+/* Section bss */
+.section .boot.bss, "aw", @nobits
+.global boot_fb_pd
+.global boot_pml4
+.align 4096
+boot_pml4:  .skip 4096
+boot_pdpt:  .skip 4096
+boot_pd:    .skip 4096
+boot_fb_pd: .skip 4096
+
+.align 16
+stack_bottom:
+    .skip 16384
+stack_top:
+
+/* Section text */
+.section .boot.text, "ax"
+.global _start
+_start:
+    cli
+    cld
+
+    /* save params received from GRUB */
+    mov %eax, mb2_magic /* MB2 Magic */
+    mov %ebx, mb2_info /* MB2 Info Structure Address */
+
+    /* clear .boot.bss */
+    mov $__boot_bss_start, %edi
+    mov $__boot_bss_end, %ecx
+    sub %edi, %ecx
+    shr $2, %ecx
+    xor %eax, %eax
+    rep stosl
+
+    /* initialize the stack pointer */
+    mov $stack_top, %esp
+
+    /*
+     * checks if CPUID is supported by attempting to flip the ID bit (bit 21) in
+     * the EFLAGS register. If we can flip it, CPUID is available.
+     * returns eax = 1 if there is cpuid support; 0 otherwise
+     */
+    pushfl
+    popl %eax
+    movl %eax, %ecx
+    xorl $(1 << 21), %eax
+    pushl %eax
+    popfl
+    pushfl
+    popl %eax
+    pushl %ecx
+    popfl
+    cmpl %ecx, %eax
+    je .Lno_long_mode
+
+    /* check for long mode support */
+    mov $CPUID_EXTENSIONS, %eax
+    cpuid
+    cmp $CPUID_EXT_FEATURES, %eax
+    jb .Lno_long_mode
+    mov $CPUID_EXT_FEATURES, %eax
+    cpuid
+    test $CPUID_EDX_EXT_FEAT_LM, %edx
+    jz .Lno_long_mode
+
+    /* setup page table */
+    /* PML4 ->  PDPT */
+    mov $boot_pdpt, %eax
+    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
+    mov $boot_pml4, %edi
+    mov %eax, (%edi)           /* lower half, PML4[0] = PDPT */
+    mov %eax, 511*8(%edi)      /* higher half, PML4[511] = PDPT */
+    /* PDPT -> PDT */
+    mov $boot_pdpt, %edi
+    /* 1GB */
+    mov $boot_pd, %eax
+    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
+    mov %eax, 0x00(%edi)           /* PDPT[0] -> boot_pd[0] (0~1GB) */
+    mov %eax, 510*8(%edi)          /* PDPT[510] -> boot_pd[0] */
+    /* Framebuffer */
+    mov $boot_fb_pd, %eax
+    or $(PAGE_PRESENT | PAGE_READWRITE), %eax
+    mov %eax, 511*8(%edi)
+    /* PDT */
+    # mov $boot_pd, %edi
+    # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_HUGE), %eax
+    # mov $512, %ecx
+    mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
+    mov %ebx, %eax
+    add (%ebx), %eax
+    mov $(__bss_end - KERNEL_VMA_BASE), %edx
+    cmp %edx, %eax
+    jae .Lmax_found
+    mov %edx, %eax
+.Lmax_found:
+    add $(X86_PD_PAGE_SIZE - 1), %eax
+    shr $X86_PD_PAGE_SHIFT, %eax
+    mov %eax, %ecx
+    mov $boot_pd, %edi
+    mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_HUGE), %eax
+.Lfill_pd:
+    mov %eax, (%edi)
+    add $X86_PD_PAGE_SIZE, %eax
+    add $8, %edi
+    loop .Lfill_pd
+
+    /* CR3 = PML4 */
+    mov $boot_pml4, %eax
+    mov %eax, %cr3
+    /* enable PAE */
+    mov %cr4, %eax
+    or $CR4_PAE_ENABLE, %eax
+    mov %eax, %cr4
+    /* enable long mode */
+    mov $EFER_MSR, %ecx
+    rdmsr
+    or $EFER_LM_ENABLE, %eax
+    wrmsr
+    /* enable write-combining */
+    mov $MSR_IA32_CR_PAT, %ecx
+    rdmsr
+    and $PAT1_MASK_CLEAR, %eax
+    or  $(PAT_WC << PAT1_SHIFT), %eax
+    wrmsr
+    /* enable paging and protected mode */
+    mov %cr0, %eax
+    or $(CR0_PAGING_ENABLE | CR0_PROTECTED_MODE), %eax
+    mov %eax, %cr0
+
+    /* load 64-bit gdt */
+    lgdt gdt64_pointer
+    ljmp $0x08, $.Ltrampoline64
+
+.Lno_long_mode:
+    cli
+.Lhlt32:
+    hlt
+    jmp .Lhlt32
+
+.code64
+.Ltrampoline64:
+    mov $0x10, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    mov %ax, %ss
+
+    movabs $realm64, %rax
+    jmp *%rax
+
+.section .text
+realm64:
+    movabs $mb2_magic, %rax
+    mov (%rax), %edi      /* arg 1: rdi = Magic */
+    
+    movabs $mb2_info, %rax
+    mov (%rax), %esi      /* arg 2: rsi = Info Structure Address */
+
+    movabs $KERNEL_VMA_BASE, %rax
+    add %rax, %rsp
+
+    /* arg 3: rdx = boot_fb_pd higher half virtual address */
+    # movabs $boot_fb_pd, %rdx
+    # add %rax, %rdx
+
+    /* arg 4: rcx = boot_pml4 higher half virtual address */
+    # movabs $boot_pml4, %rcx
+    # add %rax, %rcx
+
+    and $-16, %rsp
+
+    movabs $mb2_entry, %rax
+    call *%rax
+
+    cli
+.Lhlt64:
+    hlt
+    jmp .Lhlt64
+
+/* GDT */
+.section .boot.rodata, "a"
+.align 8
+gdt64:
+    /* null 0x00 */
+    .Lnull_desc:
+        .quad 0
+
+    /* code 0x08 */
+    .Lcode_desc:
+        .word 0x0000      /* limit, ignored in 64 bit mode */
+        .word 0x0000      /* base, ignored in 64 bit mode */
+        .byte 0x00        /* base */
+        .byte (GDT_PRESENT | GDT_NOT_SYS | GDT_EXEC | GDT_RW) /* access byte */
+        .byte (GDT_GRAN_4K | GDT_LONG_MODE)                   /* flags & limit */
+        .byte 0x00        /* base */
+
+    /* data 0x10 */
+    .Ldata_desc:
+        .word 0x0000      /* limit, ignored in 64 bit mode */
+        .word 0x0000      /* base, ignored in 64 bit mode */
+        .byte 0x00        /* base */
+        .byte (GDT_PRESENT | GDT_NOT_SYS | GDT_RW)            /* access byte */
+        .byte (GDT_GRAN_4K | GDT_SZ_32)                       /* flags & limit */
+        .byte 0x00        /* base */
+
+gdt64_pointer:
+    .word gdt64_pointer - gdt64 - 1
+    .quad gdt64
+```
+
+kernel/main.c:
+```
+#include <stdint.h>
+#include <stddef.h>
+#include <plane/boot_info.h>
+
+void kmain(struct boot_info *info) {
+	uint8_t *fb_ptr = (uint8_t *)info->video.framebuffer_addr;
+	
+	uint8_t bytes_per_pixel = info->video.bpp / 8;
+
+	for (size_t y = 0; y < info->video.height; y++) {
+		for (size_t x = 0; x < info->video.width; x++) {
+		
+			uint8_t nX = (uint8_t)(x * 255 / info->video.width);
+			uint8_t nY = (uint8_t)(y * 255 / info->video.height);
+			
+			size_t pixel_offset = (y * info->video.pitch) + (x * bytes_per_pixel);
+			
+			uint8_t blue  = nX;
+			uint8_t green = nY;
+			uint8_t red   = 0;
+
+			if (bytes_per_pixel == 4) {
+				// 32 bit mode (bgra)
+				fb_ptr[pixel_offset + 0] = blue;
+				fb_ptr[pixel_offset + 1] = green;
+				fb_ptr[pixel_offset + 2] = red;
+				fb_ptr[pixel_offset + 3] = 0;    // alpha / reserved
+			}
+			else if (bytes_per_pixel == 3) {
+				// 24 bit mode (bgr)
+				fb_ptr[pixel_offset + 0] = blue;
+				fb_ptr[pixel_offset + 1] = green;
+				fb_ptr[pixel_offset + 2] = red;
+			}
+		}
+	}
+}
+```
+
+include/limine.h:
+```
+/* SPDX-License-Identifier: 0BSD */
+
+/* Copyright (C) 2022-2026 Mintsuki and contributors.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#ifndef LIMINE_H
+#define LIMINE_H 1
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Misc */
+
+#ifdef LIMINE_NO_POINTERS
+#  define LIMINE_PTR(TYPE) uint64_t
+#else
+#  define LIMINE_PTR(TYPE) TYPE
+#endif
+
+#define LIMINE_REQUESTS_START_MARKER { 0xf6b8f4b39de7d1ae, 0xfab91a6940fcb9cf, \
+                                       0x785c6ed015d3e316, 0x181e920a7852b9d9 }
+#define LIMINE_REQUESTS_END_MARKER { 0xadc0e0531bb10d03, 0x9572709f31764c62 }
+
+#define LIMINE_BASE_REVISION(N) { 0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, (N) }
+
+#define LIMINE_BASE_REVISION_SUPPORTED(VAR) ((VAR)[2] == 0)
+
+#define LIMINE_LOADED_BASE_REVISION_VALID(VAR) ((VAR)[1] != 0x6a7b384944536bdc)
+#define LIMINE_LOADED_BASE_REVISION(VAR) ((VAR)[1])
+
+#define LIMINE_COMMON_MAGIC 0xc7b1dd30df4c8b88, 0x0a82e883a194f07b
+
+struct limine_uuid {
+    uint32_t a;
+    uint16_t b;
+    uint16_t c;
+    uint8_t d[8];
+};
+
+#define LIMINE_MEDIA_TYPE_GENERIC 0
+#define LIMINE_MEDIA_TYPE_OPTICAL 1
+#define LIMINE_MEDIA_TYPE_TFTP 2
+
+struct limine_file {
+    uint64_t revision;
+    LIMINE_PTR(void *) address;
+    uint64_t size;
+    LIMINE_PTR(char *) path;
+    LIMINE_PTR(char *) string;
+    uint32_t media_type;
+    uint32_t unused;
+    uint32_t tftp_ip;
+    uint32_t tftp_port;
+    uint32_t partition_index;
+    uint32_t mbr_disk_id;
+    struct limine_uuid gpt_disk_uuid;
+    struct limine_uuid gpt_part_uuid;
+    struct limine_uuid part_uuid;
+};
+
+/* Boot info */
+
+#define LIMINE_BOOTLOADER_INFO_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xf55038d8e2a1202f, 0x279426fcf5f59740 }
+
+struct limine_bootloader_info_response {
+    uint64_t revision;
+    LIMINE_PTR(char *) name;
+    LIMINE_PTR(char *) version;
+};
+
+struct limine_bootloader_info_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_bootloader_info_response *) response;
+};
+
+/* Executable command line */
+
+#define LIMINE_EXECUTABLE_CMDLINE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x4b161536e598651e, 0xb390ad4a2f1f303a }
+
+struct limine_executable_cmdline_response {
+    uint64_t revision;
+    LIMINE_PTR(char *) cmdline;
+};
+
+struct limine_executable_cmdline_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_executable_cmdline_response *) response;
+};
+
+/* Firmware type */
+
+#define LIMINE_FIRMWARE_TYPE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x8c2f75d90bef28a8, 0x7045a4688eac00c3 }
+
+#define LIMINE_FIRMWARE_TYPE_X86BIOS 0
+#define LIMINE_FIRMWARE_TYPE_EFI32 1
+#define LIMINE_FIRMWARE_TYPE_EFI64 2
+#define LIMINE_FIRMWARE_TYPE_SBI 3
+
+struct limine_firmware_type_response {
+    uint64_t revision;
+    uint64_t firmware_type;
+};
+
+struct limine_firmware_type_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_firmware_type_response *) response;
+};
+
+/* Stack size */
+
+#define LIMINE_STACK_SIZE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x224ef0460a8e8926, 0xe1cb0fc25f46ea3d }
+
+struct limine_stack_size_response {
+    uint64_t revision;
+};
+
+struct limine_stack_size_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_stack_size_response *) response;
+    uint64_t stack_size;
+};
+
+/* HHDM */
+
+#define LIMINE_HHDM_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x48dcf1cb8ad2b852, 0x63984e959a98244b }
+
+struct limine_hhdm_response {
+    uint64_t revision;
+    uint64_t offset;
+};
+
+struct limine_hhdm_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_hhdm_response *) response;
+};
+
+/* Framebuffer */
+
+#define LIMINE_FRAMEBUFFER_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x9d5827dcd881dd75, 0xa3148604f6fab11b }
+
+#define LIMINE_FRAMEBUFFER_RGB 1
+
+struct limine_video_mode {
+    uint64_t pitch;
+    uint64_t width;
+    uint64_t height;
+    uint16_t bpp;
+    uint8_t memory_model;
+    uint8_t red_mask_size;
+    uint8_t red_mask_shift;
+    uint8_t green_mask_size;
+    uint8_t green_mask_shift;
+    uint8_t blue_mask_size;
+    uint8_t blue_mask_shift;
+};
+
+struct limine_framebuffer {
+    LIMINE_PTR(void *) address;
+    uint64_t width;
+    uint64_t height;
+    uint64_t pitch;
+    uint16_t bpp;
+    uint8_t memory_model;
+    uint8_t red_mask_size;
+    uint8_t red_mask_shift;
+    uint8_t green_mask_size;
+    uint8_t green_mask_shift;
+    uint8_t blue_mask_size;
+    uint8_t blue_mask_shift;
+    uint8_t unused[7];
+    uint64_t edid_size;
+    LIMINE_PTR(void *) edid;
+    /* Response revision 1 */
+    uint64_t mode_count;
+    LIMINE_PTR(struct limine_video_mode **) modes;
+};
+
+struct limine_framebuffer_response {
+    uint64_t revision;
+    uint64_t framebuffer_count;
+    LIMINE_PTR(struct limine_framebuffer **) framebuffers;
+};
+
+struct limine_framebuffer_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_framebuffer_response *) response;
+};
+
+/* Flanterm FB init params */
+
+#define LIMINE_FLANTERM_FB_INIT_PARAMS_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x3259399fe7c5f126, 0xe01c1c8c5db9d1a9 }
+
+#define LIMINE_FLANTERM_FB_ROTATE_0 0
+#define LIMINE_FLANTERM_FB_ROTATE_90 1
+#define LIMINE_FLANTERM_FB_ROTATE_180 2
+#define LIMINE_FLANTERM_FB_ROTATE_270 3
+
+struct limine_flanterm_fb_init_params {
+    LIMINE_PTR(uint32_t *) canvas;
+    uint64_t canvas_size;
+    uint32_t ansi_colours[8];
+    uint32_t ansi_bright_colours[8];
+    uint32_t default_bg;
+    uint32_t default_fg;
+    uint32_t default_bg_bright;
+    uint32_t default_fg_bright;
+    LIMINE_PTR(void *) font;
+    uint64_t font_width;
+    uint64_t font_height;
+    uint64_t font_spacing;
+    uint64_t font_scale_x;
+    uint64_t font_scale_y;
+    uint64_t margin;
+    uint64_t rotation;
+};
+
+struct limine_flanterm_fb_init_params_response {
+    uint64_t revision;
+    uint64_t entry_count;
+    LIMINE_PTR(struct limine_flanterm_fb_init_params **) entries;
+};
+
+struct limine_flanterm_fb_init_params_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_flanterm_fb_init_params_response *) response;
+};
+
+/* Paging mode */
+
+#define LIMINE_PAGING_MODE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x95c1a0edab0944cb, 0xa4e5cb3842f7488a }
+
+#define LIMINE_PAGING_MODE_X86_64_4LVL 0
+#define LIMINE_PAGING_MODE_X86_64_5LVL 1
+#define LIMINE_PAGING_MODE_X86_64_MIN LIMINE_PAGING_MODE_X86_64_4LVL
+#define LIMINE_PAGING_MODE_X86_64_DEFAULT LIMINE_PAGING_MODE_X86_64_4LVL
+
+#define LIMINE_PAGING_MODE_AARCH64_4LVL 0
+#define LIMINE_PAGING_MODE_AARCH64_5LVL 1
+#define LIMINE_PAGING_MODE_AARCH64_MIN LIMINE_PAGING_MODE_AARCH64_4LVL
+#define LIMINE_PAGING_MODE_AARCH64_DEFAULT LIMINE_PAGING_MODE_AARCH64_4LVL
+
+#define LIMINE_PAGING_MODE_RISCV_SV39 0
+#define LIMINE_PAGING_MODE_RISCV_SV48 1
+#define LIMINE_PAGING_MODE_RISCV_SV57 2
+#define LIMINE_PAGING_MODE_RISCV_MIN LIMINE_PAGING_MODE_RISCV_SV39
+#define LIMINE_PAGING_MODE_RISCV_DEFAULT LIMINE_PAGING_MODE_RISCV_SV48
+
+#define LIMINE_PAGING_MODE_LOONGARCH_4LVL 0
+#define LIMINE_PAGING_MODE_LOONGARCH_MIN LIMINE_PAGING_MODE_LOONGARCH_4LVL
+#define LIMINE_PAGING_MODE_LOONGARCH_DEFAULT LIMINE_PAGING_MODE_LOONGARCH_4LVL
+
+struct limine_paging_mode_response {
+    uint64_t revision;
+    uint64_t mode;
+};
+
+struct limine_paging_mode_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_paging_mode_response *) response;
+    uint64_t mode;
+    uint64_t max_mode;
+    uint64_t min_mode;
+};
+
+/* MP */
+
+#define LIMINE_MP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x95a67b819a1b857e, 0xa0b61b723b6a73e0 }
+
+struct limine_mp_info;
+
+typedef void (*limine_goto_address)(struct limine_mp_info *);
+
+#if defined (__x86_64__) || defined (__i386__)
+
+#define LIMINE_MP_RESPONSE_X86_64_X2APIC (1 << 0)
+
+struct limine_mp_info {
+    uint32_t processor_id;
+    uint32_t lapic_id;
+    uint64_t reserved;
+    LIMINE_PTR(limine_goto_address) goto_address;
+    uint64_t extra_argument;
+};
+
+struct limine_mp_response {
+    uint64_t revision;
+    uint32_t flags;
+    uint32_t bsp_lapic_id;
+    uint64_t cpu_count;
+    LIMINE_PTR(struct limine_mp_info **) cpus;
+};
+
+#elif defined (__aarch64__)
+
+struct limine_mp_info {
+    uint32_t processor_id;
+    uint32_t reserved1;
+    uint64_t mpidr;
+    uint64_t reserved;
+    LIMINE_PTR(limine_goto_address) goto_address;
+    uint64_t extra_argument;
+};
+
+struct limine_mp_response {
+    uint64_t revision;
+    uint64_t flags;
+    uint64_t bsp_mpidr;
+    uint64_t cpu_count;
+    LIMINE_PTR(struct limine_mp_info **) cpus;
+};
+
+#elif defined (__riscv) && (__riscv_xlen == 64)
+
+struct limine_mp_info {
+    uint64_t processor_id;
+    uint64_t hartid;
+    uint64_t reserved;
+    LIMINE_PTR(limine_goto_address) goto_address;
+    uint64_t extra_argument;
+};
+
+struct limine_mp_response {
+    uint64_t revision;
+    uint64_t flags;
+    uint64_t bsp_hartid;
+    uint64_t cpu_count;
+    LIMINE_PTR(struct limine_mp_info **) cpus;
+};
+
+#elif defined (__loongarch__) && (__loongarch_grlen == 64)
+
+struct limine_mp_info {
+    uint64_t processor_id;
+    uint64_t phys_id;
+    uint64_t reserved;
+    LIMINE_PTR(limine_goto_address) goto_address;
+    uint64_t extra_argument;
+};
+
+struct limine_mp_response {
+    uint64_t revision;
+    uint64_t flags;
+    uint64_t bsp_phys_id;
+    uint64_t cpu_count;
+    LIMINE_PTR(struct limine_mp_info **) cpus;
+};
+
+#else
+#error Unknown architecture
+#endif
+
+#define LIMINE_MP_REQUEST_X86_64_X2APIC (1 << 0)
+
+struct limine_mp_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_mp_response *) response;
+    uint64_t flags;
+};
+
+/* Memory map */
+
+#define LIMINE_MEMMAP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x67cf3d9d378a806f, 0xe304acdfc50c3c62 }
+
+#define LIMINE_MEMMAP_USABLE                 0
+#define LIMINE_MEMMAP_RESERVED               1
+#define LIMINE_MEMMAP_ACPI_RECLAIMABLE       2
+#define LIMINE_MEMMAP_ACPI_NVS               3
+#define LIMINE_MEMMAP_BAD_MEMORY             4
+#define LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE 5
+#define LIMINE_MEMMAP_EXECUTABLE_AND_MODULES 6
+#define LIMINE_MEMMAP_FRAMEBUFFER            7
+#define LIMINE_MEMMAP_RESERVED_MAPPED        8
+
+struct limine_memmap_entry {
+    uint64_t base;
+    uint64_t length;
+    uint64_t type;
+};
+
+struct limine_memmap_response {
+    uint64_t revision;
+    uint64_t entry_count;
+    LIMINE_PTR(struct limine_memmap_entry **) entries;
+};
+
+struct limine_memmap_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_memmap_response *) response;
+};
+
+/* Entry point */
+
+#define LIMINE_ENTRY_POINT_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x13d86c035a1cd3e1, 0x2b0caa89d8f3026a }
+
+typedef void (*limine_entry_point)(void);
+
+struct limine_entry_point_response {
+    uint64_t revision;
+};
+
+struct limine_entry_point_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_entry_point_response *) response;
+    LIMINE_PTR(limine_entry_point) entry;
+};
+
+/* Executable File */
+
+#define LIMINE_EXECUTABLE_FILE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xad97e90e83f1ed67, 0x31eb5d1c5ff23b69 }
+
+struct limine_executable_file_response {
+    uint64_t revision;
+    LIMINE_PTR(struct limine_file *) executable_file;
+};
+
+struct limine_executable_file_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_executable_file_response *) response;
+};
+
+/* Module */
+
+#define LIMINE_MODULE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x3e7e279702be32af, 0xca1c4f3bd1280cee }
+
+#define LIMINE_INTERNAL_MODULE_REQUIRED (1 << 0)
+#define LIMINE_INTERNAL_MODULE_COMPRESSED (1 << 1)
+
+struct limine_internal_module {
+    LIMINE_PTR(const char *) path;
+    LIMINE_PTR(const char *) string;
+    uint64_t flags;
+};
+
+struct limine_module_response {
+    uint64_t revision;
+    uint64_t module_count;
+    LIMINE_PTR(struct limine_file **) modules;
+};
+
+struct limine_module_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_module_response *) response;
+
+    /* Request revision 1 */
+    uint64_t internal_module_count;
+    LIMINE_PTR(struct limine_internal_module **) internal_modules;
+};
+
+/* RSDP */
+
+#define LIMINE_RSDP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xc5e77b6b397e7b43, 0x27637845accdcf3c }
+
+struct limine_rsdp_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) address;
+};
+
+struct limine_rsdp_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_rsdp_response *) response;
+};
+
+/* SMBIOS */
+
+#define LIMINE_SMBIOS_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x9e9046f11e095391, 0xaa4a520fefbde5ee }
+
+struct limine_smbios_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) entry_32;
+    LIMINE_PTR(void *) entry_64;
+};
+
+struct limine_smbios_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_smbios_response *) response;
+};
+
+/* EFI system table */
+
+#define LIMINE_EFI_SYSTEM_TABLE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x5ceba5163eaaf6d6, 0x0a6981610cf65fcc }
+
+struct limine_efi_system_table_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) address;
+};
+
+struct limine_efi_system_table_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_efi_system_table_response *) response;
+};
+
+/* TPM event log */
+
+#define LIMINE_TPM_EVENT_LOG_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x98e094fc7e76e979, 0xee8d8775c54e1d1f }
+
+#define LIMINE_TPM_EVENT_LOG_FORMAT_TCG_1_2 1
+#define LIMINE_TPM_EVENT_LOG_FORMAT_TCG_2   2
+
+struct limine_tpm_event_log_response {
+    uint64_t revision;
+    uint64_t format;
+    uint64_t size;
+    LIMINE_PTR(void *) address;
+};
+
+struct limine_tpm_event_log_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_tpm_event_log_response *) response;
+};
+
+/* EFI memory map */
+
+#define LIMINE_EFI_MEMMAP_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x7df62a431d6872d5, 0xa4fcdfb3e57306c8 }
+
+struct limine_efi_memmap_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) memmap;
+    uint64_t memmap_size;
+    uint64_t desc_size;
+    uint64_t desc_version;
+};
+
+struct limine_efi_memmap_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_efi_memmap_response *) response;
+};
+
+/* Date at boot */
+
+#define LIMINE_DATE_AT_BOOT_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x502746e184c088aa, 0xfbc5ec83e6327893 }
+
+struct limine_date_at_boot_response {
+    uint64_t revision;
+    int64_t timestamp;
+};
+
+struct limine_date_at_boot_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_date_at_boot_response *) response;
+};
+
+/* Executable address */
+
+#define LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x71ba76863cc55f63, 0xb2644a48c516a487 }
+
+struct limine_executable_address_response {
+    uint64_t revision;
+    uint64_t physical_base;
+    uint64_t virtual_base;
+};
+
+struct limine_executable_address_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_executable_address_response *) response;
+};
+
+/* Device Tree Blob */
+
+#define LIMINE_DTB_REQUEST_ID { LIMINE_COMMON_MAGIC, 0xb40ddb48fb54bac7, 0x545081493f81ffb7 }
+
+struct limine_dtb_response {
+    uint64_t revision;
+    LIMINE_PTR(void *) dtb_ptr;
+};
+
+struct limine_dtb_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_dtb_response *) response;
+};
+
+/* RISC-V Boot Hart ID */
+
+#define LIMINE_RISCV_BSP_HARTID_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x1369359f025525f9, 0x2ff2a56178391bb6 }
+
+struct limine_riscv_bsp_hartid_response {
+    uint64_t revision;
+    uint64_t bsp_hartid;
+};
+
+struct limine_riscv_bsp_hartid_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_riscv_bsp_hartid_response *) response;
+};
+
+/* Bootloader Performance */
+
+#define LIMINE_BOOTLOADER_PERFORMANCE_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x6b50ad9bf36d13ad, 0xdc4c7e88fc759e17 }
+
+struct limine_bootloader_performance_response {
+    uint64_t revision;
+    uint64_t reset_usec;
+    uint64_t init_usec;
+    uint64_t exec_usec;
+};
+
+struct limine_bootloader_performance_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_bootloader_performance_response *) response;
+};
+
+#define LIMINE_X86_64_KEEP_IOMMU_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x8ebaabe51f490179, 0x2aa86a59ffb4ab0f }
+
+struct limine_x86_64_keep_iommu_response {
+    uint64_t revision;
+};
+
+struct limine_x86_64_keep_iommu_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_x86_64_keep_iommu_response *) response;
+};
+
+/* TSC (Timestamp Counter) Frequency */
+
+#define LIMINE_TSC_FREQUENCY_REQUEST_ID { LIMINE_COMMON_MAGIC, 0x10f2ee1d87d195e4, 0xf747a2b78f6ddb31 }
+
+struct limine_tsc_frequency_response {
+    uint64_t revision;
+    uint64_t frequency;
+};
+
+struct limine_tsc_frequency_request {
+    uint64_t id[4];
+    uint64_t revision;
+    LIMINE_PTR(struct limine_tsc_frequency_response *) response;
+};
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+```
+
+include/multiboot2.h:
+```
+/*   multiboot2.h - Multiboot 2 header file. */
+/*   Copyright (C) 1999,2003,2007,2008,2009,2010  Free Software Foundation, Inc.
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files (the "Software"), to
+ *  deal in the Software without restriction, including without limitation the
+ *  rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+ *  sell copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions:
+ *
+ *  The above copyright notice and this permission notice shall be included in
+ *  all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL ANY
+ *  DEVELOPER OR DISTRIBUTOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ *  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+ *  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#ifndef MULTIBOOT_HEADER
+#define MULTIBOOT_HEADER 1
+
+/*  How many bytes from the start of the file we search for the header. */
+#define MULTIBOOT_SEARCH                        32768
+#define MULTIBOOT_HEADER_ALIGN                  8
+
+/*  The magic field should contain this. */
+#define MULTIBOOT2_HEADER_MAGIC                 0xe85250d6
+
+/*  This should be in %eax. */
+#define MULTIBOOT2_BOOTLOADER_MAGIC             0x36d76289
+
+/*  Alignment of multiboot modules. */
+#define MULTIBOOT_MOD_ALIGN                     0x00001000
+
+/*  Alignment of the multiboot info structure. */
+#define MULTIBOOT_INFO_ALIGN                    0x00000008
+
+/*  Flags set in the ’flags’ member of the multiboot header. */
+
+#define MULTIBOOT_TAG_ALIGN                  8
+#define MULTIBOOT_TAG_TYPE_END               0
+#define MULTIBOOT_TAG_TYPE_CMDLINE           1
+#define MULTIBOOT_TAG_TYPE_BOOT_LOADER_NAME  2
+#define MULTIBOOT_TAG_TYPE_MODULE            3
+#define MULTIBOOT_TAG_TYPE_BASIC_MEMINFO     4
+#define MULTIBOOT_TAG_TYPE_BOOTDEV           5
+#define MULTIBOOT_TAG_TYPE_MMAP              6
+#define MULTIBOOT_TAG_TYPE_VBE               7
+#define MULTIBOOT_TAG_TYPE_FRAMEBUFFER       8
+#define MULTIBOOT_TAG_TYPE_ELF_SECTIONS      9
+#define MULTIBOOT_TAG_TYPE_APM               10
+#define MULTIBOOT_TAG_TYPE_EFI32             11
+#define MULTIBOOT_TAG_TYPE_EFI64             12
+#define MULTIBOOT_TAG_TYPE_SMBIOS            13
+#define MULTIBOOT_TAG_TYPE_ACPI_OLD          14
+#define MULTIBOOT_TAG_TYPE_ACPI_NEW          15
+#define MULTIBOOT_TAG_TYPE_NETWORK           16
+#define MULTIBOOT_TAG_TYPE_EFI_MMAP          17
+#define MULTIBOOT_TAG_TYPE_EFI_BS            18
+#define MULTIBOOT_TAG_TYPE_EFI32_IH          19
+#define MULTIBOOT_TAG_TYPE_EFI64_IH          20
+#define MULTIBOOT_TAG_TYPE_LOAD_BASE_ADDR    21
+
+#define MULTIBOOT_HEADER_TAG_END  0
+#define MULTIBOOT_HEADER_TAG_INFORMATION_REQUEST  1
+#define MULTIBOOT_HEADER_TAG_ADDRESS  2
+#define MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS  3
+#define MULTIBOOT_HEADER_TAG_CONSOLE_FLAGS  4
+#define MULTIBOOT_HEADER_TAG_FRAMEBUFFER  5
+#define MULTIBOOT_HEADER_TAG_MODULE_ALIGN  6
+#define MULTIBOOT_HEADER_TAG_EFI_BS        7
+#define MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI32  8
+#define MULTIBOOT_HEADER_TAG_ENTRY_ADDRESS_EFI64  9
+#define MULTIBOOT_HEADER_TAG_RELOCATABLE  10
+
+#define MULTIBOOT_ARCHITECTURE_I386  0
+#define MULTIBOOT_ARCHITECTURE_MIPS32  4
+#define MULTIBOOT_HEADER_TAG_OPTIONAL 1
+
+#define MULTIBOOT_LOAD_PREFERENCE_NONE 0
+#define MULTIBOOT_LOAD_PREFERENCE_LOW 1
+#define MULTIBOOT_LOAD_PREFERENCE_HIGH 2
+
+#define MULTIBOOT_CONSOLE_FLAGS_CONSOLE_REQUIRED 1
+#define MULTIBOOT_CONSOLE_FLAGS_EGA_TEXT_SUPPORTED 2
+
+#ifndef ASM_FILE
+
+typedef unsigned char           multiboot_uint8_t;
+typedef unsigned short          multiboot_uint16_t;
+typedef unsigned int            multiboot_uint32_t;
+typedef unsigned long long      multiboot_uint64_t;
+
+struct multiboot_header
+{
+  /*  Must be MULTIBOOT_MAGIC - see above. */
+  multiboot_uint32_t magic;
+
+  /*  ISA */
+  multiboot_uint32_t architecture;
+
+  /*  Total header length. */
+  multiboot_uint32_t header_length;
+
+  /*  The above fields plus this one must equal 0 mod 2^32. */
+  multiboot_uint32_t checksum;
+};
+
+struct multiboot_header_tag
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+};
+
+struct multiboot_header_tag_information_request
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t requests[0];
+};
+
+struct multiboot_header_tag_address
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t header_addr;
+  multiboot_uint32_t load_addr;
+  multiboot_uint32_t load_end_addr;
+  multiboot_uint32_t bss_end_addr;
+};
+
+struct multiboot_header_tag_entry_address
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t entry_addr;
+};
+
+struct multiboot_header_tag_console_flags
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t console_flags;
+};
+
+struct multiboot_header_tag_framebuffer
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t width;
+  multiboot_uint32_t height;
+  multiboot_uint32_t depth;
+};
+
+struct multiboot_header_tag_module_align
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+};
+
+struct multiboot_header_tag_relocatable
+{
+  multiboot_uint16_t type;
+  multiboot_uint16_t flags;
+  multiboot_uint32_t size;
+  multiboot_uint32_t min_addr;
+  multiboot_uint32_t max_addr;
+  multiboot_uint32_t align;
+  multiboot_uint32_t preference;
+};
+
+struct multiboot_color
+{
+  multiboot_uint8_t red;
+  multiboot_uint8_t green;
+  multiboot_uint8_t blue;
+};
+
+struct multiboot_mmap_entry
+{
+  multiboot_uint64_t addr;
+  multiboot_uint64_t len;
+#define MULTIBOOT_MEMORY_AVAILABLE              1
+#define MULTIBOOT_MEMORY_RESERVED               2
+#define MULTIBOOT_MEMORY_ACPI_RECLAIMABLE       3
+#define MULTIBOOT_MEMORY_NVS                    4
+#define MULTIBOOT_MEMORY_BADRAM                 5
+  multiboot_uint32_t type;
+  multiboot_uint32_t zero;
+};
+typedef struct multiboot_mmap_entry multiboot_memory_map_t;
+
+struct multiboot_tag
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+};
+
+struct multiboot_tag_string
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  char string[0];
+};
+
+struct multiboot_tag_module
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t mod_start;
+  multiboot_uint32_t mod_end;
+  char cmdline[0];
+};
+
+struct multiboot_tag_basic_meminfo
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t mem_lower;
+  multiboot_uint32_t mem_upper;
+};
+
+struct multiboot_tag_bootdev
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t biosdev;
+  multiboot_uint32_t slice;
+  multiboot_uint32_t part;
+};
+
+struct multiboot_tag_mmap
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t entry_size;
+  multiboot_uint32_t entry_version;
+  struct multiboot_mmap_entry entries[0];  
+};
+
+struct multiboot_vbe_info_block
+{
+  multiboot_uint8_t external_specification[512];
+};
+
+struct multiboot_vbe_mode_info_block
+{
+  multiboot_uint8_t external_specification[256];
+};
+
+struct multiboot_tag_vbe
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+
+  multiboot_uint16_t vbe_mode;
+  multiboot_uint16_t vbe_interface_seg;
+  multiboot_uint16_t vbe_interface_off;
+  multiboot_uint16_t vbe_interface_len;
+
+  struct multiboot_vbe_info_block vbe_control_info;
+  struct multiboot_vbe_mode_info_block vbe_mode_info;
+};
+
+struct multiboot_tag_framebuffer_common
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+
+  multiboot_uint64_t framebuffer_addr;
+  multiboot_uint32_t framebuffer_pitch;
+  multiboot_uint32_t framebuffer_width;
+  multiboot_uint32_t framebuffer_height;
+  multiboot_uint8_t framebuffer_bpp;
+#define MULTIBOOT_FRAMEBUFFER_TYPE_INDEXED 0
+#define MULTIBOOT_FRAMEBUFFER_TYPE_RGB     1
+#define MULTIBOOT_FRAMEBUFFER_TYPE_EGA_TEXT     2
+  multiboot_uint8_t framebuffer_type;
+  multiboot_uint16_t reserved;
+};
+
+struct multiboot_tag_framebuffer
+{
+  struct multiboot_tag_framebuffer_common common;
+
+  union
+  {
+    struct
+    {
+      multiboot_uint16_t framebuffer_palette_num_colors;
+      struct multiboot_color framebuffer_palette[0];
+    };
+    struct
+    {
+      multiboot_uint8_t framebuffer_red_field_position;
+      multiboot_uint8_t framebuffer_red_mask_size;
+      multiboot_uint8_t framebuffer_green_field_position;
+      multiboot_uint8_t framebuffer_green_mask_size;
+      multiboot_uint8_t framebuffer_blue_field_position;
+      multiboot_uint8_t framebuffer_blue_mask_size;
+    };
+  };
+};
+
+struct multiboot_tag_elf_sections
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t num;
+  multiboot_uint32_t entsize;
+  multiboot_uint32_t shndx;
+  char sections[0];
+};
+
+struct multiboot_tag_apm
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint16_t version;
+  multiboot_uint16_t cseg;
+  multiboot_uint32_t offset;
+  multiboot_uint16_t cseg_16;
+  multiboot_uint16_t dseg;
+  multiboot_uint16_t flags;
+  multiboot_uint16_t cseg_len;
+  multiboot_uint16_t cseg_16_len;
+  multiboot_uint16_t dseg_len;
+};
+
+struct multiboot_tag_efi32
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t pointer;
+};
+
+struct multiboot_tag_efi64
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint64_t pointer;
+};
+
+struct multiboot_tag_smbios
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint8_t major;
+  multiboot_uint8_t minor;
+  multiboot_uint8_t reserved[6];
+  multiboot_uint8_t tables[0];
+};
+
+struct multiboot_tag_old_acpi
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint8_t rsdp[0];
+};
+
+struct multiboot_tag_new_acpi
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint8_t rsdp[0];
+};
+
+struct multiboot_tag_network
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint8_t dhcpack[0];
+};
+
+struct multiboot_tag_efi_mmap
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t descr_size;
+  multiboot_uint32_t descr_vers;
+  multiboot_uint8_t efi_mmap[0];
+}; 
+
+struct multiboot_tag_efi32_ih
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t pointer;
+};
+
+struct multiboot_tag_efi64_ih
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint64_t pointer;
+};
+
+struct multiboot_tag_load_base_addr
+{
+  multiboot_uint32_t type;
+  multiboot_uint32_t size;
+  multiboot_uint32_t load_base_addr;
+};
+
+#endif /*  ! ASM_FILE */
+
+#endif /*  ! MULTIBOOT_HEADER */
+```
+
+include/hal/mmu.h:
+```
+#ifndef HAL_MMU_H
+#define HAL_MMU_H
+
+#ifndef __ASSEMBLER__
+#include <stdint.h>
+
+void hal_mmu_invalidate_tlb(uintptr_t vaddr);
+
+void hal_mmu_flush_tlb_all(void);
+
+void hal_mmu_map_early_framebuffer(uint64_t phys_base, uint64_t pages_needed, void *early_page_table);
+
+#endif /* !__ASSEMBLER__ */
+#endif /* HAL_MMU_H */
+```
+
+include/hal/cpu.h:
+```
+#ifndef HAL_CPU_H
+#define HAL_CPU_H
+
+#include <plane/compiler.h>
+
+void hal_cpu_hang(void) __noreturn;
+
+#endif /* HAL_CPU_H */
+```
+
+include/hal/x86_64/arch_mmu.h:
+```
+#ifndef HAL_ARCH_MMU_H
+#define HAL_ARCH_MMU_H
+
+#define PAGE_PRESENT         (1 << 0)
+#define PAGE_RW              (1 << 1)
+#define PAGE_PWT             (1 << 3)
+#define PAGE_HUGE            (1 << 7)
+
+#endif /* HAL_ARCH_MMU_H */
+```
+
+include/plane/boot_info.h:
+```
+#ifndef PLANE_BOOT_INFO_H
+#define PLANE_BOOT_INFO_H
+
+#include <stdint.h>
+
+/* Video */
+struct plane_video_info {
+	uint32_t *framebuffer_addr;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pitch;
+	uint8_t  bpp;
+};
+
+/* Memory Map */
+#define PLANE_MAX_MEMMAP_ENTRIES 128
+
+enum plane_mem_type {
+	PLANE_MEM_INVALID = 0,
+	PLANE_MEM_USABLE,
+	PLANE_MEM_RESERVED,
+	PLANE_MEM_ACPI_RECLAIMABLE,
+	PLANE_MEM_ACPI_NVS,
+	PLANE_MEM_BAD_MEMORY,
+	PLANE_MEM_BOOTLOADER_RECLAIMABLE,
+	PLANE_MEM_EXECUTABLE_AND_MODULES,
+	PLANE_MEM_FRAMEBUFFER,
+	PLANE_MEM_RESERVED_MAPPED
+};
+
+struct plane_mem_region {
+	uint64_t base;
+	uint64_t length;
+	uint32_t type;
+};
+
+struct plane_mem_info {
+	uint64_t entry_count;
+	struct plane_mem_region map[PLANE_MAX_MEMMAP_ENTRIES];
+};
+
+struct boot_info {
+	struct plane_video_info video;
+	struct plane_mem_info   mem;
+	
+	/*
+	 * and more ...
+	 * struct plane_acpi_info  acpi;
+	 * struct plane_smp_info   smp;
+	 * char cmdline[256];
+	 */
+};
+
+#endif /* PLANE_BOOT_INFO_H */
+```
+
+include/plane/compiler.h:
+```
+#ifndef PLANE_COMPILER_H
+#define PLANE_COMPILER_H
+
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+
+#define __always_inline inline __attribute__((always_inline))
+#define __noinline      __attribute__((noinline))
+#define __noreturn      __attribute__((noreturn))
+#define __maybe_unused  __attribute__((unused))
+
+/* GCC only */
+#define __same_type(a, b) __builtin_types_compatible_p(typeof(a), typeof(b))
+
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+#define BUILD_BUG_ON_ZERO(e)    ((int)(sizeof(struct { int:(-!!(e)); })))
+
+#define __must_be_array(a)      BUILD_BUG_ON_ZERO(__same_type((a), &(a)[0]))
+
+#endif /* PLANE_COMPILER_H */
+```
+
+include/plane/kernel.h:
+```
+#ifndef PLANE_KERNEL_H
+#define PLANE_KERNEL_H
+
+#include <stddef.h>
+#include <plane/compiler.h>
+
+#ifndef offsetof
+#define offsetof(TYPE, MEMBER) __builtin_offsetof(TYPE, MEMBER)
+#endif
+
+#define container_of(ptr, type, member) ({                              \
+        void *__mptr = (void *)(ptr);                                   \
+        _Static_assert(__same_type(*(ptr), ((type *)0)->member) ||      \
+                       __same_type(*(ptr), void),                       \
+                       "pointer type mismatch in container_of()");      \
+        ((type *)(__mptr - offsetof(type, member))); })
+
+#define container_of_const(ptr, type, member)                           \
+        _Generic(ptr,                                                   \
+                const typeof(*(ptr)) *: ((const type *)container_of(ptr, type, member)),\
+                default: ((type *)container_of(ptr, type, member))      \
+        )
+
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]) + __must_be_array(arr))
+#define ARRAY_END(arr)  (&(arr)[ARRAY_SIZE(arr)])
+
+#define BIT(nr)         (1UL << (nr))
+
+#define __ALIGN_KERNEL_MASK(x, mask)    (((x) + (mask)) & ~(mask))
+#define __ALIGN_KERNEL(x, a)            __ALIGN_KERNEL_MASK(x, (typeof(x))(a) - 1)
+
+#define ALIGN(x, a)                     __ALIGN_KERNEL((x), (a))
+#define ALIGN_DOWN(x, a)                __ALIGN_KERNEL((x) - ((a) - 1), (a))
+#define IS_ALIGNED(x, a)                (((x) & ((typeof(x))(a) - 1)) == 0)
+
+#define PTR_ALIGN(p, a)                 ((typeof(p))ALIGN((unsigned long)(p), (a)))
+#define PTR_ALIGN_DOWN(p, a)            ((typeof(p))ALIGN_DOWN((unsigned long)(p), (a)))
+
+extern void printk(const char *fmt, ...);
+extern void panic(const char *fmt, ...) __noreturn;
+
+#define BUG() do { \
+    printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
+    panic("Kernel BUG!"); \
+} while (0)
+
+#define BUG_ON(condition) do { \
+    if (unlikely(condition)) { \
+        BUG(); \
+    } \
+} while (0)
+
+#define DO_ONCE_LITE_IF(condition, func, ...) ({        \
+    static bool __done = false;                         \
+    int __ret_cond = !!(condition);                     \
+    if (unlikely(__ret_cond && !__done)) {              \
+        __done = true;                                  \
+        func(__VA_ARGS__);                              \
+    }                                                   \
+    unlikely(__ret_cond);                               \
+})
+
+#define WARN_ON(condition) ({                                   \
+    int __ret_warn_on = !!(condition);                          \
+    if (unlikely(__ret_warn_on))                                \
+        printk("WARNING: at %s:%d\n", __FILE__, __LINE__);      \
+    unlikely(__ret_warn_on);                                    \
+})
+
+#define WARN_ON_ONCE(condition) DO_ONCE_LITE_IF(condition, WARN_ON, 1)
+
+#define printk_once(fmt, ...) do {                      \
+    static bool __done = false;                         \
+    if (unlikely(!__done)) {                            \
+        __done = true;                                  \
+        printk(fmt, ##__VA_ARGS__);                     \
+    }                                                   \
+} while (0)
+
+#define pr_info(fmt, ...)   printk("[INFO] " fmt, ##__VA_ARGS__)
+#define pr_err(fmt, ...)    printk("[ERR]  " fmt, ##__VA_ARGS__)
+#define pr_warn(fmt, ...)   printk("[WARN] " fmt, ##__VA_ARGS__)
+
+#endif /* PLANE_KERNEL_H */
+```
+
+include/plane/mm.h:
+```
+#ifndef PLANE_MM_H
+#define PLANE_MM_H
+
+#ifdef __ASSEMBLER__
+    #define PAGE_SIZE        0x1000
+    #define PAGE_SHIFT       12
+    #define HUGE_PAGE_SIZE   0x200000
+    #define HUGE_PAGE_SHIFT  21
+#else
+    #define PAGE_SIZE        0x1000ULL
+    #define PAGE_SHIFT       12ULL
+    #define HUGE_PAGE_SIZE   0x200000ULL
+    #define HUGE_PAGE_SHIFT  21ULL
+#endif
+
+#define PAGE_MASK            (~(PAGE_SIZE - 1))
+#define HUGE_PAGE_MASK       (~(HUGE_PAGE_SIZE - 1))
+
+#define KERNEL_VMA_BASE      0xFFFFFFFF80000000ULL
+#define FRAMEBUFFER_VMA_BASE 0xFFFFFFFFC0000000ULL
+
+#endif /* PLANE_MM_H */
+```
+
+include/generated/autoconf.h:
+```
+#define CONFIG_X86_64 1
+#define CONFIG_BOOT_LIMINE 1
+```
+
+klib/string.c:
+```
+#include <stdint.h>
+#include <stddef.h>
+
+// GCC and Clang reserve the right to generate calls to the following
+// 4 functions even if they are not directly called.
+// Implement them as the C specification mandates.
+// DO NOT remove or rename these functions, or stuff will eventually break!
+
+void *memcpy(void *restrict dest, const void *restrict src, size_t n)
+{
+	uint8_t *restrict pdest = dest;
+	const uint8_t *restrict psrc = src;
+
+	for (size_t i = 0; i < n; i++) {
+		pdest[i] = psrc[i];
+	}
+
+	return dest;
+}
+
+void *memset(void *s, int c, size_t n)
+{
+	uint8_t *p = s;
+
+	for (size_t i = 0; i < n; i++) {
+		p[i] = (uint8_t)c;
+	}
+
+	return s;
+}
+
+void *memmove(void *dest, const void *src, size_t n)
+{
+	uint8_t *pdest = dest;
+	const uint8_t *psrc = src;
+
+	if ((uintptr_t)src > (uintptr_t)dest) {
+		for (size_t i = 0; i < n; i++) {
+			pdest[i] = psrc[i];
+		}
+	} else if ((uintptr_t)src < (uintptr_t)dest) {
+		for (size_t i = n; i > 0; i--) {
+			pdest[i - 1] = psrc[i - 1];
+		}
+	}
+
+	return dest;
+}
+
+int memcmp(const void *s1, const void *s2, size_t n)
+{
+	const uint8_t *p1 = s1;
+	const uint8_t *p2 = s2;
+
+	for (size_t i = 0; i < n; i++) {
+		if (p1[i] != p2[i]) {
+			return p1[i] < p2[i] ? -1 : 1;
+		}
+	}
+
+	return 0;
+}
+```
+
