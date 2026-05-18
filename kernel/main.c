@@ -3,6 +3,12 @@
 #include <plane/boot_info.h>
 
 void kmain(struct boot_info *info) {
+	plane_sanitize_memory_map(&info->mem);
+	/* 
+	 * TODO: 
+	 * pmm_init(&info->mem); 
+	 * vmm_init();
+	 */
 	uint8_t *fb_ptr = (uint8_t *)info->video.framebuffer_addr;
 	
 	uint8_t bytes_per_pixel = info->video.bpp / 8;

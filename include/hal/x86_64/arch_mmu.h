@@ -5,7 +5,7 @@
 #define PAGE_PRESENT         (1 << 0)
 #define PAGE_RW              (1 << 1)
 #define PAGE_PWT             (1 << 3)
-#define PAGE_HUGE            (1 << 7)
+#define PAGE_PS              (1 << 7)
 
 /* X86_64 specific page sizes */
 #ifdef __ASSEMBLER__

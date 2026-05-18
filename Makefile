@@ -24,7 +24,7 @@ override CFLAGS += \
 
 -include .config
 
-SRC_DIRS := kernel klib
+SRC_DIRS := kernel kernel/mm klib
 
 ifeq ($(CONFIG_X86_64),y)
     SRC_DIRS += hal/x86_64

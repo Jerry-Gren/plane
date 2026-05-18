@@ -157,7 +157,7 @@ _start:
     mov %eax, 511*8(%edi) /* boot_pdpt_high[511] -> boot_fb_pd*/
     /* PDT */
     # mov $boot_pd, %edi
-    # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_HUGE), %eax
+    # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_PS), %eax
     # mov $512, %ecx
     mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
     mov %ebx, %eax
@@ -171,7 +171,7 @@ _start:
     shr $ARCH_LARGE_PAGE_SHIFT, %eax
     mov %eax, %ecx
     mov $boot_pd, %edi
-    mov $(PAGE_PRESENT | PAGE_RW | PAGE_HUGE), %eax
+    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
 .Lfill_pd:
     mov %eax, (%edi)
     add $ARCH_LARGE_PAGE_SIZE, %eax

@@ -39,6 +39,9 @@ struct plane_mem_info {
 	struct plane_mem_region map[PLANE_MAX_MEMMAP_ENTRIES];
 };
 
+void plane_sanitize_memory_map(struct plane_mem_info *mem);
+
+/* hand off to kmain() */
 struct boot_info {
 	struct plane_video_info video;
 	struct plane_mem_info   mem;
