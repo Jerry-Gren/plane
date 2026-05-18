@@ -1,0 +1,10 @@
+.vscode/
+
+build/
+include/generated/
+
+*.o
+*.elf
+*.iso
+.config
+.config.old

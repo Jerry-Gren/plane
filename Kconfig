@@ -1,0 +1,32 @@
+mainmenu "PlanE Configuration"
+
+config X86_64
+    bool "Target x86_64 architecture"
+    default y
+
+menu "Boot Options"
+
+choice
+    prompt "Boot Protocol"
+    default BOOT_LIMINE
+    help
+      Select the boot protocol and bootloader to package the OS.
+
+    config BOOT_LIMINE
+        bool "Limine Boot Protocol"
+        help
+          Use Limine bootloader. Requires xorriso to build the ISO.
+
+    config BOOT_GRUB
+        bool "GRUB (Multiboot2) Protocol"
+        help
+          Use GRUB bootloader. Requires grub-mkrescue to build the ISO.
+endchoice
+
+endmenu
+
+menu "Drivers"
+    config BLK_DEV_NVME
+        bool "NVMe Support"
+        default n
+endmenu

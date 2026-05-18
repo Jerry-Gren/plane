@@ -1,0 +1,4 @@
+limine.h:
+    https://raw.githubusercontent.com/Limine-Bootloader/limine-protocol/refs/heads/trunk/include/limine.h
+multiboot2.h:
+    https://www.gnu.org/software/grub/manual/multiboot2/html_node/multiboot2_002eh.html#multiboot2_002eh

@@ -1,0 +1,141 @@
+ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
+CC := x86_64-elf-gcc
+LD := x86_64-elf-ld
+
+override CFLAGS += \
+	-I$(ROOT_DIR)/include \
+	-std=gnu11 \
+	-Wall -Wextra -Werror \
+	-ffreestanding \
+	-fno-stack-protector \
+	-fno-stack-check \
+	-fno-lto \
+	-fno-PIC \
+	-m64 \
+	-march=x86-64 \
+	-mabi=sysv \
+	-mcmodel=kernel \
+	-mno-80387 \
+	-mno-mmx \
+	-mno-sse \
+	-mno-sse2 \
+	-mno-red-zone
+
+-include .config
+
+SRC_DIRS := kernel klib
+
+ifeq ($(CONFIG_X86_64),y)
+    SRC_DIRS += hal/x86_64
+endif
+
+ifeq ($(CONFIG_BOOT_LIMINE),y)
+    SRC_DIRS += boot/limine
+    LINKER_SCRIPT := hal/x86_64/linker_limine.lds
+endif
+
+ifeq ($(CONFIG_BOOT_GRUB),y)
+    SRC_DIRS += boot/multiboot2
+	ifeq ($(CONFIG_X86_64),y)
+        EXTRA_S_FILES += hal/x86_64/boot/multiboot2_entry.S
+    endif
+    LINKER_SCRIPT := hal/x86_64/linker_grub.lds
+endif
+
+# ifeq ($(CONFIG_BLK_DEV_NVME),y)
+#     SRC_DIRS += drivers/block
+# endif
+
+C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
+S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S)) $(EXTRA_S_FILES)
+OBJS := $(C_FILES:.c=.o) $(S_FILES:.S=.o)
+KERNEL := plane.elf
+
+.PHONY: all clean menuconfig iso qemu
+
+all: $(KERNEL)
+
+$(KERNEL): $(OBJS) $(LINKER_SCRIPT)
+	@echo "  LD      $@"
+	@$(LD) -T $(LINKER_SCRIPT) $(OBJS) -o $@
+
+%.o: %.c include/generated/autoconf.h
+	@echo "  CC      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+%.o: %.S
+	@echo "  AS      $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+include/generated/autoconf.h: .config
+	@mkdir -p include/generated
+	@genconfig --header-path include/generated/autoconf.h
+
+menuconfig:
+	@MENUCONFIG_STYLE="monochrome" menuconfig
+	@genconfig --header-path include/generated/autoconf.h
+
+# ISO / QEMU
+ISO_NAME := plane.iso
+ISO_DIR  := build/iso_root
+ifeq ($(CONFIG_BOOT_LIMINE),y)
+LIMINE_EXE := tools/limine_bin/limine
+$(LIMINE_EXE):
+	@echo "  HOSTCC  Limine Deploy Tool"
+	@$(MAKE) -s -C tools/limine_bin
+iso: $(KERNEL) $(LIMINE_EXE)
+	@echo "  MKISO   $(ISO_NAME) [Limine]"
+	@rm -rf $(ISO_DIR)
+	@mkdir -p $(ISO_DIR)/boot/limine
+	@mkdir -p $(ISO_DIR)/EFI/BOOT
+	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@cp tools/limine_bin/limine-bios.sys $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/limine-bios-cd.bin $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/limine-uefi-cd.bin $(ISO_DIR)/boot/limine/
+	@cp tools/limine_bin/BOOTX64.EFI $(ISO_DIR)/EFI/BOOT/
+	@cp tools/limine_bin/BOOTIA32.EFI $(ISO_DIR)/EFI/BOOT/
+	@echo "timeout: 3" > $(ISO_DIR)/boot/limine/limine.conf
+	@echo "/PlanE" >> $(ISO_DIR)/boot/limine/limine.conf
+	@echo "    protocol: limine" >> $(ISO_DIR)/boot/limine/limine.conf
+	@echo "    path: boot():/boot/$(KERNEL)" >> $(ISO_DIR)/boot/limine/limine.conf
+	@xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin \
+		-no-emul-boot -boot-load-size 4 -boot-info-table \
+		--efi-boot boot/limine/limine-uefi-cd.bin \
+		-efi-boot-part --efi-boot-image --protective-msdos-label \
+		$(ISO_DIR) -o $(ISO_NAME) > /dev/null 2>&1
+	@$(LIMINE_EXE) bios-install $(ISO_NAME) > /dev/null 2>&1
+endif
+
+ifeq ($(CONFIG_BOOT_GRUB),y)
+iso: $(KERNEL)
+	@echo "  MKISO   $(ISO_NAME) [GRUB/Multiboot2]"
+	@rm -rf $(ISO_DIR)
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(KERNEL) $(ISO_DIR)/boot/
+	@# GEN grub.cfg
+	@echo "set timeout=3" > $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "insmod all_video" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "set gfxmode=auto" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "set gfxpayload=keep" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "menuentry \"PlanE\" {" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    multiboot2 /boot/$(KERNEL)" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    boot" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "}" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@grub-mkrescue -o $(ISO_NAME) $(ISO_DIR) > /dev/null 2>&1
+endif
+
+qemu: iso
+	@echo "  QEMU    $(ISO_NAME)"
+	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d
+
+clean:
+	@echo "  CLEAN"
+	@find kernel klib hal boot drivers -type f -name "*.o" -delete
+	@rm -f $(KERNEL) $(ISO_NAME)
+	@rm -rf $(ISO_DIR)
+
+distclean: clean
+	@echo "  DISTCLEAN"
+	@rm -rf build/ include/generated/* .config .config.old
+	@$(MAKE) -s -C tools/limine_bin clean
