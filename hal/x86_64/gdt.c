@@ -2,14 +2,16 @@
 #include <klib/string.h>
 
 /* 1 Null + 4 Segments + 2 for TSS */
-#define GDT_ENTRIES 7
+#define GDT_NR_DESCRIPTORS 7
+_Static_assert(GDT_NR_DESCRIPTORS <= GDT_MAX_DESCRIPTORS, "gdt descriptors exceed hardware limit!");
 
-static struct gdt_descriptor gdt[GDT_ENTRIES];
+static struct gdt_descriptor gdt[GDT_NR_DESCRIPTORS];
 static struct gdt_ptr gdtr;
 static struct tss64 tss;
 
-extern void hal_gdt_flush(uint64_t gdtr_addr);
-extern void hal_tss_flush(void);
+/* in gdt_flush.S */
+extern void x86_64_gdt_flush(uint64_t gdtr_addr);
+extern void x86_64_tss_flush(void);
 
 static void set_gdt_descriptor(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t flags) {
 	gdt[index].base_low    = (base & 0xffff);
@@ -32,7 +34,7 @@ static void set_tss_descriptor(int index, uintptr_t base, uint32_t limit) {
 	tss_desc->reserved     = 0;
 }
 
-void hal_gdt_init(void) {
+void x86_64_gdt_init(void) {
 	/* set gdtr */
 	gdtr.limit = sizeof(gdt) - 1;
 	gdtr.base  = (uint64_t)&gdt;
@@ -72,10 +74,10 @@ void hal_gdt_init(void) {
 	set_tss_descriptor(5, (uintptr_t)&tss, sizeof(tss) - 1);
 
 	/* do flush */
-	hal_gdt_flush((uint64_t)&gdtr);
-	hal_tss_flush();
+	x86_64_gdt_flush((uint64_t)&gdtr);
+	x86_64_tss_flush();
 }
 
-void hal_tss_set_kernel_stack(uintptr_t stack) {
+void x86_64_tss_set_kernel_stack(uintptr_t stack) {
 	tss.rsp0 = stack;
 }

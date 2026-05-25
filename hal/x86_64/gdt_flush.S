@@ -1,15 +1,15 @@
 #include <hal/x86_64/gdt.h>
 
-.global hal_gdt_flush
-.global hal_tss_flush
+.global x86_64_gdt_flush
+.global x86_64_tss_flush
 
 .section .text
 
 /*
- * void hal_gdt_flush(uint64_t gdtr_addr);
+ * void x86_64_gdt_flush(uint64_t gdtr_addr);
  * call rule: %rdi = gdtr_addr
  */
-hal_gdt_flush:
+x86_64_gdt_flush:
     /* load new gdt */
     lgdt (%rdi)
 
@@ -28,9 +28,9 @@ hal_gdt_flush:
     lretq
 
 /*
- * void hal_tss_flush(void);
+ * void x86_64_tss_flush(void);
  */
-hal_tss_flush:
+x86_64_tss_flush:
     mov $SELECTOR_TSS, %ax
     ltr %ax
     ret

@@ -36,6 +36,7 @@
 #define PTR_ALIGN(p, a)                 ((typeof(p))ALIGN((unsigned long)(p), (a)))
 #define PTR_ALIGN_DOWN(p, a)            ((typeof(p))ALIGN_DOWN((unsigned long)(p), (a)))
 
+/* in printk.c */
 extern void printk(const char *fmt, ...);
 extern void panic(const char *fmt, ...) __noreturn;
 

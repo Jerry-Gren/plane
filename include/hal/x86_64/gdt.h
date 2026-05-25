@@ -1,5 +1,7 @@
-#ifndef HAL_X86_64_GDT_H
-#define HAL_X86_64_GDT_H
+#ifndef HAL_ARCH_GDT_H
+#define HAL_ARCH_GDT_H
+
+#define GDT_MAX_DESCRIPTORS 8192
 
 #define SELECTOR_KERNEL_CS 0x08  // 0x08 | 0
 #define SELECTOR_KERNEL_DS 0x10  // 0x10 | 0
@@ -85,10 +87,10 @@ struct gdt_ptr {
     uint64_t base;
 } __attribute__((packed));
 
-void hal_gdt_init(void);
+void x86_64_gdt_init(void);
 
-void hal_tss_set_kernel_stack(uintptr_t stack);
+void x86_64_tss_set_kernel_stack(uintptr_t stack);
 
 #endif /* __ASSEMBLER__ */
 
-#endif /* HAL_X86_64_GDT_H */
+#endif /* HAL_ARCH_GDT_H */

@@ -129,6 +129,17 @@ ISR_ERRCODE   30    /* #SX: Security Exception
                      */
 ISR_NOERRCODE 31    /* Reserved */
 
+/*
+ * for vector 32-255
+ * manually push error code 0
+ * and a fake vector number 256
+ */
+.global isr_default
+isr_default:
+    pushq $0            /* a dummy error code */
+    pushq $256
+    jmp isr_common_stub
+
 /* 
  * common stub
  * stack status now: [int_no][error_code][hardware-handled regs] <- stack bottom
@@ -176,5 +187,3 @@ isr_common_stub:
 
     /* resume */
     iretq
-
-/* NOTE THAT VECTOR 32-255 ARE NOT HANDLED */

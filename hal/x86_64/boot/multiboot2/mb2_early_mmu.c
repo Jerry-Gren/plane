@@ -6,6 +6,7 @@
 
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
 
+/* in mb2_entry_entry.S */
 extern uint64_t early_pml4[];
 extern uint64_t early_pd_kernel[];
 extern uint64_t early_pd_fb[];
