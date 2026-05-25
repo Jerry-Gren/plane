@@ -47,5 +47,5 @@ void kmain(struct boot_info *info) {
 		}
 	}
 
-	pr_info("[SUCCESS] Kernel initialization completed. System halted.\n");
+	pr_info("Kernel initialization completed. System halted.\n");
 }
