@@ -17,9 +17,9 @@ void hal_mmu_flush_tlb_all(void) {
 }
 
 void *hal_mmu_phys_to_virt(uintptr_t phys_addr) {
-    return (void *)(phys_addr + KERNEL_VMA_BASE);
+	return (void *)(phys_addr + KERNEL_VMA_BASE);
 }
 
 uintptr_t hal_mmu_virt_to_phys(void *virt_addr) {
-    return (uintptr_t)virt_addr - KERNEL_VMA_BASE;
+	return (uintptr_t)virt_addr - KERNEL_VMA_BASE;
 }

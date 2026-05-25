@@ -11,31 +11,31 @@ extern uint64_t early_pd_kernel[];
 extern uint64_t early_pd_fb[];
 
 void *hal_mmu_map_early_framebuffer(uint64_t phys_addr, uint64_t size) {
-    uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
-    uint64_t page_offset = phys_addr - phys_base;
+	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
+	uint64_t page_offset = phys_addr - phys_base;
 
-    uint64_t fb_aligned_size = ALIGN(size + page_offset, ARCH_LARGE_PAGE_SIZE);
-    uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
+	uint64_t fb_aligned_size = ALIGN(size + page_offset, ARCH_LARGE_PAGE_SIZE);
+	uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
 
-    uint64_t *target_pd = early_pd_fb;
+	uint64_t *target_pd = early_pd_fb;
 #if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(FRAMEBUFFER_VMA_BASE)
-    target_pd = early_pd_kernel;
+	target_pd = early_pd_kernel;
 #endif
 
-    uint64_t start_idx = PD_INDEX(FRAMEBUFFER_VMA_BASE);
+	uint64_t start_idx = PD_INDEX(FRAMEBUFFER_VMA_BASE);
 
-    for (uint64_t i = 0; i < pages_needed; i++) {
-        uint64_t offset = i * ARCH_LARGE_PAGE_SIZE;
-        uint64_t current_vaddr = FRAMEBUFFER_VMA_BASE + offset;
-        
-        target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
-        hal_mmu_invalidate_tlb(current_vaddr);
-    }
+	for (uint64_t i = 0; i < pages_needed; i++) {
+		uint64_t offset = i * ARCH_LARGE_PAGE_SIZE;
+		uint64_t current_vaddr = FRAMEBUFFER_VMA_BASE + offset;
+		
+		target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
+		hal_mmu_invalidate_tlb(current_vaddr);
+	}
 
-    return (void *)(FRAMEBUFFER_VMA_BASE + page_offset);
+	return (void *)(FRAMEBUFFER_VMA_BASE + page_offset);
 }
 
 void hal_mmu_remove_identity_mapping(void) {
-    early_pml4[0] = 0;
-    hal_mmu_flush_tlb_all();
+	early_pml4[0] = 0;
+	hal_mmu_flush_tlb_all();
 }

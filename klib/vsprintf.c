@@ -15,51 +15,51 @@ static const char *upper_digits = "0123456789ABCDEF";
 static int print_number(char **str_ptr, size_t *size_ptr, size_t written, 
                         uint64_t num, int base, bool is_signed, 
                         int pad_width, char pad_char, bool use_upper) {
-    char buf[64];
-    int pos = 0;
-    bool is_negative = false;
-    const char *digits = use_upper ? upper_digits : lower_digits;
+	char buf[64];
+	int pos = 0;
+	bool is_negative = false;
+	const char *digits = use_upper ? upper_digits : lower_digits;
 
-    char *str = *str_ptr;
-    size_t size = *size_ptr;
-    size_t start_written = written;
+	char *str = *str_ptr;
+	size_t size = *size_ptr;
+	size_t start_written = written;
 
-    /* sign */
-    if (is_signed && (int64_t)num < 0) {
-        is_negative = true;
-        num = (uint64_t)(-(int64_t)num);
-    }
+	/* sign */
+	if (is_signed && (int64_t)num < 0) {
+		is_negative = true;
+		num = (uint64_t)(-(int64_t)num);
+	}
 
-    /* digit to string */
-    do {
-        buf[pos++] = digits[num % base];
-        num /= base;
-    } while (num > 0);
+	/* digit to string */
+	do {
+		buf[pos++] = digits[num % base];
+		num /= base;
+	} while (num > 0);
 
-    /* sign '-' takes up 1 pad_width */
-    if (is_negative) {
-        pad_width--;
-    }
+	/* sign '-' takes up 1 pad_width */
+	if (is_negative) {
+		pad_width--;
+	}
 
-    /* pad leading characters */
-    while (pos < pad_width) {
-        APPEND_CHAR(pad_char);
-        pad_width--;
-    }
+	/* pad leading characters */
+	while (pos < pad_width) {
+		APPEND_CHAR(pad_char);
+		pad_width--;
+	}
 
-    /* the '-' */
-    if (is_negative) {
-        APPEND_CHAR('-');
-    }
+	/* the '-' */
+	if (is_negative) {
+		APPEND_CHAR('-');
+	}
 
-    /* output numbers in reverse order */
-    while (pos > 0) {
-        APPEND_CHAR(buf[--pos]);
-    }
+	/* output numbers in reverse order */
+	while (pos > 0) {
+		APPEND_CHAR(buf[--pos]);
+	}
 
-    *str_ptr = str;
-    *size_ptr = size;
-    return written - start_written;
+	*str_ptr = str;
+	*size_ptr = size;
+	return written - start_written;
 }
 
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {

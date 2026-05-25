@@ -6,34 +6,10 @@
 
 void kmain(struct boot_info *info) {
 	hal_serial_init();
-	printk("PlanE Booting...\n");
-	printk("arch: x86_64\n");
-
-	if (info->mem.entry_count > 0) {
-		for (uint64_t i = 0; i < info->mem.entry_count; i++) {
-			printk("[INFO] Mem Region %lld: Base=%p, Size=%llu KB, Type=%u\n",
-			i+1,
-			info->mem.map[i].base, 
-			info->mem.map[i].length / 1024, 
-			info->mem.map[i].type);
-		}
-	}
+	pr_info("PlanE Booting...\n");
 
 	plane_sanitize_memory_map(&info->mem);
-	printk("[INFO] Memory map sanitized. Valid entries: %llu\n", info->mem.entry_count);
-
-	if (info->mem.entry_count > 0) {
-		for (uint64_t i = 0; i < info->mem.entry_count; i++) {
-			printk("[INFO] Mem Region %lld: Base=%p, Size=%llu KB, Type=%u\n",
-			i+1,
-			info->mem.map[i].base, 
-			info->mem.map[i].length / 1024, 
-			info->mem.map[i].type);
-		}
-	}
-	printk("[INFO] Framebuffer initialized at %p, %ux%u, %u bpp\n", 
-		info->video.framebuffer_addr,
-		info->video.width, info->video.height, info->video.bpp);
+	
 	/* 
 	 * TODO: 
 	 * pmm_init(&info->mem); 

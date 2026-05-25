@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <klib/string.h>
+
 // GCC and Clang reserve the right to generate calls to the following
 // 4 functions even if they are not directly called.
 // Implement them as the C specification mandates.
