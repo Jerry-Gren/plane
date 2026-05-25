@@ -3,10 +3,11 @@
 #include <plane/boot_info.h>
 #include <plane/kernel.h>
 #include <hal/serial.h>
+#include <hal/hal.h>
 
 void kmain(struct boot_info *info) {
 	hal_serial_init();
-	pr_info("PlanE Booting...\n");
+	hal_arch_early_init();
 
 	plane_sanitize_memory_map(&info->mem);
 	
