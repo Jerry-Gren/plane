@@ -2,6 +2,7 @@
 
 #include <klib/stdio.h>
 #include <hal/serial.h>
+#include <hal/cpu.h>
 
 #define PRINTK_BUF_SIZE 1024
 
@@ -23,18 +24,13 @@ void panic(const char *fmt, ...) {
 	char buf[PRINTK_BUF_SIZE];
 	va_list args;
 	
-	printk("\n==================================================\n");
-	printk("KERNEL PANIC!\n");
+	printk("[PANIC] ");
 	
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	
-	printk("Reason: %s\n", buf);
-	printk("==================================================\n");
+	printk("%s\n", buf);
 	
-	/* TODO: replace with hal_cpu_hang */
-	for (;;) {
-		__asm__ volatile ("cli; hlt");
-	}
+	hal_cpu_hang();
 }
