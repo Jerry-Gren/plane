@@ -38,25 +38,35 @@ static const char *exception_names[32] = {
 
 void x86_64_exception_handler(struct interrupt_frame *frame) {
 	if (frame->int_no >= 32) {
-		pr_warn("Unhandled interrupt/irq triggered and ignored.\n");
+		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
 		return;
 	}
 
-	printk(" Error Code : 0x%016llx\n", frame->error_code);
-	printk("--------------------------------------------------\n");
-	printk(" RIP: 0x%016llx   CS : 0x%04llx   RFLAGS: 0x%016llx\n", 
+	printk(" error code : 0x%016llx\n", frame->error_code);
+	printk(" rip: 0x%016llx   cs : 0x%04llx   rflags: 0x%016llx\n", 
 		frame->rip, frame->cs, frame->rflags);
-	printk(" RSP: 0x%016llx   SS : 0x%04llx\n", 
+	printk(" rsp: 0x%016llx   ss : 0x%04llx\n", 
 		frame->rsp, frame->ss);
-	printk("--------------------------------------------------\n");
-	printk(" RAX: 0x%016llx   RBX: 0x%016llx\n", frame->rax, frame->rbx);
-	printk(" RCX: 0x%016llx   RDX: 0x%016llx\n", frame->rcx, frame->rdx);
-	printk(" RSI: 0x%016llx   RDI: 0x%016llx\n", frame->rsi, frame->rdi);
-	printk(" RBP: 0x%016llx   R8 : 0x%016llx\n", frame->rbp, frame->r8);
-	printk(" R9 : 0x%016llx   R10: 0x%016llx\n", frame->r9,  frame->r10);
-	printk(" R11: 0x%016llx   R12: 0x%016llx\n", frame->r11, frame->r12);
-	printk(" R13: 0x%016llx   R14: 0x%016llx\n", frame->r13, frame->r14);
-	printk(" R15: 0x%016llx\n", frame->r15);
+	printk(" rax: 0x%016llx   rbx: 0x%016llx\n", frame->rax, frame->rbx);
+	printk(" rcx: 0x%016llx   rdx: 0x%016llx\n", frame->rcx, frame->rdx);
+	printk(" rsi: 0x%016llx   rdi: 0x%016llx\n", frame->rsi, frame->rdi);
+	printk(" rbp: 0x%016llx   r8 : 0x%016llx\n", frame->rbp, frame->r8);
+	printk(" r9 : 0x%016llx   r10: 0x%016llx\n", frame->r9,  frame->r10);
+	printk(" r11: 0x%016llx   r12: 0x%016llx\n", frame->r11, frame->r12);
+	printk(" r13: 0x%016llx   r14: 0x%016llx\n", frame->r13, frame->r14);
+	printk(" r15: 0x%016llx\n", frame->r15);
+
+	/* TODO: implemement page fault handler and print something before pc */
+	printk("Code: ");
+	uint8_t *pc = (uint8_t *)frame->rip;
+	for (int i = 0; i < 16; i++) {
+		if (i == 0) {
+			printk("<%02x> ", pc[i]);
+		} else {
+			printk("%02x ", pc[i]);
+		}
+	}
+	printk("\n");
 
 	panic("Unhandled exception: %s", exception_names[frame->int_no]);
 }
