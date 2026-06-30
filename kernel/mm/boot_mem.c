@@ -1,5 +1,5 @@
-#include <plane/boot_info.h>
 #include <plane/kernel.h>
+#include <plane/memmap.h>
 #include <plane/mm.h>
 
 void plane_sanitize_memory_map(struct plane_mem_info *mem) {

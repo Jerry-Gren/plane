@@ -1,7 +1,7 @@
 #define ASM_FILE           1
 #include <multiboot2.h>
 
-#include <plane/mm.h>
+#include <hal/x86_64/arch_mmu.h>
 
 /* Macros */
 #define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC

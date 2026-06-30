@@ -1,6 +1,6 @@
 #include <hal/mmu.h>
 
-#include <plane/mm.h>
+#include <hal/x86_64/arch_mmu.h>
 
 void hal_mmu_invalidate_tlb(uintptr_t vaddr) {
 	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");

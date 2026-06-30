@@ -1,11 +1,7 @@
 #ifndef PLANE_MM_H
 #define PLANE_MM_H
 
-#if defined(__x86_64__)
-	#include <hal/x86_64/arch_mmu.h>
-#else
-	#error "Unsupported architecture for Memory Management!"
-#endif
+#include <hal/page.h>
 
 /* must have */
 #ifndef ARCH_PAGE_SIZE

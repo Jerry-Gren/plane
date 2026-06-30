@@ -7,7 +7,6 @@
 
 #include <plane/boot_info.h>
 #include <plane/kernel.h>
-#include <plane/mm.h>
 
 /* in main.c */
 extern void kmain(struct boot_info *info);

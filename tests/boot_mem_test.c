@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <plane/boot_info.h>
+#include <plane/memmap.h>
 
 struct test_case {
 	const char *name;

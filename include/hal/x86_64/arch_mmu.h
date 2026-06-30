@@ -1,6 +1,8 @@
 #ifndef HAL_ARCH_MMU_H
 #define HAL_ARCH_MMU_H
 
+#include <hal/x86_64/page.h>
+
 /* Page flags */
 #define PAGE_PRESENT         (1 << 0)
 #define PAGE_RW              (1 << 1)
@@ -13,29 +15,10 @@
 #define PD_INDEX(vaddr)   (((vaddr) >> 21) & 0x1ff)
 #define PT_INDEX(vaddr)   (((vaddr) >> 12) & 0x1ff)
 
-/* X86_64 specific page sizes */
 #ifdef __ASSEMBLER__
-	#define ARCH_PAGE_SIZE         0x1000        /* 4KB base page */
-	#define ARCH_PAGE_SHIFT        12
-	
-	#define ARCH_LARGE_PAGE_SIZE   0x200000      /* 2MB large page (pd) */
-	#define ARCH_LARGE_PAGE_SHIFT  21
-	
-	#define ARCH_HUGE_PAGE_SIZE    0x40000000    /* 1GB huge page (pdpt) */
-	#define ARCH_HUGE_PAGE_SHIFT   30
-
 	#define KERNEL_VMA_BASE        0xffffffff80000000
 	#define FRAMEBUFFER_VMA_BASE   0xffffffffc0000000
 #else
-	#define ARCH_PAGE_SIZE         0x1000ull
-	#define ARCH_PAGE_SHIFT        12ull
-	
-	#define ARCH_LARGE_PAGE_SIZE   0x200000ull
-	#define ARCH_LARGE_PAGE_SHIFT  21ULL
-	
-	#define ARCH_HUGE_PAGE_SIZE    0x40000000ull
-	#define ARCH_HUGE_PAGE_SHIFT   30ull
-
 	#define KERNEL_VMA_BASE        0xffffffff80000000ull
 	#define FRAMEBUFFER_VMA_BASE   0xffffffffc0000000ull
 #endif
