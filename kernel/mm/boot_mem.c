@@ -106,6 +106,7 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 			 * step 3 (save tail)     :                 [------] -> pushed back to i--
 			 */
 			uint64_t old_prev_end = prev_end;
+			uint32_t old_prev_type = prev->type;
 			prev->length = curr.base - prev->base;
 
 			if (prev->length == 0) {
@@ -123,7 +124,7 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 						/* put the tail back, deduct i to reprocess it */
 						mem->map[i].base = tail_base;
 						mem->map[i].length = tail_len;
-						mem->map[i].type = prev->type;
+						mem->map[i].type = old_prev_type;
 						i--; 
 					}
 				}

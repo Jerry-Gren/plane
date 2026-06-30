@@ -100,8 +100,8 @@ _start:
     mov %ebx, mb2_info /* MB2 Info Structure Address */
 
     /* clear .boot.bss */
-    mov $__boot_bss_start, %edi
-    mov $__boot_bss_end, %ecx
+    mov $__kernel_boot_bss_start, %edi
+    mov $__kernel_boot_bss_end, %ecx
     sub %edi, %ecx
     shr $2, %ecx
     xor %eax, %eax
@@ -174,7 +174,7 @@ _start:
     mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
     mov %ebx, %eax
     add (%ebx), %eax
-    mov $(__bss_end - KERNEL_VMA_BASE), %edx
+    mov $(__kernel_bss_end - KERNEL_VMA_BASE), %edx
     cmp %edx, %eax
     jae .Lmax_found
     mov %edx, %eax
@@ -261,8 +261,8 @@ realm64:
     and $-16, %rsp
 
     /* clear .bss */
-    movabs $__bss_start, %rdi
-    movabs $__bss_end, %rcx
+    movabs $__kernel_bss_start, %rdi
+    movabs $__kernel_bss_end, %rcx
     sub %rdi, %rcx
     xor %rax, %rax
     rep stosb             /* ensure every byte is cleared */

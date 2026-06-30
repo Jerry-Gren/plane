@@ -4,7 +4,9 @@
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
+#ifndef __always_inline
 #define __always_inline inline __attribute__((always_inline))
+#endif
 #define __noinline      __attribute__((noinline))
 #define __noreturn      __attribute__((noreturn))
 #define __maybe_unused  __attribute__((unused))

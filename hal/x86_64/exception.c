@@ -1,5 +1,10 @@
 #include <hal/x86_64/exception.h>
+#include <hal/x86_64/linkage.h>
 #include <plane/kernel.h>
+
+#define X86_EXCEPTION_BP 3
+#define X86_EXCEPTION_PF 14
+#define CODE_DUMP_BYTES 16
 
 static const char *exception_names[32] = {
     "Divide Error (#DE)",                       /* 0 */
@@ -36,6 +41,45 @@ static const char *exception_names[32] = {
     "Reserved"                                  /* 31 */
 };
 
+static uint64_t read_cr2(void) {
+	uint64_t cr2;
+
+	__asm__ volatile ("mov %%cr2, %0" : "=r" (cr2));
+	return cr2;
+}
+
+static int range_in_kernel_text(uint64_t addr, uint64_t size) {
+	uint64_t text_start = (uint64_t)__kernel_text_start;
+	uint64_t text_end = (uint64_t)__kernel_text_end;
+
+	return addr >= text_start && addr <= text_end && size <= text_end - addr;
+}
+
+static void dump_code(uint64_t rip, uint64_t int_no) {
+	uint64_t code_addr = rip;
+
+	if (int_no == X86_EXCEPTION_BP) {
+		code_addr--;
+	}
+	uint64_t marker_addr = code_addr;
+
+	if (!range_in_kernel_text(code_addr, CODE_DUMP_BYTES)) {
+		printk("Code: unavailable, rip is outside kernel .text\n");
+		return;
+	}
+
+	printk("Code: ");
+	uint8_t *pc = (uint8_t *)code_addr;
+	for (int i = 0; i < CODE_DUMP_BYTES; i++) {
+		if ((uint64_t)&pc[i] == marker_addr) {
+			printk("<%02x> ", pc[i]);
+		} else {
+			printk("%02x ", pc[i]);
+		}
+	}
+	printk("\n");
+}
+
 void x86_64_exception_handler(struct interrupt_frame *frame) {
 	if (frame->int_no >= 32) {
 		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
@@ -56,17 +100,11 @@ void x86_64_exception_handler(struct interrupt_frame *frame) {
 	printk(" r13: 0x%016llx   r14: 0x%016llx\n", frame->r13, frame->r14);
 	printk(" r15: 0x%016llx\n", frame->r15);
 
-	/* TODO: implemement page fault handler and print something before pc */
-	printk("Code: ");
-	uint8_t *pc = (uint8_t *)frame->rip;
-	for (int i = 0; i < 16; i++) {
-		if (i == 0) {
-			printk("<%02x> ", pc[i]);
-		} else {
-			printk("%02x ", pc[i]);
-		}
+	if (frame->int_no == X86_EXCEPTION_PF) {
+		printk(" cr2: 0x%016llx\n", read_cr2());
 	}
-	printk("\n");
+
+	dump_code(frame->rip, frame->int_no);
 
 	panic("Unhandled exception: %s", exception_names[frame->int_no]);
 }

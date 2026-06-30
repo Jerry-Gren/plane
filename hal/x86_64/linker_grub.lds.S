@@ -35,9 +35,9 @@ SECTIONS {
 
     . = ALIGN(4K);
     .boot.bss : {
-        __boot_bss_start = .;
+        __kernel_boot_bss_start = .;
         *(.boot.bss)
-        __boot_bss_end = .;
+        __kernel_boot_bss_end = .;
     } :boot_data
 
     /* Virtual address */
@@ -45,7 +45,9 @@ SECTIONS {
 
     . = ALIGN(4K);
     .text : AT(ADDR(.text) - KERNEL_VMA_BASE) {
+        __kernel_text_start = .;
         *(.text .text.*)
+        __kernel_text_end = .;
     } :text
 
     . = ALIGN(4K);
@@ -60,10 +62,10 @@ SECTIONS {
 
     . = ALIGN(4K);
     .bss : AT(ADDR(.bss) - KERNEL_VMA_BASE) {
-        __bss_start = .;
+        __kernel_bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
-        __bss_end = .;
+        __kernel_bss_end = .;
     } :data
 
     /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */

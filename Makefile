@@ -2,6 +2,7 @@ ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 CC := x86_64-elf-gcc
 LD := x86_64-elf-ld
+HOSTCC ?= gcc
 
 override CFLAGS += \
 	-I$(ROOT_DIR)/include \
@@ -21,6 +22,11 @@ override CFLAGS += \
 	-mno-sse \
 	-mno-sse2 \
 	-mno-red-zone
+
+override HOSTCFLAGS += \
+	-I$(ROOT_DIR)/include \
+	-std=gnu11 \
+	-Wall -Wextra -Werror
 
 -include .config
 
@@ -52,8 +58,15 @@ ALL_S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S))
 S_FILES := $(filter-out %.lds.S, $(ALL_S_FILES))
 OBJS := $(C_FILES:.c=.o) $(S_FILES:.S=.o)
 KERNEL := plane.elf
+TEST_SRCS := $(wildcard tests/*_test.c)
+TEST_MKS := $(wildcard tests/*_test.mk)
+TEST_BINS := $(patsubst tests/%.c,build/tests/%,$(TEST_SRCS))
 
-.PHONY: all clean menuconfig iso qemu
+-include $(TEST_MKS)
+
+.SECONDEXPANSION:
+
+.PHONY: all clean menuconfig iso qemu check unit-check
 
 all: $(KERNEL)
 
@@ -80,6 +93,19 @@ include/generated/autoconf.h: .config
 menuconfig:
 	@MENUCONFIG_STYLE="monochrome" menuconfig
 	@genconfig --header-path include/generated/autoconf.h
+
+check: unit-check
+
+unit-check: $(TEST_BINS)
+	@for test in $(TEST_BINS); do \
+		echo "  TEST    $$test"; \
+		$$test || exit $$?; \
+	done
+
+build/tests/%_test: tests/%_test.c include/plane/*.h include/hal/*.h $$($$*_test_DEPS)
+	@echo "  HOSTCC  $@"
+	@mkdir -p $(dir $@)
+	@$(HOSTCC) $(HOSTCFLAGS) $< $($*_test_DEPS) -o $@
 
 # ISO / QEMU
 ISO_NAME := plane.iso
@@ -139,7 +165,7 @@ clean:
 	@find kernel klib hal boot drivers -type f -name "*.o" -delete
 	@find hal -type f -name "*.lds" -delete
 	@rm -f $(KERNEL) $(ISO_NAME)
-	@rm -rf $(ISO_DIR)
+	@rm -rf $(ISO_DIR) build/tests
 
 distclean: clean
 	@echo "  DISTCLEAN"

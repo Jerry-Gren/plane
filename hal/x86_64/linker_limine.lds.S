@@ -36,7 +36,9 @@ SECTIONS
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .text : {
+        __kernel_text_start = .;
         *(.text .text.*)
+        __kernel_text_end = .;
     } :text
 
     /* Move to the next memory page for .rodata */
