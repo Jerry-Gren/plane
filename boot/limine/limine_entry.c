@@ -6,6 +6,7 @@
 #include <hal/cpu.h>
 
 #include <plane/boot_info.h>
+#include <plane/entry.h>
 
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -39,9 +40,6 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 
 __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
-
-/* in main.c */
-extern void kmain(struct boot_info *info);
 
 static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	if (framebuffer_request.response == NULL ||

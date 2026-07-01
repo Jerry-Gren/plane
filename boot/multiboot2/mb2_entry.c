@@ -6,10 +6,8 @@
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/boot_info.h>
+#include <plane/entry.h>
 #include <plane/kernel.h>
-
-/* in main.c */
-extern void kmain(struct boot_info *info);
 
 /* This struct is not present in official multiboot2.h */
 struct multiboot_info_base {

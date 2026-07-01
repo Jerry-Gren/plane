@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <plane/boot_info.h>
 #include <plane/early_video.h>
+#include <plane/entry.h>
 #include <plane/kernel.h>
 #include <hal/cpu.h>
 #include <hal/serial.h>
