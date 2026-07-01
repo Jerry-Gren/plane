@@ -17,6 +17,7 @@ struct multiboot_info_base {
     uint32_t reserved;
 };
 
+/* in linker_grub.lds.S */
 extern char __kernel_phys_start[];
 extern char __kernel_phys_end[];
 
@@ -64,7 +65,7 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	 */
 
 	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
-	
+
 	video->width  = fb_common->framebuffer_width;
 	video->height = fb_common->framebuffer_height;
 	video->pitch  = fb_common->framebuffer_pitch;
