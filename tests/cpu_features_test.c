@@ -291,6 +291,38 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 	return passed;
 }
 
+static int test_vendor_signature_display_model_rules(void) {
+	struct x86_64_cpuid_raw raw = {0};
+	struct x86_64_cpu_features features;
+	int passed = 0;
+
+	raw.leaf0 = vendor_leaf(1, "GenuineIntel");
+	raw.leaf1 = leaf(0x000a0631, 0, 0, 0);
+	x86_64_cpu_features_decode(&features, &raw);
+	passed += expect_u32("intel family 6 display model",
+			      features.display_model, 0xa3);
+
+	raw.leaf0 = vendor_leaf(1, "AuthenticAMD");
+	raw.leaf1 = leaf(0x000a0631, 0, 0, 0);
+	x86_64_cpu_features_decode(&features, &raw);
+	passed += expect_u32("amd family 6 display model",
+			      features.display_model, 0x03);
+
+	raw.leaf0 = vendor_leaf(1, "AuthenticAMD");
+	raw.leaf1 = leaf(0x00800f82, 0, 0, 0);
+	x86_64_cpu_features_decode(&features, &raw);
+	passed += expect_u32("amd family f display model",
+			      features.display_model, 0x08);
+
+	raw.leaf0 = vendor_leaf(1, "TCGTCGTCGTCG");
+	raw.leaf1 = leaf(0x000a0631, 0, 0, 0);
+	x86_64_cpu_features_decode(&features, &raw);
+	passed += expect_u32("unknown family 6 display model",
+			      features.display_model, 0x03);
+
+	return passed;
+}
+
 static int test_unknown_vendor_keeps_common_decode(void) {
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
@@ -384,6 +416,9 @@ int main(void) {
 
 	passed += test_decode_amd_like_extended_features_and_brand();
 	total += 14;
+
+	passed += test_vendor_signature_display_model_rules();
+	total += 4;
 
 	passed += test_unknown_vendor_keeps_common_decode();
 	total += 7;

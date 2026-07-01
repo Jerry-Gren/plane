@@ -52,6 +52,8 @@ enum x86_64_cpu_feature {
 	X86_64_CPU_FEATURE_AVX,
 	X86_64_CPU_FEATURE_F16C,
 	X86_64_CPU_FEATURE_RDRAND,
+
+	/* Hypervisor-present environment hint, not a hardware capability. */
 	X86_64_CPU_FEATURE_HYPERVISOR,
 
 	/* CPUID.07H.00H structured extended common feature flags */

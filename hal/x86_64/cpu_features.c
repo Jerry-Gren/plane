@@ -137,6 +137,15 @@ static void set_brand_string(char brand[X86_64_CPU_BRAND_LENGTH + 1],
 	brand[X86_64_CPU_BRAND_LENGTH] = '\0';
 }
 
+static bool should_extend_display_model(enum x86_64_cpu_vendor vendor_id,
+					uint8_t base_family) {
+	if (vendor_id == X86_64_CPU_VENDOR_INTEL) {
+		return base_family == 0x6 || base_family == 0xf;
+	}
+
+	return base_family == 0xf;
+}
+
 static void decode_signature(struct x86_64_cpu_features *features,
 			     const struct x86_64_cpuid_leaf *leaf1) {
 	uint32_t signature = leaf1->eax;
@@ -154,7 +163,8 @@ static void decode_signature(struct x86_64_cpu_features *features,
 	}
 
 	features->display_model = features->base_model;
-	if (features->base_family == 0x6 || features->base_family == 0xf) {
+	if (should_extend_display_model(features->vendor_id,
+					features->base_family)) {
 		features->display_model |= (uint32_t)features->extended_model << 4;
 	}
 }
@@ -234,6 +244,11 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 		(leaf1->ecx & CPUID_1_ECX_F16C) != 0;
 	features->has[X86_64_CPU_FEATURE_RDRAND] =
 		(leaf1->ecx & CPUID_1_ECX_RDRAND) != 0;
+
+	/*
+	 * Intel reserves ECX[31] for software emulation; AMD reserves it for
+	 * hypervisor guest status. Treat it as an environment hint.
+	 */
 	features->has[X86_64_CPU_FEATURE_HYPERVISOR] =
 		(leaf1->ecx & CPUID_1_ECX_HYPERVISOR) != 0;
 }
