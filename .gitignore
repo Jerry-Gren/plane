@@ -4,6 +4,7 @@ build/
 include/generated/
 
 *.o
+*.d
 *.elf
 *.iso
 *.lds

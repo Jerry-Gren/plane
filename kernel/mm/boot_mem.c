@@ -13,6 +13,11 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 	return true;
 }
 
+static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end) {
+	*end = base + length;
+	return *end >= base;
+}
+
 bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
 	if (mem->entry_count == 0) return true;
 
@@ -27,12 +32,17 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
 
 		if (r->length == 0) continue;
 
+		uint64_t end;
+		if (!checked_region_end(r->base, r->length, &end)) {
+			return false;
+		}
+
 		if (r->type == PLANE_MEM_USABLE) {
 			uint64_t start = ALIGN(r->base, PAGE_SIZE);
-			uint64_t end   = ALIGN_DOWN(r->base + r->length, PAGE_SIZE);
-			if (start >= end) continue;
+			uint64_t aligned_end = ALIGN_DOWN(end, PAGE_SIZE);
+			if (start >= aligned_end) continue;
 			r->base = start;
-			r->length = end - start;
+			r->length = aligned_end - start;
 		}
 
 		mem->map[valid_count++] = *r;
@@ -70,8 +80,12 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
 		}
 
 		struct plane_mem_region *prev = &clean_map[clean_count - 1];
-		uint64_t prev_end = prev->base + prev->length;
-		uint64_t curr_end = curr.base + curr.length;
+		uint64_t prev_end;
+		uint64_t curr_end;
+		if (!checked_region_end(prev->base, prev->length, &prev_end) ||
+		    !checked_region_end(curr.base, curr.length, &curr_end)) {
+			return false;
+		}
 
 		/*
 		 * case 1: completely disjoint
@@ -201,8 +215,8 @@ bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 		return false;
 	}
 
-	uint64_t end = base + length;
-	if (end < base) {
+	uint64_t end;
+	if (!checked_region_end(base, length, &end)) {
 		return false;
 	}
 

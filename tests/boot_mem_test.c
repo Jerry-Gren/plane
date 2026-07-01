@@ -172,6 +172,48 @@ static int run_sanitize_too_many_regions_failure_case(void) {
 	return 0;
 }
 
+static int run_sanitize_overflow_failure_case(void) {
+	struct plane_mem_info actual = {0};
+
+	actual.entry_count = 1;
+	actual.map[0].base = UINT64_MAX - 0x1000;
+	actual.map[0].length = 0x2000;
+	actual.map[0].type = PLANE_MEM_USABLE;
+
+	int ret = plane_sanitize_memory_map(&actual);
+	if (ret == 0) {
+		return 1;
+	}
+
+	printf("FAIL: sanitize rejects overflowing region\n");
+	printf("expected ret=0 actual ret=%d\n", ret);
+	dump_map("actual", &actual);
+	return 0;
+}
+
+static int run_reserve_overflow_failure_case(void) {
+	struct plane_mem_info actual = {0};
+	struct plane_mem_info expected = {0};
+
+	actual.entry_count = 1;
+	actual.map[0].base = 0x1000;
+	actual.map[0].length = 0x2000;
+	actual.map[0].type = PLANE_MEM_USABLE;
+	expected = actual;
+
+	int ret = plane_memmap_reserve(&actual, UINT64_MAX - 0x1000, 0x2000,
+				       PLANE_MEM_RESERVED);
+	if (ret == 0 && maps_equal(&actual, &expected)) {
+		return 1;
+	}
+
+	printf("FAIL: overflowing reserve fails without modifying map\n");
+	printf("expected ret=0 actual ret=%d\n", ret);
+	dump_map("expected", &expected);
+	dump_map("actual", &actual);
+	return 0;
+}
+
 int main(void) {
 	const struct test_case cases[] = {
 		{
@@ -384,7 +426,7 @@ int main(void) {
 	int passed = 0;
 	int sanitize_count = (int)(sizeof(cases) / sizeof(cases[0]));
 	int reserve_count = (int)(sizeof(reserve_cases) / sizeof(reserve_cases[0]));
-	int total = sanitize_count + reserve_count + 2;
+	int total = sanitize_count + reserve_count + 4;
 
 	for (int i = 0; i < sanitize_count; i++) {
 		passed += run_case(&cases[i]);
@@ -394,6 +436,8 @@ int main(void) {
 	}
 	passed += run_full_map_reserve_failure_case();
 	passed += run_sanitize_too_many_regions_failure_case();
+	passed += run_sanitize_overflow_failure_case();
+	passed += run_reserve_overflow_failure_case();
 
 	if (passed != total) {
 		printf("boot_mem_test: %d/%d passed\n", passed, total);

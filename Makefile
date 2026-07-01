@@ -5,6 +5,7 @@ LD := x86_64-elf-ld
 HOSTCC ?= gcc
 GENERATED_DIR := include/generated
 AUTOCONF_HEADER := $(GENERATED_DIR)/autoconf.h
+.DEFAULT_GOAL := all
 
 override CFLAGS += \
 	-I$(ROOT_DIR)/include \
@@ -55,6 +56,7 @@ C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 ALL_S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S))
 S_FILES := $(filter-out %.lds.S, $(ALL_S_FILES))
 OBJS := $(C_FILES:.c=.o) $(S_FILES:.S=.o)
+DEPS := $(OBJS:.o=.d) $(LINKER_SCRIPT:.lds=.lds.d)
 KERNEL := plane.elf
 TEST_SRCS := $(wildcard tests/*_test.c)
 TEST_MKS := $(wildcard tests/*_test.mk)
@@ -63,6 +65,7 @@ PUBLIC_HEADERS := include/plane/*.h include/hal/*.h
 ARCH_TEST_HEADERS := include/hal/x86_64/*.h
 
 -include $(TEST_MKS)
+-include $(DEPS)
 
 .SECONDEXPANSION:
 
@@ -76,15 +79,16 @@ $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 
 %.lds: %.lds.S
 	@echo "  CPP     $@"
-	@$(CC) -E -P -x c -D__ASSEMBLER__ $(CFLAGS) $< -o $@
+	@$(CC) -E -P -x c -D__ASSEMBLER__ $(CFLAGS) \
+		-MMD -MP -MT $@ -MF $@.d $< -o $@
 
 %.o: %.c $(AUTOCONF_HEADER)
 	@echo "  CC      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 %.o: %.S
 	@echo "  AS      $<"
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(AUTOCONF_HEADER): .config
 	@mkdir -p $(GENERATED_DIR)
@@ -164,6 +168,7 @@ qemu: iso
 clean:
 	@echo "  CLEAN"
 	@find kernel klib hal boot drivers -type f -name "*.o" -delete
+	@find kernel klib hal boot drivers -type f -name "*.d" -delete
 	@find hal -type f -name "*.lds" -delete
 	@rm -f $(KERNEL) $(ISO_NAME)
 	@rm -rf $(ISO_DIR) build/tests
