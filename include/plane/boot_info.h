@@ -11,6 +11,12 @@ struct plane_video_info {
 	uint32_t height;
 	uint32_t pitch;
 	uint8_t  bpp;
+	uint8_t  red_mask_size;
+	uint8_t  red_mask_shift;
+	uint8_t  green_mask_size;
+	uint8_t  green_mask_shift;
+	uint8_t  blue_mask_size;
+	uint8_t  blue_mask_shift;
 };
 
 /* hand off to kmain() */

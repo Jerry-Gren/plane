@@ -4,7 +4,6 @@
 
 #include <hal/mmu.h>
 #include <hal/cpu.h>
-#include <hal/x86_64/linkage.h>
 
 #include <plane/boot_info.h>
 #include <plane/kernel.h>
@@ -18,11 +17,13 @@ struct multiboot_info_base {
     uint32_t reserved;
 };
 
+extern char __kernel_phys_start[];
+extern char __kernel_phys_end[];
+
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
 					 uint64_t *framebuffer_phys_addr,
 					 uint64_t *framebuffer_size) {
-	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
 	
 	/* struct multiboot_tag_framebuffer_common
 	 * {
@@ -37,11 +38,48 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	 *     multiboot_uint8_t framebuffer_type;
 	 *     multiboot_uint16_t reserved;
 	 * }
+	 * 
+	 * struct multiboot_tag_framebuffer
+	 * {
+	 *     struct multiboot_tag_framebuffer_common common;
+
+	 *     union
+	 *     {
+	 *         struct
+	 *         {
+	 *             multiboot_uint16_t framebuffer_palette_num_colors;
+	 *             struct multiboot_color framebuffer_palette[0];
+	 *         };
+	 *         struct
+	 *         {
+	 *             multiboot_uint8_t framebuffer_red_field_position;
+	 *             multiboot_uint8_t framebuffer_red_mask_size;
+	 *             multiboot_uint8_t framebuffer_green_field_position;
+	 *             multiboot_uint8_t framebuffer_green_mask_size;
+	 *             multiboot_uint8_t framebuffer_blue_field_position;
+	 *             multiboot_uint8_t framebuffer_blue_mask_size;
+	 *         };
+	 *     };
+	 * };
 	 */
+
+	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
+	
 	video->width  = fb_common->framebuffer_width;
 	video->height = fb_common->framebuffer_height;
 	video->pitch  = fb_common->framebuffer_pitch;
 	video->bpp    = fb_common->framebuffer_bpp;
+
+	if (fb_common->framebuffer_type != MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+		hal_cpu_hang();
+	}
+
+	video->red_mask_size    = fb_tag->framebuffer_red_mask_size;
+	video->red_mask_shift   = fb_tag->framebuffer_red_field_position;
+	video->green_mask_size  = fb_tag->framebuffer_green_mask_size;
+	video->green_mask_shift = fb_tag->framebuffer_green_field_position;
+	video->blue_mask_size   = fb_tag->framebuffer_blue_mask_size;
+	video->blue_mask_shift  = fb_tag->framebuffer_blue_field_position;
 
 	uint64_t phys_addr = fb_common->framebuffer_addr;
 	uint64_t fb_size = (uint64_t)video->pitch * video->height;

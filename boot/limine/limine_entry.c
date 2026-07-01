@@ -72,11 +72,21 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	/* fetch the first framebuffer */
 	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
 
+	if (fb->memory_model != LIMINE_FRAMEBUFFER_RGB) {
+		hal_cpu_hang();
+	}
+
 	video->framebuffer_addr = (uint32_t *)fb->address;
 	video->width            = fb->width;
 	video->height           = fb->height;
 	video->pitch            = fb->pitch;
 	video->bpp              = fb->bpp;
+	video->red_mask_size    = fb->red_mask_size;
+	video->red_mask_shift   = fb->red_mask_shift;
+	video->green_mask_size  = fb->green_mask_size;
+	video->green_mask_shift = fb->green_mask_shift;
+	video->blue_mask_size   = fb->blue_mask_size;
+	video->blue_mask_shift  = fb->blue_mask_shift;
 }
 
 static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
