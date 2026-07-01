@@ -40,7 +40,3 @@ void x86_64_mb2_early_remove_identity_mapping(void) {
 	early_pml4[0] = 0;
 	hal_mmu_flush_tlb_all();
 }
-
-void *x86_64_mb2_early_direct_phys_to_virt(uintptr_t phys_addr) {
-	return (void *)(phys_addr + KERNEL_VMA_BASE);
-}

@@ -2,8 +2,9 @@
 #include <stddef.h>
 #include <multiboot2.h>
 
+#include <boot/multiboot2/mb2_arch.h>
+
 #include <hal/cpu.h>
-#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/boot_info.h>
 #include <plane/entry.h>
@@ -14,10 +15,6 @@ struct multiboot_info_base {
     uint32_t total_size;
     uint32_t reserved;
 };
-
-/* in linker_grub.lds.S */
-extern char __kernel_phys_start[];
-extern char __kernel_phys_end[];
 
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
@@ -85,7 +82,7 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
-	video->framebuffer_addr = (uint32_t *)x86_64_mb2_early_map_framebuffer(phys_addr, fb_size);
+	video->framebuffer_addr = boot_mb2_arch_map_framebuffer(phys_addr, fb_size);
 }
 
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {
@@ -137,15 +134,6 @@ static void boot_mb2_add_reservations(struct boot_info *info,
 				      uint64_t mb2_info_size,
 				      uint64_t framebuffer_phys_addr,
 				      uint64_t framebuffer_size) {
-	uint64_t kernel_phys_start = (uint64_t)__kernel_phys_start;
-	uint64_t kernel_phys_end = (uint64_t)__kernel_phys_end;
-
-	if (!plane_memmap_reserve(&info->mem, kernel_phys_start,
-				  kernel_phys_end - kernel_phys_start,
-				  PLANE_MEM_EXECUTABLE_AND_MODULES)) {
-		hal_cpu_hang();
-	}
-
 	if (!plane_memmap_reserve(&info->mem, mb2_info_addr, mb2_info_size,
 				  PLANE_MEM_BOOTLOADER_RECLAIMABLE)) {
 		hal_cpu_hang();
@@ -169,7 +157,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	uint64_t framebuffer_phys_addr = 0;
 	uint64_t framebuffer_size = 0;
 
-	void *info_vaddr = x86_64_mb2_early_direct_phys_to_virt(info_addr);
+	void *info_vaddr = boot_mb2_arch_phys_to_virt(info_addr);
 	struct multiboot_info_base *info_base = info_vaddr;
 	struct multiboot_tag *tag = (struct multiboot_tag *)((uint8_t *)info_vaddr + sizeof(struct multiboot_info_base));
 
@@ -195,10 +183,11 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 		hal_cpu_hang();
 	}
 
+	boot_mb2_arch_reserve_kernel_image(&b_info.mem);
 	boot_mb2_add_reservations(&b_info, info_addr, info_base->total_size,
 				  framebuffer_phys_addr, framebuffer_size);
 
-	x86_64_mb2_early_remove_identity_mapping();
+	boot_mb2_arch_finish_handoff();
 
 	kmain(&b_info);
 
