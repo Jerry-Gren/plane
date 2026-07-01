@@ -42,22 +42,61 @@ static int expect_bool(const char *name, int actual, int expected) {
 	return 0;
 }
 
-static int test_pack_rgb(void) {
+static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel) {
+	uint32_t pixel = 0;
+
+	for (uint8_t i = 0; i < bytes_per_pixel; i++) {
+		pixel |= (uint32_t)src[i] << (i * 8);
+	}
+
+	return pixel;
+}
+
+static int test_draw_pattern_packs_rgb_formats(void) {
 	int passed = 0;
 
-	struct plane_video_info rgb565 = rgb_video(16, 11, 5, 0, 5, 6, 5);
-	struct plane_video_info rgb888 = rgb_video(24, 16, 8, 0, 8, 8, 8);
-	struct plane_video_info xrgb8888 = rgb_video(32, 16, 8, 0, 8, 8, 8);
+	struct {
+		const char *name;
+		struct plane_video_info video;
+		uint32_t expected;
+	} cases[] = {
+		{
+			.name = "draw packs rgb565",
+			.video = rgb_video(16, 11, 5, 0, 5, 6, 5),
+			.expected = 0x000003ef,
+		},
+		{
+			.name = "draw packs rgb888",
+			.video = rgb_video(24, 16, 8, 0, 8, 8, 8),
+			.expected = 0x00007f7f,
+		},
+		{
+			.name = "draw packs xrgb8888",
+			.video = rgb_video(32, 16, 8, 0, 8, 8, 8),
+			.expected = 0x00007f7f,
+		},
+	};
 
-	passed += expect_u32("pack rgb565 white",
-			     plane_early_video_pack_rgb(&rgb565, 255, 255, 255),
-			     0x0000ffff);
-	passed += expect_u32("pack rgb888",
-			     plane_early_video_pack_rgb(&rgb888, 0x12, 0x34, 0x56),
-			     0x00123456);
-	passed += expect_u32("pack xrgb8888",
-			     plane_early_video_pack_rgb(&xrgb8888, 0xab, 0xcd, 0xef),
-			     0x00abcdef);
+	for (uint64_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		uint8_t framebuffer[16] = {0};
+		struct plane_video_info video = cases[i].video;
+		uint8_t bytes_per_pixel = video.bpp / 8;
+
+		video.framebuffer_addr = framebuffer;
+		video.width = 2;
+		video.height = 2;
+		video.pitch = video.width * bytes_per_pixel;
+
+		if (!plane_early_video_draw_test_pattern(&video)) {
+			printf("FAIL: %s returned false\n", cases[i].name);
+			continue;
+		}
+
+		uint64_t offset = video.pitch + bytes_per_pixel;
+		passed += expect_u32(cases[i].name,
+				     read_le_pixel(&framebuffer[offset], bytes_per_pixel),
+				     cases[i].expected);
+	}
 
 	return passed;
 }
@@ -181,7 +220,7 @@ int main(void) {
 	int passed = 0;
 	int total = 0;
 
-	passed += test_pack_rgb();
+	passed += test_draw_pattern_packs_rgb_formats();
 	total += 3;
 
 	passed += test_format_supported();

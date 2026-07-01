@@ -12,8 +12,8 @@ static uint32_t scale_color(uint8_t value, uint8_t mask_size) {
 	return (uint32_t)(((uint64_t)value * max + 127) / 255);
 }
 
-uint32_t plane_early_video_pack_rgb(const struct plane_video_info *video,
-				    uint8_t red, uint8_t green, uint8_t blue) {
+static uint32_t pack_rgb(const struct plane_video_info *video,
+			 uint8_t red, uint8_t green, uint8_t blue) {
 	return (scale_color(red, video->red_mask_size) << video->red_mask_shift) |
 	       (scale_color(green, video->green_mask_size) << video->green_mask_shift) |
 	       (scale_color(blue, video->blue_mask_size) << video->blue_mask_shift);
@@ -72,7 +72,7 @@ bool plane_early_video_draw_test_pattern(struct plane_video_info *video) {
 			uint8_t nX = (uint8_t)(x * 255 / video->width);
 			uint8_t nY = (uint8_t)(y * 255 / video->height);
 			size_t pixel_offset = (y * video->pitch) + (x * bytes_per_pixel);
-			uint32_t pixel = plane_early_video_pack_rgb(video, 0, nY, nX);
+			uint32_t pixel = pack_rgb(video, 0, nY, nX);
 
 			write_pixel(&fb_ptr[pixel_offset], bytes_per_pixel, pixel);
 		}

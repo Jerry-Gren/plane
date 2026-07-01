@@ -8,7 +8,7 @@
 
 #include <plane/boot_info.h>
 #include <plane/entry.h>
-#include <plane/kernel.h>
+#include <plane/util.h>
 
 /* This struct is not present in official multiboot2.h */
 struct multiboot_info_base {

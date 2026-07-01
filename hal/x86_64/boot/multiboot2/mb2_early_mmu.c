@@ -1,8 +1,8 @@
 #include <hal/mmu.h>
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
-#include <plane/kernel.h>
 #include <plane/mm.h>
+#include <plane/util.h>
 
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
 

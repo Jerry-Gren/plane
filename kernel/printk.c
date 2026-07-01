@@ -3,6 +3,7 @@
 #include <klib/stdio.h>
 #include <hal/serial.h>
 #include <hal/cpu.h>
+#include <plane/printk.h>
 
 #define PRINTK_BUF_SIZE 1024
 

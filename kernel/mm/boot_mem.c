@@ -1,6 +1,6 @@
-#include <plane/kernel.h>
 #include <plane/memmap.h>
 #include <plane/mm.h>
+#include <plane/util.h>
 
 static bool append_clean_region(struct plane_mem_region *clean_map,
 				uint64_t *clean_count,

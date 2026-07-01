@@ -1,6 +1,6 @@
 #include <hal/x86_64/exception.h>
 #include <hal/x86_64/linkage.h>
-#include <plane/kernel.h>
+#include <plane/printk.h>
 
 #define X86_EXCEPTION_BP 3
 #define X86_EXCEPTION_PF 14
