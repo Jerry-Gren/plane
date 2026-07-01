@@ -151,6 +151,32 @@ static int test_draw_rejects_invalid_inputs(void) {
 	return passed;
 }
 
+static int test_draw_rejects_short_pitch(void) {
+	uint8_t framebuffer[16];
+	memset(framebuffer, 0x5a, sizeof(framebuffer));
+
+	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
+	video.framebuffer_addr = framebuffer;
+	video.width = 2;
+	video.height = 2;
+	video.pitch = 4;
+
+	if (!expect_bool("draw rejects short pitch",
+			 plane_early_video_draw_test_pattern(&video), 0)) {
+		return 0;
+	}
+
+	for (uint64_t i = 0; i < sizeof(framebuffer); i++) {
+		if (framebuffer[i] != 0x5a) {
+			printf("FAIL: short pitch rejection wrote byte %llu\n",
+			       (unsigned long long)i);
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
 int main(void) {
 	int passed = 0;
 	int total = 0;
@@ -166,6 +192,9 @@ int main(void) {
 
 	passed += test_draw_rejects_invalid_inputs();
 	total += 2;
+
+	passed += test_draw_rejects_short_pitch();
+	total += 1;
 
 	if (passed != total) {
 		printf("early_video_test: %d/%d passed\n", passed, total);

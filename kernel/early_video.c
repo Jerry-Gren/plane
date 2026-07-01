@@ -51,9 +51,6 @@ bool plane_early_video_format_supported(const struct plane_video_info *video) {
 }
 
 bool plane_early_video_draw_test_pattern(struct plane_video_info *video) {
-	/*
-	 * TODO: validate pitch >= width * bytes_per_pixel before drawing.
-	 */
 	if (!plane_early_video_format_supported(video) ||
 	    video->framebuffer_addr == NULL ||
 	    video->width == 0 ||
@@ -63,6 +60,12 @@ bool plane_early_video_draw_test_pattern(struct plane_video_info *video) {
 
 	uint8_t *fb_ptr = (uint8_t *)video->framebuffer_addr;
 	uint8_t bytes_per_pixel = video->bpp / 8;
+	
+	/* reject pitch values that cannot hold one full framebuffer row */
+	if (video->width > SIZE_MAX / bytes_per_pixel ||
+	    video->pitch < video->width * bytes_per_pixel) {
+		return false;
+	}
 
 	for (size_t y = 0; y < video->height; y++) {
 		for (size_t x = 0; x < video->width; x++) {
