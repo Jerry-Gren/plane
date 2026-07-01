@@ -1,5 +1,3 @@
-#include <stdint.h>
-#include <stddef.h>
 #include <plane/boot_info.h>
 #include <plane/early_video.h>
 #include <plane/entry.h>

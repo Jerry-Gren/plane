@@ -70,16 +70,16 @@ mb2_info:  .long 0
 
 /* Section bss */
 .section .boot.bss, "aw", @nobits
-.global early_pml4
-.global early_pd_kernel
-.global early_pd_fb
+.global x86_64_mb2_early_pml4
+.global x86_64_mb2_early_pd_kernel
+.global x86_64_mb2_early_pd_fb
 .align 4096
-early_pml4:       .skip 4096
-early_pdpt_ident: .skip 4096
-early_pdpt_high:  .skip 4096
-early_pd_ident:   .skip 4096
-early_pd_kernel:  .skip 4096
-early_pd_fb:      .skip 4096
+x86_64_mb2_early_pml4:      .skip 4096
+early_pdpt_ident:           .skip 4096
+early_pdpt_high:            .skip 4096
+early_pd_ident:             .skip 4096
+x86_64_mb2_early_pd_kernel: .skip 4096
+x86_64_mb2_early_pd_fb:     .skip 4096
 
 .align 16
 stack_bottom:
@@ -150,7 +150,7 @@ _start:
 
     /* setup page table */
     /* PML4 */
-    mov $early_pml4, %edi
+    mov $x86_64_mb2_early_pml4, %edi
 
     mov $early_pdpt_ident, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
@@ -167,12 +167,12 @@ _start:
     mov %eax, 0(%edi) /* early_pdpt_ident[0] -> early_pd_ident */
 
     mov $early_pdpt_high, %edi
-    mov $early_pd_kernel, %eax
+    mov $x86_64_mb2_early_pd_kernel, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
     mov %eax, (PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
 
 #if PDPT_INDEX(KERNEL_VMA_BASE) != PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
-    mov $early_pd_fb, %eax
+    mov $x86_64_mb2_early_pd_fb, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
     mov %eax, (PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
@@ -208,7 +208,7 @@ _start:
     loop .Lfill_ident_pd
     pop %ecx
 
-    mov $early_pd_kernel, %edi
+    mov $x86_64_mb2_early_pd_kernel, %edi
     add $(PD_INDEX(KERNEL_VMA_BASE) * 8), %edi
     mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
 .Lfill_kernel_pd:
@@ -218,7 +218,7 @@ _start:
     loop .Lfill_kernel_pd
 
     /* CR3 = PML4 */
-    mov $early_pml4, %eax
+    mov $x86_64_mb2_early_pml4, %eax
     mov %eax, %cr3
     /* enable PAE */
     mov %cr4, %eax

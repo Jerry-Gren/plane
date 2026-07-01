@@ -1,15 +1,15 @@
-#include <hal/mmu.h>
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
-#include <plane/mm.h>
+#include <hal/mmu.h>
+
 #include <plane/util.h>
 
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
 
 /* in mb2_entry_entry.S */
-extern uint64_t early_pml4[];
-extern uint64_t early_pd_kernel[];
-extern uint64_t early_pd_fb[];
+extern uint64_t x86_64_mb2_early_pml4[];
+extern uint64_t x86_64_mb2_early_pd_kernel[];
+extern uint64_t x86_64_mb2_early_pd_fb[];
 
 static bool checked_align_up(uint64_t value, uint64_t align, uint64_t *out) {
 	if (value > UINT64_MAX - (align - 1)) {
@@ -46,9 +46,9 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 
 	uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
 
-	uint64_t *target_pd = early_pd_fb;
+	uint64_t *target_pd = x86_64_mb2_early_pd_fb;
 #if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
-	target_pd = early_pd_kernel;
+	target_pd = x86_64_mb2_early_pd_kernel;
 #endif
 
 	uint64_t start_idx = PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
@@ -69,6 +69,6 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 }
 
 void x86_64_mb2_early_remove_identity_mapping(void) {
-	early_pml4[0] = 0;
+	x86_64_mb2_early_pml4[0] = 0;
 	hal_mmu_flush_tlb_all();
 }

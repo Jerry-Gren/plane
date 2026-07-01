@@ -2,7 +2,6 @@
 #define PLANE_EARLY_VIDEO_H
 
 #include <stdbool.h>
-#include <stdint.h>
 
 #include <plane/boot_info.h>
 

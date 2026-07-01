@@ -6,9 +6,9 @@
 
 #include <plane/util.h>
 
-uint64_t early_pml4[X86_64_PAGE_TABLE_ENTRIES];
-uint64_t early_pd_kernel[X86_64_PAGE_TABLE_ENTRIES];
-uint64_t early_pd_fb[X86_64_PAGE_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pml4[X86_64_PAGE_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pd_kernel[X86_64_PAGE_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGE_TABLE_ENTRIES];
 
 static uintptr_t invalidated_vaddrs[X86_64_PAGE_TABLE_ENTRIES];
 static uint64_t invalidate_count;
@@ -26,9 +26,10 @@ void hal_mmu_flush_tlb_all(void) {
 }
 
 static void reset_state(void) {
-	memset(early_pml4, 0, sizeof(early_pml4));
-	memset(early_pd_kernel, 0, sizeof(early_pd_kernel));
-	memset(early_pd_fb, 0, sizeof(early_pd_fb));
+	memset(x86_64_mb2_early_pml4, 0, sizeof(x86_64_mb2_early_pml4));
+	memset(x86_64_mb2_early_pd_kernel, 0,
+	       sizeof(x86_64_mb2_early_pd_kernel));
+	memset(x86_64_mb2_early_pd_fb, 0, sizeof(x86_64_mb2_early_pd_fb));
 	memset(invalidated_vaddrs, 0, sizeof(invalidated_vaddrs));
 	invalidate_count = 0;
 	flush_count = 0;
@@ -65,7 +66,8 @@ static int expect_ptr(const char *name, const void *actual,
 
 static int page_directory_untouched(void) {
 	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
-		if (early_pd_fb[i] != 0 || early_pd_kernel[i] != 0) {
+		if (x86_64_mb2_early_pd_fb[i] != 0 ||
+		    x86_64_mb2_early_pd_kernel[i] != 0) {
 			return 0;
 		}
 	}
@@ -93,13 +95,13 @@ static int test_maps_unaligned_framebuffer(void) {
 			     (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE +
 				      page_offset));
 	passed += expect_u64("first framebuffer pde",
-			     early_pd_fb[start_idx],
+			     x86_64_mb2_early_pd_fb[start_idx],
 			     phys_base | flags);
 	passed += expect_u64("second framebuffer pde",
-			     early_pd_fb[start_idx + 1],
+			     x86_64_mb2_early_pd_fb[start_idx + 1],
 			     (phys_base + ARCH_LARGE_PAGE_SIZE) | flags);
 	passed += expect_u64("third framebuffer pde",
-			     early_pd_fb[start_idx + 2],
+			     x86_64_mb2_early_pd_fb[start_idx + 2],
 			     (phys_base + (2 * ARCH_LARGE_PAGE_SIZE)) | flags);
 	passed += expect_u64("invalidate count", invalidate_count, 3);
 	passed += expect_u64("first invalidated vaddr", invalidated_vaddrs[0],

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <plane/memmap.h>
+struct plane_mem_info;
 
 void *boot_mb2_arch_phys_to_virt(uint64_t phys_addr);
 bool boot_mb2_arch_map_framebuffer(uint64_t phys_addr, uint64_t size,
