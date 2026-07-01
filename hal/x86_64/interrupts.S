@@ -4,8 +4,8 @@
 
 /* hardware does not push an error code, manually push 0 */
 .macro ISR_NOERRCODE vector
-.global isr\vector
-isr\vector:
+.global x86_64_isr\vector
+x86_64_isr\vector:
     pushq $0            /* a dummy error code */
     pushq $\vector
     jmp isr_common_stub
@@ -13,8 +13,8 @@ isr\vector:
 
 /* hardware handles error code */
 .macro ISR_ERRCODE vector
-.global isr\vector
-isr\vector:
+.global x86_64_isr\vector
+x86_64_isr\vector:
     pushq $\vector
     jmp isr_common_stub
 .endm
@@ -134,8 +134,8 @@ ISR_NOERRCODE 31    /* Reserved */
  * manually push error code 0
  * and a fake vector number 256
  */
-.global isr_default
-isr_default:
+.global x86_64_isr_default
+x86_64_isr_default:
     pushq $0            /* a dummy error code */
     pushq $256
     jmp isr_common_stub
