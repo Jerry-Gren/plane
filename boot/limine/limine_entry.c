@@ -70,7 +70,13 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	/* fetch the first framebuffer */
 	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
 
-	if (fb->memory_model != LIMINE_FRAMEBUFFER_RGB) {
+	if (fb == NULL || fb->address == NULL ||
+	    fb->memory_model != LIMINE_FRAMEBUFFER_RGB) {
+		hal_cpu_hang();
+	}
+
+	if (fb->width > UINT32_MAX || fb->height > UINT32_MAX ||
+	    fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX) {
 		hal_cpu_hang();
 	}
 

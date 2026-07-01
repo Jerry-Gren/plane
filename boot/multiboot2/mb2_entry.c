@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <multiboot2.h>
 
 #include <boot/multiboot2/mb2_arch.h>
@@ -15,6 +16,15 @@ struct multiboot_info_base {
     uint32_t total_size;
     uint32_t reserved;
 };
+
+static bool checked_u64_mul(uint64_t lhs, uint64_t rhs, uint64_t *out) {
+	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
+		return false;
+	}
+
+	*out = lhs * rhs;
+	return true;
+}
 
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
@@ -78,11 +88,18 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	video->blue_mask_shift  = fb_tag->framebuffer_blue_field_position;
 
 	uint64_t phys_addr = fb_common->framebuffer_addr;
-	uint64_t fb_size = (uint64_t)video->pitch * video->height;
+	uint64_t fb_size;
+	if (!checked_u64_mul(video->pitch, video->height, &fb_size) ||
+	    fb_size == 0) {
+		hal_cpu_hang();
+	}
 
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
-	video->framebuffer_addr = boot_mb2_arch_map_framebuffer(phys_addr, fb_size);
+	if (!boot_mb2_arch_map_framebuffer(phys_addr, fb_size,
+					   &video->framebuffer_addr)) {
+		hal_cpu_hang();
+	}
 }
 
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {

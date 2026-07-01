@@ -10,6 +10,8 @@
 #define PAGE_PWT             BIT(3)
 #define PAGE_PS              BIT(7)
 
+#define X86_64_PAGE_TABLE_ENTRIES 512
+
 /* Page table indices */
 #define PML4_INDEX(vaddr) (((vaddr) >> 39) & 0x1ff)
 #define PDPT_INDEX(vaddr) (((vaddr) >> 30) & 0x1ff)

@@ -180,7 +180,7 @@ _start:
     /* PDT */
     # mov $boot_pd, %edi
     # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_PS), %eax
-    # mov $512, %ecx
+    # mov $X86_64_PAGE_TABLE_ENTRIES, %ecx
     mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
     mov %ebx, %eax
     add (%ebx), %eax
@@ -193,9 +193,9 @@ _start:
     shr $ARCH_LARGE_PAGE_SHIFT, %eax
     mov %eax, %ecx
 
-    cmp $512, %ecx
+    cmp $X86_64_PAGE_TABLE_ENTRIES, %ecx
     jbe .Lpages_ok
-    mov $512, %ecx
+    mov $X86_64_PAGE_TABLE_ENTRIES, %ecx
 .Lpages_ok:
 
     push %ecx

@@ -13,8 +13,9 @@ void *boot_mb2_arch_phys_to_virt(uint64_t phys_addr) {
 	return (void *)(phys_addr + KERNEL_VMA_BASE);
 }
 
-void *boot_mb2_arch_map_framebuffer(uint64_t phys_addr, uint64_t size) {
-	return x86_64_mb2_early_map_framebuffer(phys_addr, size);
+bool boot_mb2_arch_map_framebuffer(uint64_t phys_addr, uint64_t size,
+				   void **vaddr) {
+	return x86_64_mb2_early_map_framebuffer(phys_addr, size, vaddr);
 }
 
 void boot_mb2_arch_reserve_kernel_image(struct plane_mem_info *mem) {

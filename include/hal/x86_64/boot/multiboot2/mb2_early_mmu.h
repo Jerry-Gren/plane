@@ -6,6 +6,7 @@
 #ifdef __ASSEMBLER__
 	#define X86_64_MB2_FRAMEBUFFER_VMA_BASE 0xffffffffc0000000
 #else
+	#include <stdbool.h>
 	#include <stdint.h>
 	#define X86_64_MB2_FRAMEBUFFER_VMA_BASE 0xffffffffc0000000ull
 #endif
@@ -25,7 +26,8 @@
 #endif
 
 #ifndef __ASSEMBLER__
-void *x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size);
+bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
+				      void **vaddr);
 void x86_64_mb2_early_remove_identity_mapping(void);
 #endif /* !__ASSEMBLER__ */
 
