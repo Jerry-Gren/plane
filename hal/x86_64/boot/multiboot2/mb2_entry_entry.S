@@ -2,6 +2,7 @@
 #include <multiboot2.h>
 
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
+#include <hal/x86_64/cpuid_defs.h>
 
 /* Macros */
 #define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
@@ -26,14 +27,6 @@
 #define GDT_GRAN_4K        (1 << 7)
 #define GDT_LONG_MODE      (1 << 5)
 #define GDT_SZ_32          (1 << 6)
-
-#define CPUID_BASIC_MAX       0x00000000
-#define CPUID_BASIC_FEATURES  0x00000001
-#define CPUID_EXTENSIONS      0x80000000
-#define CPUID_EXT_FEATURES    0x80000001
-#define CPUID_EDX_FEAT_MSR    (1 << 5)
-#define CPUID_EDX_FEAT_PAT    (1 << 16)
-#define CPUID_EDX_EXT_FEAT_LM (1 << 29)
 
 #define MSR_IA32_CR_PAT       0x277
 #define PAT_WC                0x01
@@ -133,25 +126,25 @@ _start:
     je .Lno_long_mode
 
     /* check for MSR and PAT support before writing EFER and IA32_PAT */
-    mov $CPUID_BASIC_MAX, %eax
+    mov $X86_64_CPUID_LEAF_BASIC_MAX, %eax
     cpuid
-    cmp $CPUID_BASIC_FEATURES, %eax
+    cmp $X86_64_CPUID_LEAF_FEATURES, %eax
     jb .Lno_long_mode
-    mov $CPUID_BASIC_FEATURES, %eax
+    mov $X86_64_CPUID_LEAF_FEATURES, %eax
     cpuid
-    test $CPUID_EDX_FEAT_MSR, %edx
+    test $X86_64_CPUID_1_EDX_MSR, %edx
     jz .Lno_long_mode
-    test $CPUID_EDX_FEAT_PAT, %edx
+    test $X86_64_CPUID_1_EDX_PAT, %edx
     jz .Lno_long_mode
 
     /* check for long mode support */
-    mov $CPUID_EXTENSIONS, %eax
+    mov $X86_64_CPUID_LEAF_EXT_MAX, %eax
     cpuid
-    cmp $CPUID_EXT_FEATURES, %eax
+    cmp $X86_64_CPUID_LEAF_EXT_FEATURES, %eax
     jb .Lno_long_mode
-    mov $CPUID_EXT_FEATURES, %eax
+    mov $X86_64_CPUID_LEAF_EXT_FEATURES, %eax
     cpuid
-    test $CPUID_EDX_EXT_FEAT_LM, %edx
+    test $X86_64_CPUID_EXT_1_EDX_LM, %edx
     jz .Lno_long_mode
 
     /* setup page table */
