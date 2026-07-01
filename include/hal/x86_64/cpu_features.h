@@ -72,7 +72,9 @@ enum x86_64_cpu_feature {
 	X86_64_CPU_FEATURE_UMIP,
 	X86_64_CPU_FEATURE_LA57,
 	X86_64_CPU_FEATURE_RDPID,
-	X86_64_CPU_FEATURE_SERIALIZE,
+
+	/* CPUID.07H.00H Intel-defined feature flags */
+	X86_64_CPU_FEATURE_INTEL_SERIALIZE,
 
 	/* CPUID.80000001H extended-common feature flags */
 	X86_64_CPU_FEATURE_SYSCALL,
@@ -126,6 +128,8 @@ struct x86_64_cpu_features {
 	uint8_t initial_apic_id;
 	uint8_t logical_processor_count;
 	uint16_t clflush_line_size;
+
+	uint32_t leaf7_max_subleaf;
 
 	uint64_t xcr0_supported_mask;
 	uint32_t xsave_area_size_enabled;

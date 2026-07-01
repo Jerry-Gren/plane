@@ -99,7 +99,7 @@ static int test_decode_intel_like_common_features(void) {
 			 (1u << 12) | (1u << 13) | (1u << 15) |
 			 (1u << 16) | (1u << 19) | (1u << 24) |
 			 (1u << 25) | (1u << 26) | (1u << 28));
-	raw.leaf7_0 = leaf(0,
+	raw.leaf7_0 = leaf(2,
 			   (1u << 0) | (1u << 1) | (1u << 3) |
 			   (1u << 5) | (1u << 7) | (1u << 8) |
 			   (1u << 9) | (1u << 10) | (1u << 18) |
@@ -124,6 +124,8 @@ static int test_decode_intel_like_common_features(void) {
 			      features.max_extended_leaf, 0x80000001u);
 	passed += expect_u32("raw leaf 7 ebx",
 			      features.raw.leaf7_0.ebx, raw.leaf7_0.ebx);
+	passed += expect_u32("leaf 7 max subleaf",
+			      features.leaf7_max_subleaf, 2);
 	passed += expect_u32("stepping", features.stepping, 3);
 	passed += expect_u32("base model", features.base_model, 0xe);
 	passed += expect_u32("base family", features.base_family, 6);
@@ -204,8 +206,9 @@ static int test_decode_intel_like_common_features(void) {
 	passed += expect_bool("umip", features.has[X86_64_CPU_FEATURE_UMIP], true);
 	passed += expect_bool("la57", features.has[X86_64_CPU_FEATURE_LA57], true);
 	passed += expect_bool("rdpid", features.has[X86_64_CPU_FEATURE_RDPID], true);
-	passed += expect_bool("serialize",
-			      features.has[X86_64_CPU_FEATURE_SERIALIZE], true);
+	passed += expect_bool("intel serialize",
+			      features.has[X86_64_CPU_FEATURE_INTEL_SERIALIZE],
+			      true);
 
 	passed += expect_u64("xcr0 supported mask",
 			      features.xcr0_supported_mask, 0x0000000200000007ull);
@@ -245,9 +248,10 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 	struct x86_64_cpu_features features;
 	int passed = 0;
 
-	raw.leaf0 = vendor_leaf(1, "AuthenticAMD");
+	raw.leaf0 = vendor_leaf(7, "AuthenticAMD");
 	raw.leaf1 = leaf(0x00800f82, (0x02u << 24) | (1u << 16) | (8u << 8),
 			 0, (1u << 5) | (1u << 16));
+	raw.leaf7_0 = leaf(0, 0, 0, (1u << 14));
 	raw.leaf_ext0 = vendor_leaf(0x80000004u, "AuthenticAMD");
 	raw.leaf_ext1 = leaf(0, 0, (1u << 0) | (1u << 5) | (1u << 8),
 			     (1u << 11) | (1u << 20) | (1u << 26) |
@@ -280,6 +284,9 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 			      features.has[X86_64_CPU_FEATURE_LZCNT], true);
 	passed += expect_bool("amd prefetchw",
 			      features.has[X86_64_CPU_FEATURE_PREFETCHW], true);
+	passed += expect_bool("amd serialize reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_SERIALIZE],
+			      false);
 
 	return passed;
 }
@@ -289,8 +296,9 @@ static int test_unknown_vendor_keeps_common_decode(void) {
 	struct x86_64_cpu_features features;
 	int passed = 0;
 
-	raw.leaf0 = vendor_leaf(1, "TCGTCGTCGTCG");
+	raw.leaf0 = vendor_leaf(7, "TCGTCGTCGTCG");
 	raw.leaf1 = leaf(0, 0, 0, (1u << 5) | (1u << 16) | (1u << 26));
+	raw.leaf7_0 = leaf(0, 0, 0, (1u << 14));
 	raw.leaf_ext0 = vendor_leaf(0x80000001u, "TCGTCGTCGTCG");
 	raw.leaf_ext1 = leaf(0, 0, 0, (1u << 29));
 
@@ -307,6 +315,9 @@ static int test_unknown_vendor_keeps_common_decode(void) {
 			      features.has[X86_64_CPU_FEATURE_SSE2], true);
 	passed += expect_bool("unknown ext long mode",
 			      features.has[X86_64_CPU_FEATURE_LONG_MODE], true);
+	passed += expect_bool("unknown serialize reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_SERIALIZE],
+			      false);
 
 	return passed;
 }
@@ -369,13 +380,13 @@ int main(void) {
 	int total = 0;
 
 	passed += test_decode_intel_like_common_features();
-	total += 81;
+	total += 82;
 
 	passed += test_decode_amd_like_extended_features_and_brand();
-	total += 13;
+	total += 14;
 
 	passed += test_unknown_vendor_keeps_common_decode();
-	total += 6;
+	total += 7;
 
 	passed += test_missing_leaves_default_to_zero();
 	total += 8;

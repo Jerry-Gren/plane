@@ -72,7 +72,7 @@
 #define CPUID_7_0_ECX_LA57       (1u << 16)
 #define CPUID_7_0_ECX_RDPID      (1u << 22)
 
-#define CPUID_7_0_EDX_SERIALIZE   (1u << 14)
+#define CPUID_7_0_EDX_INTEL_SERIALIZE (1u << 14)
 
 #define CPUID_EXT_1_EDX_SYSCALL  (1u << 11)
 #define CPUID_EXT_1_EDX_NX       (1u << 20)
@@ -240,6 +240,8 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 
 static void decode_leaf7_0(struct x86_64_cpu_features *features,
 			   const struct x86_64_cpuid_leaf *leaf7) {
+	features->leaf7_max_subleaf = leaf7->eax;
+
 	features->has[X86_64_CPU_FEATURE_FSGSBASE] =
 		(leaf7->ebx & CPUID_7_0_EBX_FSGSBASE) != 0;
 	features->has[X86_64_CPU_FEATURE_TSC_ADJUST] =
@@ -276,8 +278,11 @@ static void decode_leaf7_0(struct x86_64_cpu_features *features,
 	features->has[X86_64_CPU_FEATURE_RDPID] =
 		(leaf7->ecx & CPUID_7_0_ECX_RDPID) != 0;
 
-	features->has[X86_64_CPU_FEATURE_SERIALIZE] =
-		(leaf7->edx & CPUID_7_0_EDX_SERIALIZE) != 0;
+	/* Intel defines CPUID.07H.00H:EDX[14] as SERIALIZE. */
+	if (features->vendor_id == X86_64_CPU_VENDOR_INTEL) {
+		features->has[X86_64_CPU_FEATURE_INTEL_SERIALIZE] =
+			(leaf7->edx & CPUID_7_0_EDX_INTEL_SERIALIZE) != 0;
+	}
 }
 
 static void decode_xsave(struct x86_64_cpu_features *features,
@@ -364,7 +369,9 @@ static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw) {
 	if (raw->leaf0.eax >= CPUID_LEAF_STRUCTURED) {
 		raw->leaf7_0 = cpuid_count(CPUID_LEAF_STRUCTURED, 0);
 	}
-	if (raw->leaf0.eax >= CPUID_LEAF_XSAVE) {
+	/* CPUID.0DH is valid when CPUID.01H:ECX.XSAVE is present. */
+	if (raw->leaf0.eax >= CPUID_LEAF_XSAVE &&
+	    (raw->leaf1.ecx & CPUID_1_ECX_XSAVE) != 0) {
 		raw->leafd_0 = cpuid_count(CPUID_LEAF_XSAVE, 0);
 		raw->leafd_1 = cpuid_count(CPUID_LEAF_XSAVE, 1);
 	}
