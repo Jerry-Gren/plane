@@ -294,16 +294,18 @@ int main(void) {
 			.expected_count = 2,
 		},
 		{
-			.name = "different high-priority memory types degrade to reserved",
+			.name = "same-rank specific types degrade only the overlap to reserved",
 			.input = {
 				{ .base = 0x1000, .length = 0x3000, .type = PLANE_MEM_ACPI_NVS },
 				{ .base = 0x2000, .length = 0x3000, .type = PLANE_MEM_BAD_MEMORY },
 			},
 			.input_count = 2,
 			.expected = {
-				{ .base = 0x1000, .length = 0x4000, .type = PLANE_MEM_RESERVED },
+				{ .base = 0x1000, .length = 0x1000, .type = PLANE_MEM_ACPI_NVS },
+				{ .base = 0x2000, .length = 0x2000, .type = PLANE_MEM_RESERVED },
+				{ .base = 0x4000, .length = 0x1000, .type = PLANE_MEM_BAD_MEMORY },
 			},
-			.expected_count = 1,
+			.expected_count = 3,
 		},
 	};
 	const struct reserve_test_case reserve_cases[] = {
@@ -376,7 +378,7 @@ int main(void) {
 			.expected_count = 3,
 		},
 		{
-			.name = "reserve over an existing reserved region stays reserved",
+			.name = "specific reserve overrides an existing generic reserved region",
 			.input = {
 				{ .base = 0x1000, .length = 0x2000, .type = PLANE_MEM_RESERVED },
 			},
@@ -386,9 +388,60 @@ int main(void) {
 			.reserve_type = PLANE_MEM_FRAMEBUFFER,
 			.expected_ret = 1,
 			.expected = {
-				{ .base = 0x1000, .length = 0x2000, .type = PLANE_MEM_RESERVED },
+				{ .base = 0x1000, .length = 0x2000, .type = PLANE_MEM_FRAMEBUFFER },
 			},
 			.expected_count = 1,
+		},
+		{
+			.name = "executable reserve splits an existing generic reserved region",
+			.input = {
+				{ .base = 0x1000, .length = 0x4000, .type = PLANE_MEM_RESERVED },
+			},
+			.input_count = 1,
+			.reserve_base = 0x2000,
+			.reserve_length = 0x1000,
+			.reserve_type = PLANE_MEM_EXECUTABLE_AND_MODULES,
+			.expected_ret = 1,
+			.expected = {
+				{ .base = 0x1000, .length = 0x1000, .type = PLANE_MEM_RESERVED },
+				{ .base = 0x2000, .length = 0x1000, .type = PLANE_MEM_EXECUTABLE_AND_MODULES },
+				{ .base = 0x3000, .length = 0x2000, .type = PLANE_MEM_RESERVED },
+			},
+			.expected_count = 3,
+		},
+		{
+			.name = "bootloader reserve splits an existing generic reserved region",
+			.input = {
+				{ .base = 0x1000, .length = 0x4000, .type = PLANE_MEM_RESERVED },
+			},
+			.input_count = 1,
+			.reserve_base = 0x2000,
+			.reserve_length = 0x1000,
+			.reserve_type = PLANE_MEM_BOOTLOADER_RECLAIMABLE,
+			.expected_ret = 1,
+			.expected = {
+				{ .base = 0x1000, .length = 0x1000, .type = PLANE_MEM_RESERVED },
+				{ .base = 0x2000, .length = 0x1000, .type = PLANE_MEM_BOOTLOADER_RECLAIMABLE },
+				{ .base = 0x3000, .length = 0x2000, .type = PLANE_MEM_RESERVED },
+			},
+			.expected_count = 3,
+		},
+		{
+			.name = "bootloader reserve preserves handoff data inside executable region",
+			.input = {
+				{ .base = 0x1000, .length = 0x4000, .type = PLANE_MEM_EXECUTABLE_AND_MODULES },
+			},
+			.input_count = 1,
+			.reserve_base = 0x2000,
+			.reserve_length = 0x1000,
+			.reserve_type = PLANE_MEM_BOOTLOADER_RECLAIMABLE,
+			.expected_ret = 1,
+			.expected = {
+				{ .base = 0x1000, .length = 0x1000, .type = PLANE_MEM_EXECUTABLE_AND_MODULES },
+				{ .base = 0x2000, .length = 0x1000, .type = PLANE_MEM_BOOTLOADER_RECLAIMABLE },
+				{ .base = 0x3000, .length = 0x2000, .type = PLANE_MEM_EXECUTABLE_AND_MODULES },
+			},
+			.expected_count = 3,
 		},
 		{
 			.name = "zero-length reserve is a no-op",

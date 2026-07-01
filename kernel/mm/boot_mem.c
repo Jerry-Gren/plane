@@ -2,9 +2,44 @@
 #include <plane/mm.h>
 #include <plane/util.h>
 
+#define PLANE_MEMMAP_MAX_BOUNDARIES (PLANE_MAX_MEMMAP_ENTRIES * 2)
+
+static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end) {
+	*end = base + length;
+	return *end >= base;
+}
+
 static bool append_clean_region(struct plane_mem_region *clean_map,
 				uint64_t *clean_count,
 				struct plane_mem_region region) {
+	if (*clean_count > 0) {
+		struct plane_mem_region *prev = &clean_map[*clean_count - 1];
+		uint64_t prev_end;
+
+		if (!checked_region_end(prev->base, prev->length, &prev_end)) {
+			return false;
+		}
+
+		if (prev_end == region.base && prev->type == region.type) {
+			uint64_t region_end;
+
+			/*
+			 * Boundary scan emits small adjacent pieces.
+			 *
+			 * prev: [====]
+			 * curr:      [====]
+			 *
+			 * action: merge equal-type neighbors.
+			 */
+			if (!checked_region_end(region.base, region.length,
+						&region_end)) {
+				return false;
+			}
+			prev->length = region_end - prev->base;
+			return true;
+		}
+	}
+
 	if (*clean_count >= PLANE_MAX_MEMMAP_ENTRIES) {
 		return false;
 	}
@@ -13,9 +48,109 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 	return true;
 }
 
-static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end) {
-	*end = base + length;
-	return *end >= base;
+static int mem_type_rank(uint32_t type) {
+	/*
+	 * Overlap priority:
+	 *   usable             : allocator input, lowest rank
+	 *   generic/untrusted  : unavailable, invalid, unknown, or mapped fallback
+	 *   specific reserved  : keeps boot protocol / hardware semantics
+	 *   bootloader handoff : protects data passed into early kernel C
+	 */
+	switch (type) {
+	case PLANE_MEM_USABLE:
+		return 0;
+	case PLANE_MEM_INVALID:
+	case PLANE_MEM_RESERVED:
+	case PLANE_MEM_RESERVED_MAPPED:
+		return 1;
+	case PLANE_MEM_BOOTLOADER_RECLAIMABLE:
+		return 3;
+	case PLANE_MEM_ACPI_RECLAIMABLE:
+	case PLANE_MEM_ACPI_NVS:
+	case PLANE_MEM_BAD_MEMORY:
+	case PLANE_MEM_EXECUTABLE_AND_MODULES:
+	case PLANE_MEM_FRAMEBUFFER:
+		return 2;
+	default:
+		return 1;
+	}
+}
+
+static bool append_boundary(uint64_t *boundaries, uint64_t *boundary_count,
+			    uint64_t boundary) {
+	for (uint64_t i = 0; i < *boundary_count; i++) {
+		if (boundaries[i] == boundary) {
+			return true;
+		}
+	}
+
+	if (*boundary_count >= PLANE_MEMMAP_MAX_BOUNDARIES) {
+		return false;
+	}
+
+	boundaries[(*boundary_count)++] = boundary;
+	return true;
+}
+
+static void sort_boundaries(uint64_t *boundaries, uint64_t boundary_count) {
+	for (uint64_t i = 0; i < boundary_count; i++) {
+		for (uint64_t j = 0; j < boundary_count - i - 1; j++) {
+			if (boundaries[j] > boundaries[j + 1]) {
+				uint64_t tmp = boundaries[j];
+				boundaries[j] = boundaries[j + 1];
+				boundaries[j + 1] = tmp;
+			}
+		}
+	}
+}
+
+static bool choose_interval_type(const struct plane_mem_info *mem,
+				 uint64_t base,
+				 uint64_t end,
+				 uint32_t *type,
+				 bool *covered) {
+	int best_rank = -1;
+	uint32_t best_type = PLANE_MEM_INVALID;
+	bool conflict = false;
+
+	*covered = false;
+
+	for (uint64_t i = 0; i < mem->entry_count; i++) {
+		const struct plane_mem_region *region = &mem->map[i];
+		uint64_t region_end;
+
+		if (!checked_region_end(region->base, region->length,
+					&region_end)) {
+			return false;
+		}
+
+		if (region->base > base || region_end < end) {
+			continue;
+		}
+
+		int rank = mem_type_rank(region->type);
+		if (!*covered || rank > best_rank) {
+			best_rank = rank;
+			best_type = region->type;
+			conflict = false;
+			*covered = true;
+		} else if (rank == best_rank && region->type != best_type) {
+			/*
+			 * ACPI_NVS: [------]
+			 * BAD_MEM :    [------]
+			 * result  : [NVS][RESV][BAD]
+			 *
+			 * action: same-rank conflict degrades only the
+			 * conflicting interval to generic RESERVED.
+			 */
+			conflict = true;
+		}
+	}
+
+	if (*covered) {
+		*type = conflict ? PLANE_MEM_RESERVED : best_type;
+	}
+	return true;
 }
 
 bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
@@ -63,133 +198,63 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
 		}
 	}
 
-	/*
-	 * thrid:
-	 *   process overlap
-	 */
-	struct plane_mem_region clean_map[PLANE_MAX_MEMMAP_ENTRIES];
-	uint64_t clean_count = 0;
+	uint64_t boundaries[PLANE_MEMMAP_MAX_BOUNDARIES];
+	uint64_t boundary_count = 0;
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
-		struct plane_mem_region curr = mem->map[i];
+		uint64_t end;
 
-		if (clean_count == 0) {
-			if (!append_clean_region(clean_map, &clean_count, curr)) {
-				return false;
-			}
-			continue;
-		}
-
-		struct plane_mem_region *prev = &clean_map[clean_count - 1];
-		uint64_t prev_end;
-		uint64_t curr_end;
-		if (!checked_region_end(prev->base, prev->length, &prev_end) ||
-		    !checked_region_end(curr.base, curr.length, &curr_end)) {
+		if (!checked_region_end(mem->map[i].base, mem->map[i].length,
+					&end)) {
 			return false;
 		}
 
-		/*
-		 * case 1: completely disjoint
-		 * 
-		 * prev: [========]
-		 * curr:               [========]
-		 * 
-		 * action: append curr.
-		 */
-		if (curr.base >= prev_end) {
-			if (!append_clean_region(clean_map, &clean_count, curr)) {
-				return false;
-			}
+		if (!append_boundary(boundaries, &boundary_count,
+				     mem->map[i].base) ||
+		    !append_boundary(boundaries, &boundary_count, end)) {
+			return false;
+		}
+	}
+	sort_boundaries(boundaries, boundary_count);
+
+	/*
+	 * raw:
+	 *   A: [-----------]
+	 *   B:     [###]
+	 * bounds:
+	 *      |---|###|---|
+	 * action:
+	 *   choose type for each interval, then merge adjacent equal types.
+	 */
+	/*
+	 * third:
+	 *   split overlaps on all boundaries and select the highest-rank type
+	 */
+	struct plane_mem_region clean_map[PLANE_MAX_MEMMAP_ENTRIES];
+	uint64_t clean_count = 0;
+	for (uint64_t i = 0; i + 1 < boundary_count; i++) {
+		uint64_t base = boundaries[i];
+		uint64_t end = boundaries[i + 1];
+		uint32_t type;
+		bool covered;
+
+		if (base == end) {
 			continue;
 		}
-		/*
-		 * case 2: same type overlap
-		 * 
-		 * prev: [========]
-		 * curr:      [========]
-		 * 
-		 * action: extend prev to cover curr's end.
-		 */
-		if (prev->type == curr.type) {
-			if (curr_end > prev_end) {
-				prev->length = curr_end - prev->base;
-			}
+
+		if (!choose_interval_type(mem, base, end, &type, &covered)) {
+			return false;
+		}
+		if (!covered) {
 			continue;
 		}
-		/* 
-		 * case 3: different types overlap
-		 * priority: non-USABLE > USABLE
-		 */
-		int prev_prio = (prev->type == PLANE_MEM_USABLE) ? 0 : 1;
-		int curr_prio = (curr.type == PLANE_MEM_USABLE) ? 0 : 1;
-		if (curr_prio > prev_prio) {
-			/*
-			 * case 3a: curr (hi-prio) truncates prev (lo-prio)
-			 *
-			 * prev (USABLE)  : [----------------------]
-			 * curr (RESERVED):         [######]
-			 * 
-			 * step 1 (truncate prev) : [------]
-			 * step 2 (append curr)   : [------][######]
-			 * step 3 (save tail)     :                 [------] -> pushed back to i--
-			 */
-			uint64_t old_prev_end = prev_end;
-			uint32_t old_prev_type = prev->type;
-			prev->length = curr.base - prev->base;
 
-			if (prev->length == 0) {
-				*prev = curr; /* prev is completely crushed, replace it */
-			} else if (!append_clean_region(clean_map, &clean_count, curr)) {
-				return false;
-			}
-
-			/* rescue the remaining tail of prev if curr split it */
-			if (curr_end < old_prev_end) {
-				uint64_t tail_base = ALIGN(curr_end, PAGE_SIZE);
-				if (tail_base < old_prev_end) {
-					uint64_t tail_len = ALIGN_DOWN(old_prev_end - tail_base, PAGE_SIZE);
-					if (tail_len > 0) {
-						/* put the tail back, deduct i to reprocess it */
-						mem->map[i].base = tail_base;
-						mem->map[i].length = tail_len;
-						mem->map[i].type = old_prev_type;
-						i--; 
-					}
-				}
-			}
-		}
-		else if (prev_prio > curr_prio) {
-			/*
-			 * case 3b: prev (hi-prio) cuts off curr's head (lo-prio)
-			 *
-			 * prev (RESERVED): [######]
-			 * curr (USABLE)  :     [------------------]
-			 * 
-			 * step 1 (keep prev)    : [######]
-			 * step 2 (truncate curr):         [-------] -> pushed back to i--
-			 */
-			if (curr_end > prev_end) {
-				uint64_t new_base = ALIGN(prev_end, PAGE_SIZE);
-				if (new_base < curr_end) {
-					uint64_t new_len = ALIGN_DOWN(curr_end - new_base, PAGE_SIZE);
-					if (new_len > 0) {
-						/* put the tail back, deduct i to reprocess it */
-						mem->map[i].base = new_base;
-						mem->map[i].length = new_len;
-						i--;
-					}
-				}
-			}
-		}
-		else {
-			/* 
-			 * case 3c: both high priority but different specific types 
-			 * (e.g., ACPI_NVS vs BAD_MEMORY)
-			 * action: degrade to strictest generic RESERVED and merge.
-			 */
-			prev->type = PLANE_MEM_RESERVED;
-			if (curr_end > prev_end) {
-				prev->length = curr_end - prev->base;
-			}
+		if (!append_clean_region(clean_map, &clean_count,
+					 (struct plane_mem_region){
+						 .base = base,
+						 .length = end - base,
+						 .type = type
+					 })) {
+			return false;
 		}
 	}
 
