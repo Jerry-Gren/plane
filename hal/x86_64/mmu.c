@@ -1,7 +1,5 @@
 #include <hal/mmu.h>
 
-#include <hal/x86_64/arch_mmu.h>
-
 void hal_mmu_invalidate_tlb(uintptr_t vaddr) {
 	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");
 }
@@ -14,16 +12,4 @@ void hal_mmu_flush_tlb_all(void) {
 		: /* no output */
 		: "rax", "memory"
 	);
-}
-
-void *hal_mmu_phys_to_virt(uintptr_t phys_addr) {
-	/*
-	 * uses the early high-half direct window built around KERNEL_VMA_BASE.
-	 * does not map any physical address.
-	 */
-	return (void *)(phys_addr + KERNEL_VMA_BASE);
-}
-
-uintptr_t hal_mmu_virt_to_phys(void *virt_addr) {
-	return (uintptr_t)virt_addr - KERNEL_VMA_BASE;
 }

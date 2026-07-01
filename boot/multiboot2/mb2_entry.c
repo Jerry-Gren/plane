@@ -2,8 +2,8 @@
 #include <stddef.h>
 #include <multiboot2.h>
 
-#include <hal/mmu.h>
 #include <hal/cpu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/boot_info.h>
 #include <plane/kernel.h>
@@ -87,7 +87,7 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
-	video->framebuffer_addr = (uint32_t *)hal_mmu_map_early_framebuffer(phys_addr, fb_size);
+	video->framebuffer_addr = (uint32_t *)x86_64_mb2_early_map_framebuffer(phys_addr, fb_size);
 }
 
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {
@@ -171,7 +171,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	uint64_t framebuffer_phys_addr = 0;
 	uint64_t framebuffer_size = 0;
 
-	void *info_vaddr = hal_mmu_phys_to_virt(info_addr);
+	void *info_vaddr = x86_64_mb2_early_direct_phys_to_virt(info_addr);
 	struct multiboot_info_base *info_base = info_vaddr;
 	struct multiboot_tag *tag = (struct multiboot_tag *)((uint8_t *)info_vaddr + sizeof(struct multiboot_info_base));
 
@@ -200,7 +200,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	boot_mb2_add_reservations(&b_info, info_addr, info_base->total_size,
 				  framebuffer_phys_addr, framebuffer_size);
 
-	hal_mmu_remove_identity_mapping();
+	x86_64_mb2_early_remove_identity_mapping();
 
 	kmain(&b_info);
 
