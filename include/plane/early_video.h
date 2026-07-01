@@ -14,7 +14,7 @@
 bool plane_early_video_format_supported(const struct plane_video_info *video);
 
 /*
- * call with rbg framebuffer info already accepted by
+ * call with rgb framebuffer info already accepted by
  * plane_early_video_format_supported().
  *
  * kept public for tests and early reuse; can become internal once no external
