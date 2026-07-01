@@ -21,6 +21,7 @@ PHDRS
 SECTIONS {
     /* Physical address */
     . = 1M;
+    __kernel_phys_start = .;
 
     .boot.text : {
         KEEP(*(.multiboot_header))
@@ -67,6 +68,7 @@ SECTIONS {
         *(COMMON)
         __kernel_bss_end = .;
     } :data
+    __kernel_phys_end = . - KERNEL_VMA_BASE;
 
     /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */
     /DISCARD/ : {

@@ -2,8 +2,19 @@
 #include <plane/memmap.h>
 #include <plane/mm.h>
 
-void plane_sanitize_memory_map(struct plane_mem_info *mem) {
-	if (mem->entry_count == 0) return;
+static bool append_clean_region(struct plane_mem_region *clean_map,
+				uint64_t *clean_count,
+				struct plane_mem_region region) {
+	if (*clean_count >= PLANE_MAX_MEMMAP_ENTRIES) {
+		return false;
+	}
+
+	clean_map[(*clean_count)++] = region;
+	return true;
+}
+
+static bool sanitize_memory_map(struct plane_mem_info *mem) {
+	if (mem->entry_count == 0) return true;
 
 	/*
 	 * first:
@@ -52,7 +63,9 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 		struct plane_mem_region curr = mem->map[i];
 
 		if (clean_count == 0) {
-			clean_map[clean_count++] = curr;
+			if (!append_clean_region(clean_map, &clean_count, curr)) {
+				return false;
+			}
 			continue;
 		}
 
@@ -69,8 +82,8 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 		 * action: append curr.
 		 */
 		if (curr.base >= prev_end) {
-			if (clean_count < PLANE_MAX_MEMMAP_ENTRIES) {
-				clean_map[clean_count++] = curr;
+			if (!append_clean_region(clean_map, &clean_count, curr)) {
+				return false;
 			}
 			continue;
 		}
@@ -111,8 +124,8 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 
 			if (prev->length == 0) {
 				*prev = curr; /* prev is completely crushed, replace it */
-			} else if (clean_count < PLANE_MAX_MEMMAP_ENTRIES) {
-				clean_map[clean_count++] = curr;
+			} else if (!append_clean_region(clean_map, &clean_count, curr)) {
+				return false;
 			}
 
 			/* rescue the remaining tail of prev if curr split it */
@@ -171,4 +184,48 @@ void plane_sanitize_memory_map(struct plane_mem_info *mem) {
 		mem->map[i] = clean_map[i];
 	}
 	mem->entry_count = clean_count;
+	return true;
+}
+
+void plane_sanitize_memory_map(struct plane_mem_info *mem) {
+	(void)sanitize_memory_map(mem);
+}
+
+bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
+			  uint64_t length, uint32_t type) {
+	if (length == 0) {
+		return true;
+	}
+
+	if (type == PLANE_MEM_INVALID || type == PLANE_MEM_USABLE) {
+		return false;
+	}
+
+	if (mem->entry_count >= PLANE_MAX_MEMMAP_ENTRIES) {
+		return false;
+	}
+
+	uint64_t end = base + length;
+	if (end < base) {
+		return false;
+	}
+
+	uint64_t reserve_base = ALIGN_DOWN(base, PAGE_SIZE);
+	uint64_t reserve_end = ALIGN(end, PAGE_SIZE);
+	if (reserve_end < end || reserve_end <= reserve_base) {
+		return false;
+	}
+
+	struct plane_mem_info tmp = *mem;
+	uint64_t index = tmp.entry_count++;
+	tmp.map[index].base = reserve_base;
+	tmp.map[index].length = reserve_end - reserve_base;
+	tmp.map[index].type = type;
+
+	if (!sanitize_memory_map(&tmp)) {
+		return false;
+	}
+
+	*mem = tmp;
+	return true;
 }

@@ -4,6 +4,7 @@
 
 #include <hal/mmu.h>
 #include <hal/cpu.h>
+#include <hal/x86_64/linkage.h>
 
 #include <plane/boot_info.h>
 #include <plane/kernel.h>
@@ -17,7 +18,10 @@ struct multiboot_info_base {
     uint32_t reserved;
 };
 
-static void boot_mb2_collect_framebuffer(struct plane_video_info *video, struct multiboot_tag_framebuffer *fb_tag) {
+static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
+					 struct multiboot_tag_framebuffer *fb_tag,
+					 uint64_t *framebuffer_phys_addr,
+					 uint64_t *framebuffer_size) {
 	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
 	
 	/* struct multiboot_tag_framebuffer_common
@@ -42,6 +46,8 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video, struct 
 	uint64_t phys_addr = fb_common->framebuffer_addr;
 	uint64_t fb_size = (uint64_t)video->pitch * video->height;
 
+	*framebuffer_phys_addr = phys_addr;
+	*framebuffer_size = fb_size;
 	video->framebuffer_addr = (uint32_t *)hal_mmu_map_early_framebuffer(phys_addr, fb_size);
 }
 
@@ -89,6 +95,32 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 	}
 }
 
+static void boot_mb2_add_reservations(struct boot_info *info,
+				      uint64_t mb2_info_addr,
+				      uint64_t mb2_info_size,
+				      uint64_t framebuffer_phys_addr,
+				      uint64_t framebuffer_size) {
+	uint64_t kernel_phys_start = (uint64_t)__kernel_phys_start;
+	uint64_t kernel_phys_end = (uint64_t)__kernel_phys_end;
+
+	if (!plane_memmap_reserve(&info->mem, kernel_phys_start,
+				  kernel_phys_end - kernel_phys_start,
+				  PLANE_MEM_EXECUTABLE_AND_MODULES)) {
+		hal_cpu_hang();
+	}
+
+	if (!plane_memmap_reserve(&info->mem, mb2_info_addr, mb2_info_size,
+				  PLANE_MEM_BOOTLOADER_RECLAIMABLE)) {
+		hal_cpu_hang();
+	}
+
+	if (!plane_memmap_reserve(&info->mem, framebuffer_phys_addr,
+				  framebuffer_size,
+				  PLANE_MEM_FRAMEBUFFER)) {
+		hal_cpu_hang();
+	}
+}
+
 void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	
 	/* check magic number passed by multiboot2 */
@@ -97,15 +129,20 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	}
 
 	struct boot_info b_info = {0};
+	uint64_t framebuffer_phys_addr = 0;
+	uint64_t framebuffer_size = 0;
 
 	void *info_vaddr = hal_mmu_phys_to_virt(info_addr);
+	struct multiboot_info_base *info_base = info_vaddr;
 	struct multiboot_tag *tag = (struct multiboot_tag *)((uint8_t *)info_vaddr + sizeof(struct multiboot_info_base));
 
 	while (tag->type != MULTIBOOT_TAG_TYPE_END) {
 		
 		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
 			struct multiboot_tag_framebuffer *fb_tag = (struct multiboot_tag_framebuffer *)tag;
-			boot_mb2_collect_framebuffer(&b_info.video, fb_tag);
+			boot_mb2_collect_framebuffer(&b_info.video, fb_tag,
+						     &framebuffer_phys_addr,
+						     &framebuffer_size);
 		}
 
 		else if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
@@ -120,6 +157,9 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 	if (b_info.video.framebuffer_addr == NULL) {
 		hal_cpu_hang();
 	}
+
+	boot_mb2_add_reservations(&b_info, info_addr, info_base->total_size,
+				  framebuffer_phys_addr, framebuffer_size);
 
 	hal_mmu_remove_identity_mapping();
 

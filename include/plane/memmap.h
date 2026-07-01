@@ -1,6 +1,7 @@
 #ifndef PLANE_MEMMAP_H
 #define PLANE_MEMMAP_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define PLANE_MAX_MEMMAP_ENTRIES 128
@@ -30,5 +31,7 @@ struct plane_mem_info {
 };
 
 void plane_sanitize_memory_map(struct plane_mem_info *mem);
+bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
+			  uint64_t length, uint32_t type);
 
 #endif /* PLANE_MEMMAP_H */

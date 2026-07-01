@@ -5,6 +5,8 @@
 
 extern char __kernel_text_start[];
 extern char __kernel_text_end[];
+extern char __kernel_phys_start[];
+extern char __kernel_phys_end[];
 
 #endif /* __ASSEMBLER__ */
 

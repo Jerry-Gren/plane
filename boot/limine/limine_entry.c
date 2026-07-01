@@ -70,8 +70,8 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	 * };
 	 */
 	/* fetch the first framebuffer */
-   	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
-	
+	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
+
 	video->framebuffer_addr = (uint32_t *)fb->address;
 	video->width            = fb->width;
 	video->height           = fb->height;
