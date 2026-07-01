@@ -3,6 +3,8 @@ ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 CC := x86_64-elf-gcc
 LD := x86_64-elf-ld
 HOSTCC ?= gcc
+GENERATED_DIR := include/generated
+AUTOCONF_HEADER := $(GENERATED_DIR)/autoconf.h
 
 override CFLAGS += \
 	-I$(ROOT_DIR)/include \
@@ -80,7 +82,7 @@ $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 	@echo "  CPP     $@"
 	@$(CC) -E -P -x c -D__ASSEMBLER__ $(CFLAGS) $< -o $@
 
-%.o: %.c include/generated/autoconf.h
+%.o: %.c $(AUTOCONF_HEADER)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -88,13 +90,14 @@ $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 	@echo "  AS      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-include/generated/autoconf.h: .config
-	@mkdir -p include/generated
-	@genconfig --header-path include/generated/autoconf.h
+$(AUTOCONF_HEADER): .config
+	@mkdir -p $(GENERATED_DIR)
+	@genconfig --header-path $(AUTOCONF_HEADER)
 
 menuconfig:
+	@mkdir -p $(GENERATED_DIR)
 	@MENUCONFIG_STYLE="monochrome" menuconfig
-	@genconfig --header-path include/generated/autoconf.h
+	@genconfig --header-path $(AUTOCONF_HEADER)
 
 check: unit-check
 
@@ -171,5 +174,5 @@ clean:
 
 distclean: clean
 	@echo "  DISTCLEAN"
-	@rm -rf build/ include/generated/* .config .config.old
+	@rm -rf build/ $(GENERATED_DIR)/* .config .config.old
 	@$(MAKE) -s -C tools/limine_bin clean
