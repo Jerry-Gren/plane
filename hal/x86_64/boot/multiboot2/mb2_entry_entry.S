@@ -1,7 +1,7 @@
 #define ASM_FILE           1
 #include <multiboot2.h>
 
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 /* Macros */
 #define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
@@ -177,10 +177,10 @@ _start:
     or $(PAGE_PRESENT | PAGE_RW), %eax
     mov %eax, (PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
 
-#if PDPT_INDEX(KERNEL_VMA_BASE) != PDPT_INDEX(FRAMEBUFFER_VMA_BASE)
+#if PDPT_INDEX(KERNEL_VMA_BASE) != PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
     mov $early_pd_fb, %eax
     or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, (PDPT_INDEX(FRAMEBUFFER_VMA_BASE) * 8)(%edi)
+    mov %eax, (PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
 
     /* PDT */

@@ -1,5 +1,4 @@
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/kernel.h>
@@ -20,21 +19,21 @@ void *x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size) {
 	uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
 
 	uint64_t *target_pd = early_pd_fb;
-#if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(FRAMEBUFFER_VMA_BASE)
+#if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
 	target_pd = early_pd_kernel;
 #endif
 
-	uint64_t start_idx = PD_INDEX(FRAMEBUFFER_VMA_BASE);
+	uint64_t start_idx = PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
 
 	for (uint64_t i = 0; i < pages_needed; i++) {
 		uint64_t offset = i * ARCH_LARGE_PAGE_SIZE;
-		uint64_t current_vaddr = FRAMEBUFFER_VMA_BASE + offset;
+		uint64_t current_vaddr = X86_64_MB2_FRAMEBUFFER_VMA_BASE + offset;
 		
 		target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
 		hal_mmu_invalidate_tlb(current_vaddr);
 	}
 
-	return (void *)(FRAMEBUFFER_VMA_BASE + page_offset);
+	return (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE + page_offset);
 }
 
 void x86_64_mb2_early_remove_identity_mapping(void) {

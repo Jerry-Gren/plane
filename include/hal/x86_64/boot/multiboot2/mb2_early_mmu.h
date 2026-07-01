@@ -1,14 +1,37 @@
 #ifndef HAL_X86_64_BOOT_MULTIBOOT2_MB2_EARLY_MMU_H
 #define HAL_X86_64_BOOT_MULTIBOOT2_MB2_EARLY_MMU_H
 
-#include <stdint.h>
+#include <hal/x86_64/arch_mmu.h>
+
+#ifdef __ASSEMBLER__
+	#define X86_64_MB2_FRAMEBUFFER_VMA_BASE 0xffffffffc0000000
+#else
+	#include <stdint.h>
+	#define X86_64_MB2_FRAMEBUFFER_VMA_BASE 0xffffffffc0000000ull
+#endif
+
+#if (X86_64_MB2_FRAMEBUFFER_VMA_BASE & 0x1fffff) != 0
+	#error "X86_64_MB2_FRAMEBUFFER_VMA_BASE must be 2MB aligned!"
+#endif
+
+#if KERNEL_VMA_BASE == X86_64_MB2_FRAMEBUFFER_VMA_BASE
+	#error "Kernel and Multiboot2 framebuffer cannot share the same VMA base!"
+#endif
+
+#if ((KERNEL_VMA_BASE > X86_64_MB2_FRAMEBUFFER_VMA_BASE ? \
+      KERNEL_VMA_BASE - X86_64_MB2_FRAMEBUFFER_VMA_BASE : \
+      X86_64_MB2_FRAMEBUFFER_VMA_BASE - KERNEL_VMA_BASE) < 0x2000000ull)
+	#error "Kernel and Multiboot2 framebuffer VMA bases are too close!"
+#endif
 
 /*
  * Multiboot2 handoff page-table helpers. These operate on the temporary
  * x86_64 page tables built by the Multiboot2 entry path.
  */
+#ifndef __ASSEMBLER__
 void *x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size);
 void x86_64_mb2_early_remove_identity_mapping(void);
 void *x86_64_mb2_early_direct_phys_to_virt(uintptr_t phys_addr);
+#endif /* !__ASSEMBLER__ */
 
 #endif /* HAL_X86_64_BOOT_MULTIBOOT2_MB2_EARLY_MMU_H */
