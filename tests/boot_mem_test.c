@@ -72,12 +72,13 @@ static int run_case(const struct test_case *tc) {
 	memcpy(expected.map, tc->expected,
 	       tc->expected_count * sizeof(tc->expected[0]));
 
-	plane_sanitize_memory_map(&actual);
-	if (maps_equal(&actual, &expected)) {
+	int ret = plane_sanitize_memory_map(&actual);
+	if (ret == 1 && maps_equal(&actual, &expected)) {
 		return 1;
 	}
 
 	printf("FAIL: %s\n", tc->name);
+	printf("expected ret=1 actual ret=%d\n", ret);
 	dump_map("expected", &expected);
 	dump_map("actual", &actual);
 	return 0;
@@ -141,6 +142,32 @@ static int run_full_map_reserve_failure_case(void) {
 	printf("FAIL: full map reserve fails without modifying map\n");
 	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("expected", &expected);
+	dump_map("actual", &actual);
+	return 0;
+}
+
+static int run_sanitize_too_many_regions_failure_case(void) {
+	struct plane_mem_info actual = {0};
+	const uint64_t reservation_count = PLANE_MAX_MEMMAP_ENTRIES / 2;
+
+	actual.entry_count = reservation_count + 1;
+	actual.map[0].base = 0;
+	actual.map[0].length = (reservation_count * 2 + 2) * 0x1000;
+	actual.map[0].type = PLANE_MEM_USABLE;
+
+	for (uint64_t i = 0; i < reservation_count; i++) {
+		actual.map[i + 1].base = (i * 2 + 1) * 0x1000;
+		actual.map[i + 1].length = 0x1000;
+		actual.map[i + 1].type = PLANE_MEM_RESERVED;
+	}
+
+	int ret = plane_sanitize_memory_map(&actual);
+	if (ret == 0) {
+		return 1;
+	}
+
+	printf("FAIL: sanitize reports too many output regions\n");
+	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("actual", &actual);
 	return 0;
 }
@@ -357,7 +384,7 @@ int main(void) {
 	int passed = 0;
 	int sanitize_count = (int)(sizeof(cases) / sizeof(cases[0]));
 	int reserve_count = (int)(sizeof(reserve_cases) / sizeof(reserve_cases[0]));
-	int total = sanitize_count + reserve_count + 1;
+	int total = sanitize_count + reserve_count + 2;
 
 	for (int i = 0; i < sanitize_count; i++) {
 		passed += run_case(&cases[i]);
@@ -366,6 +393,7 @@ int main(void) {
 		passed += run_reserve_case(&reserve_cases[i]);
 	}
 	passed += run_full_map_reserve_failure_case();
+	passed += run_sanitize_too_many_regions_failure_case();
 
 	if (passed != total) {
 		printf("boot_mem_test: %d/%d passed\n", passed, total);

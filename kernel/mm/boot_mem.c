@@ -13,7 +13,7 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 	return true;
 }
 
-static bool sanitize_memory_map(struct plane_mem_info *mem) {
+bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
 	if (mem->entry_count == 0) return true;
 
 	/*
@@ -187,10 +187,6 @@ static bool sanitize_memory_map(struct plane_mem_info *mem) {
 	return true;
 }
 
-void plane_sanitize_memory_map(struct plane_mem_info *mem) {
-	(void)sanitize_memory_map(mem);
-}
-
 bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 			  uint64_t length, uint32_t type) {
 	if (length == 0) {
@@ -222,7 +218,7 @@ bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 	tmp.map[index].length = reserve_end - reserve_base;
 	tmp.map[index].type = type;
 
-	if (!sanitize_memory_map(&tmp)) {
+	if (!plane_sanitize_memory_map(&tmp)) {
 		return false;
 	}
 

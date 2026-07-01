@@ -30,7 +30,7 @@ struct plane_mem_info {
 	struct plane_mem_region map[PLANE_MAX_MEMMAP_ENTRIES];
 };
 
-void plane_sanitize_memory_map(struct plane_mem_info *mem);
+bool plane_sanitize_memory_map(struct plane_mem_info *mem);
 bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 			  uint64_t length, uint32_t type);
 

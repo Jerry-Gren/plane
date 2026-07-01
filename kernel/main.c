@@ -11,7 +11,9 @@ void kmain(struct boot_info *info) {
 	hal_serial_init();
 	hal_arch_early_init();
 
-	plane_sanitize_memory_map(&info->mem);
+	if (!plane_sanitize_memory_map(&info->mem)) {
+		hal_cpu_hang();
+	}
 	
 	/* 
 	 * TODO: 
