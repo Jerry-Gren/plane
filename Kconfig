@@ -24,9 +24,3 @@ choice
 endchoice
 
 endmenu
-
-menu "Drivers"
-    config BLK_DEV_NVME
-        bool "NVMe Support"
-        default n
-endmenu

@@ -51,10 +51,6 @@ ifeq ($(CONFIG_BOOT_GRUB),y)
     LINKER_SCRIPT := hal/x86_64/linker_grub.lds
 endif
 
-# ifeq ($(CONFIG_BLK_DEV_NVME),y)
-#     SRC_DIRS += drivers/block
-# endif
-
 C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 ALL_S_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.S))
 S_FILES := $(filter-out %.lds.S, $(ALL_S_FILES))
