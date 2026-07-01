@@ -25,8 +25,6 @@
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]) + __must_be_array(arr))
 #define ARRAY_END(arr)  (&(arr)[ARRAY_SIZE(arr)])
 
-#define BIT(nr)         (1UL << (nr))
-
 #define __ALIGN_KERNEL_MASK(x, mask)    (((x) + (mask)) & ~(mask))
 #define __ALIGN_KERNEL(x, a)            __ALIGN_KERNEL_MASK(x, (typeof(x))(a) - 1)
 

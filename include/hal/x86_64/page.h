@@ -15,7 +15,7 @@
 	#define ARCH_PAGE_SHIFT        12ull
 
 	#define ARCH_LARGE_PAGE_SIZE   0x200000ull
-	#define ARCH_LARGE_PAGE_SHIFT  21ULL
+	#define ARCH_LARGE_PAGE_SHIFT  21ull
 
 	#define ARCH_HUGE_PAGE_SIZE    0x40000000ull
 	#define ARCH_HUGE_PAGE_SHIFT   30ull

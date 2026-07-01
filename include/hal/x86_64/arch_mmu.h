@@ -2,12 +2,13 @@
 #define HAL_ARCH_MMU_H
 
 #include <hal/x86_64/page.h>
+#include <plane/bits.h>
 
 /* Page flags */
-#define PAGE_PRESENT         (1 << 0)
-#define PAGE_RW              (1 << 1)
-#define PAGE_PWT             (1 << 3)
-#define PAGE_PS              (1 << 7)
+#define PAGE_PRESENT         BIT(0)
+#define PAGE_RW              BIT(1)
+#define PAGE_PWT             BIT(3)
+#define PAGE_PS              BIT(7)
 
 /* Page table indices */
 #define PML4_INDEX(vaddr) (((vaddr) >> 39) & 0x1ff)

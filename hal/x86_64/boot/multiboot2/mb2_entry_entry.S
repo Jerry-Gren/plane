@@ -3,6 +3,7 @@
 
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 #include <hal/x86_64/cpuid_defs.h>
+#include <plane/bits.h>
 
 /* Macros */
 #define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
@@ -10,23 +11,23 @@
 #define MB2_TAG_END_TYPE   MULTIBOOT_HEADER_TAG_END
 #define MB2_TAG_FB_TYPE    MULTIBOOT_HEADER_TAG_FRAMEBUFFER
 
-#define CR4_PAE_ENABLE     (1 << 5)
+#define CR4_PAE_ENABLE     BIT(5)
 #define EFER_MSR           0xc0000080
-#define EFER_LM_ENABLE     (1 << 8)
-#define CR0_PAGING_ENABLE  (1 << 31)
-#define CR0_PROTECTED_MODE (1 << 0)
+#define EFER_LM_ENABLE     BIT(8)
+#define CR0_PAGING_ENABLE  BIT(31)
+#define CR0_PROTECTED_MODE BIT(0)
 
 # /* DO NOT MODIFY THESE TWO LINES */
 # #define X86_PD_PAGE_SIZE  0x200000
 # #define X86_PD_PAGE_SHIFT 21
 
-#define GDT_PRESENT        (1 << 7)
-#define GDT_NOT_SYS        (1 << 4)
-#define GDT_EXEC           (1 << 3)
-#define GDT_RW             (1 << 1)
-#define GDT_GRAN_4K        (1 << 7)
-#define GDT_LONG_MODE      (1 << 5)
-#define GDT_SZ_32          (1 << 6)
+#define GDT_PRESENT        BIT(7)
+#define GDT_NOT_SYS        BIT(4)
+#define GDT_EXEC           BIT(3)
+#define GDT_RW             BIT(1)
+#define GDT_GRAN_4K        BIT(7)
+#define GDT_LONG_MODE      BIT(5)
+#define GDT_SZ_32          BIT(6)
 
 #define MSR_IA32_CR_PAT       0x277
 #define PAT_WC                0x01
@@ -115,7 +116,7 @@ _start:
     pushfl
     popl %eax
     movl %eax, %ecx
-    xorl $(1 << 21), %eax
+    xorl $BIT(21), %eax
     pushl %eax
     popfl
     pushfl
