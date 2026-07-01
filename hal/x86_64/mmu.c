@@ -17,6 +17,10 @@ void hal_mmu_flush_tlb_all(void) {
 }
 
 void *hal_mmu_phys_to_virt(uintptr_t phys_addr) {
+	/*
+	 * uses the early high-half direct window built around KERNEL_VMA_BASE.
+	 * does not map any physical address.
+	 */
 	return (void *)(phys_addr + KERNEL_VMA_BASE);
 }
 

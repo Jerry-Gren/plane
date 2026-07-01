@@ -20,6 +20,11 @@ uint32_t plane_early_video_pack_rgb(const struct plane_video_info *video,
 }
 
 static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel) {
+	/*
+	 * current targets are little-endian.
+	 * if big-endian support is added,
+	 * make byte order explicit behind a hal helper.
+	 */
 	for (uint8_t i = 0; i < bytes_per_pixel; i++) {
 		dst[i] = (uint8_t)(pixel >> (i * 8));
 	}
@@ -46,6 +51,9 @@ bool plane_early_video_format_supported(const struct plane_video_info *video) {
 }
 
 bool plane_early_video_draw_test_pattern(struct plane_video_info *video) {
+	/*
+	 * TODO: validate pitch >= width * bytes_per_pixel before drawing.
+	 */
 	if (!plane_early_video_format_supported(video) ||
 	    video->framebuffer_addr == NULL ||
 	    video->width == 0 ||
