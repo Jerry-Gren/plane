@@ -27,8 +27,12 @@
 #define GDT_LONG_MODE      (1 << 5)
 #define GDT_SZ_32          (1 << 6)
 
+#define CPUID_BASIC_MAX       0x00000000
+#define CPUID_BASIC_FEATURES  0x00000001
 #define CPUID_EXTENSIONS      0x80000000
 #define CPUID_EXT_FEATURES    0x80000001
+#define CPUID_EDX_FEAT_MSR    (1 << 5)
+#define CPUID_EDX_FEAT_PAT    (1 << 16)
 #define CPUID_EDX_EXT_FEAT_LM (1 << 29)
 
 #define MSR_IA32_CR_PAT       0x277
@@ -127,6 +131,18 @@ _start:
     popfl
     cmpl %ecx, %eax
     je .Lno_long_mode
+
+    /* check for MSR and PAT support before writing EFER and IA32_PAT */
+    mov $CPUID_BASIC_MAX, %eax
+    cpuid
+    cmp $CPUID_BASIC_FEATURES, %eax
+    jb .Lno_long_mode
+    mov $CPUID_BASIC_FEATURES, %eax
+    cpuid
+    test $CPUID_EDX_FEAT_MSR, %edx
+    jz .Lno_long_mode
+    test $CPUID_EDX_FEAT_PAT, %edx
+    jz .Lno_long_mode
 
     /* check for long mode support */
     mov $CPUID_EXTENSIONS, %eax
