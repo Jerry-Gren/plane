@@ -38,13 +38,13 @@
 #define CPUID_1_ECX_SSSE3        (1u << 9)
 #define CPUID_1_ECX_FMA          (1u << 12)
 #define CPUID_1_ECX_CX16         (1u << 13)
-#define CPUID_1_ECX_PCID         (1u << 17)
+#define CPUID_1_ECX_INTEL_PCID   (1u << 17)
 #define CPUID_1_ECX_SSE4_1       (1u << 19)
 #define CPUID_1_ECX_SSE4_2       (1u << 20)
 #define CPUID_1_ECX_X2APIC       (1u << 21)
 #define CPUID_1_ECX_MOVBE        (1u << 22)
 #define CPUID_1_ECX_POPCNT       (1u << 23)
-#define CPUID_1_ECX_TSC_DEADLINE (1u << 24)
+#define CPUID_1_ECX_INTEL_TSC_DEADLINE (1u << 24)
 #define CPUID_1_ECX_AES          (1u << 25)
 #define CPUID_1_ECX_XSAVE        (1u << 26)
 #define CPUID_1_ECX_OSXSAVE      (1u << 27)
@@ -171,6 +171,75 @@ static void decode_signature(struct x86_64_cpu_features *features,
 
 static void decode_leaf1(struct x86_64_cpu_features *features,
 			 const struct x86_64_cpuid_leaf *leaf1) {
+	/*
+	 * Bit        Intel field                         AMD field
+	 *
+	 * EDX[0]     FPU                                 FPU
+	 * EDX[1]     VME                                 VME
+	 * EDX[2]     DE                                  DE
+	 * EDX[3]     PSE                                 PSE
+	 * EDX[4]     TSC                                 TSC
+	 * EDX[5]     MSR                                 MSR
+	 * EDX[6]     PAE                                 PAE
+	 * EDX[7]     MCE                                 MCE
+	 * EDX[8]     CMPXCHG8B                           CMPXCHG8B
+	 * EDX[9]     APIC                                APIC
+	 * EDX[10]    Reserved                            Reserved
+	 * EDX[11]    SEP                                 SysEnterSysExit
+	 * EDX[12]    MTRR                                MTRR
+	 * EDX[13]    PGE                                 PGE
+	 * EDX[14]    MCA                                 MCA
+	 * EDX[15]    CMOV                                CMOV
+	 * EDX[16]    PAT                                 PAT
+	 * EDX[17]    PSE_36                              PSE36
+	 * EDX[18]    PSN                                 Reserved
+	 * EDX[19]    CLFLUSH                             CLFSH
+	 * EDX[20]    Reserved                            Reserved
+	 * EDX[21]    DS                                  Reserved
+	 * EDX[22]    ACPI                                Reserved
+	 * EDX[23]    MMX                                 MMX
+	 * EDX[24]    FXSR                                FXSR
+	 * EDX[25]    SSE                                 SSE
+	 * EDX[26]    SSE2                                SSE2
+	 * EDX[27]    SELF_SNOOP                          Reserved
+	 * EDX[28]    HTT                                 HTT
+	 * EDX[29]    TM                                  Reserved
+	 * EDX[30]    Reserved                            Reserved
+	 * EDX[31]    PBE                                 Reserved
+	 *
+	 * ECX[0]     SSE3                                SSE3
+	 * ECX[1]     PCLMULQDQ                           PCLMULQDQ
+	 * ECX[2]     DTES64                              Reserved
+	 * ECX[3]     MONITOR                             MONITOR
+	 * ECX[4]     DS_CPL                              Reserved
+	 * ECX[5]     VMX                                 Reserved
+	 * ECX[6]     SMX                                 Reserved
+	 * ECX[7]     EIST                                Reserved
+	 * ECX[8]     TM2                                 Reserved
+	 * ECX[9]     SSSE3                               SSSE3
+	 * ECX[10]    L1_CONTEXT_ID                       Reserved
+	 * ECX[11]    DEBUG_INTERFACE                     Reserved
+	 * ECX[12]    FMA                                 FMA
+	 * ECX[13]    CMPXCHG16B                          CMPXCHG16B
+	 * ECX[14]    XTPR_UPDATE_CONTROL                 Reserved
+	 * ECX[15]    PERF_CAPABILITIES                   Reserved
+	 * ECX[16]    Reserved                            Reserved
+	 * ECX[17]    PCID                                Reserved
+	 * ECX[18]    DCA                                 Reserved
+	 * ECX[19]    SSE4_1                              SSE41
+	 * ECX[20]    SSE4_2                              SSE42
+	 * ECX[21]    X2APIC                              x2APIC
+	 * ECX[22]    MOVBE                               MOVBE
+	 * ECX[23]    POPCNT                              POPCNT
+	 * ECX[24]    TSC_DEADLINE                        Reserved
+	 * ECX[25]    AESNI                               AES
+	 * ECX[26]    XSAVE                               XSAVE
+	 * ECX[27]    OSXSAVE runtime state               OSXSAVE runtime state
+	 * ECX[28]    AVX                                 AVX
+	 * ECX[29]    F16C                                F16C
+	 * ECX[30]    RDRAND                              RDRAND
+	 * ECX[31]    Not Used, software emulation        Hypervisor guest status
+	 */
 	decode_signature(features, leaf1);
 
 	features->initial_apic_id = (leaf1->ebx >> 24) & 0xff;
@@ -218,8 +287,6 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 		(leaf1->ecx & CPUID_1_ECX_FMA) != 0;
 	features->has[X86_64_CPU_FEATURE_CX16] =
 		(leaf1->ecx & CPUID_1_ECX_CX16) != 0;
-	features->has[X86_64_CPU_FEATURE_PCID] =
-		(leaf1->ecx & CPUID_1_ECX_PCID) != 0;
 	features->has[X86_64_CPU_FEATURE_SSE4_1] =
 		(leaf1->ecx & CPUID_1_ECX_SSE4_1) != 0;
 	features->has[X86_64_CPU_FEATURE_SSE4_2] =
@@ -230,8 +297,6 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 		(leaf1->ecx & CPUID_1_ECX_MOVBE) != 0;
 	features->has[X86_64_CPU_FEATURE_POPCNT] =
 		(leaf1->ecx & CPUID_1_ECX_POPCNT) != 0;
-	features->has[X86_64_CPU_FEATURE_TSC_DEADLINE] =
-		(leaf1->ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
 	features->has[X86_64_CPU_FEATURE_AES] =
 		(leaf1->ecx & CPUID_1_ECX_AES) != 0;
 	features->has[X86_64_CPU_FEATURE_XSAVE] =
@@ -251,10 +316,119 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 	 */
 	features->has[X86_64_CPU_FEATURE_HYPERVISOR] =
 		(leaf1->ecx & CPUID_1_ECX_HYPERVISOR) != 0;
+
+	/* Intel defines ECX[17] as PCID; AMD reserves ECX[18:14]. */
+	if (features->vendor_id == X86_64_CPU_VENDOR_INTEL) {
+		features->has[X86_64_CPU_FEATURE_INTEL_PCID] =
+			(leaf1->ecx & CPUID_1_ECX_INTEL_PCID) != 0;
+	}
+
+	/* Intel defines ECX[24] as TSC_DEADLINE; AMD reserves this bit. */
+	if (features->vendor_id == X86_64_CPU_VENDOR_INTEL) {
+		features->has[X86_64_CPU_FEATURE_INTEL_TSC_DEADLINE] =
+			(leaf1->ecx & CPUID_1_ECX_INTEL_TSC_DEADLINE) != 0;
+	}
 }
 
 static void decode_leaf7_0(struct x86_64_cpu_features *features,
 			   const struct x86_64_cpuid_leaf *leaf7) {
+	/*
+	 * Bit         Intel field                        AMD field
+	 *
+	 * EBX[0]      FSGSBASE                           FSGSBASE
+	 * EBX[1]      TSC_ADJUST                         TSCADJUST
+	 * EBX[2]      SGX                                Reserved
+	 * EBX[3]      BMI1                               BMI1
+	 * EBX[4]      HLE                                Reserved
+	 * EBX[5]      AVX2                               AVX2
+	 * EBX[6]      FDP_EXCPTN_ONLY                    Reserved
+	 * EBX[7]      SMEP                               SMEP
+	 * EBX[8]      BMI2                               BMI2
+	 * EBX[9]      ENH_REP_MOVSB_STOSB                ERMS
+	 * EBX[10]     INVPCID                            INVPCID
+	 * EBX[11]     RTM                                Reserved
+	 * EBX[12]     RDT_M                              PQM
+	 * EBX[13]     FCS_FDS_DEPRECATION                Reserved
+	 * EBX[14]     MPX                                Reserved
+	 * EBX[15]     RDT_A                              PQE
+	 * EBX[16]     AVX512F                            AVX512F
+	 * EBX[17]     AVX512DQ                           AVX512DQ
+	 * EBX[18]     RDSEED                             RDSEED
+	 * EBX[19]     ADX                                ADX
+	 * EBX[20]     SMAP                               SMAP
+	 * EBX[21]     AVX512_IFMA                        AVX512_IFMA
+	 * EBX[22]     Reserved                           Reserved
+	 * EBX[23]     CLFLUSHOPT                         CLFLUSHOPT
+	 * EBX[24]     CLWB                               CLWB
+	 * EBX[25]     INTEL_PROC_TRACE                   Reserved
+	 * EBX[26]     AVX512PF                           Reserved
+	 * EBX[27]     AVX512ER                           Reserved
+	 * EBX[28]     AVX512CD                           AVX512CD
+	 * EBX[29]     SHA                                SHA
+	 * EBX[30]     AVX512BW                           AVX512BW
+	 * EBX[31]     AVX512VL                           AVX512VL
+	 *
+	 * ECX[0]      PREFETCHWT1                        Reserved
+	 * ECX[1]      AVX512_VBMI                        AVX512_VBMI
+	 * ECX[2]      UMIP                               UMIP
+	 * ECX[3]      PKU                                PKU
+	 * ECX[4]      OSPKE runtime state                OSPKE runtime state
+	 * ECX[5]      WAITPKG                            Reserved
+	 * ECX[6]      AVX512_VBMI2                       AVX512_VBMI2
+	 * ECX[7]      CET_SS                             CET_SS
+	 * ECX[8]      GFNI                               GFNI
+	 * ECX[9]      VAES                               VAES
+	 * ECX[10]     VPCLMULQDQ                         VPCMULQDQ
+	 * ECX[11]     AVX512_VNNI                        AVX512_VNNI
+	 * ECX[12]     AVX512_BITALG                      AVX512_BITALG
+	 * ECX[13]     TME_EN                             Reserved
+	 * ECX[14]     AVX512_VPOPCNTDQ                   AVX512_VPOPCNTDQ
+	 * ECX[15]     Reserved                           Reserved
+	 * ECX[16]     LA57                               LA57
+	 * ECX[21:17]  MPX_MAWAU                          Reserved
+	 * ECX[22]     RDPID                              RDPID
+	 * ECX[23]     KEY_LOCKER                         Reserved
+	 * ECX[24]     BUS_LOCK_DETECT                    BUSLOCKTRAP
+	 * ECX[25]     CLDEMOTE                           Reserved
+	 * ECX[26]     Reserved                           Reserved
+	 * ECX[27]     MOVDIRI                            MOVDIRI
+	 * ECX[28]     MOVDIR64B                          MOVDIR64B
+	 * ECX[29]     ENQCMD                             Reserved
+	 * ECX[30]     SGX_LC                             Reserved
+	 * ECX[31]     PKS                                Reserved
+	 *
+	 * EDX[0]      Reserved                           Reserved
+	 * EDX[1]      SGX_KEYS                           Reserved
+	 * EDX[2]      AVX512_4VNNIW                      Reserved
+	 * EDX[3]      AVX512_4FMAPS                      Reserved
+	 * EDX[4]      FAST_SHORT_REP_MOVSB               Reserved
+	 * EDX[5]      UINTR                              Reserved
+	 * EDX[7:6]    Reserved                           Reserved
+	 * EDX[8]      AVX512_VP2INTERSECT                Reserved
+	 * EDX[9]      MCU_OPT_CTRL                       Reserved
+	 * EDX[10]     MD_CLEAR                           Reserved
+	 * EDX[11]     RTM_ALWAYS_ABORT                   Reserved
+	 * EDX[12]     Reserved                           Reserved
+	 * EDX[13]     RTM_FORCE_ABORT                    Reserved
+	 * EDX[14]     SERIALIZE                          Reserved
+	 * EDX[15]     HYBRID                             Reserved
+	 * EDX[16]     TSXLDTRK                           Reserved
+	 * EDX[17]     Reserved                           Reserved
+	 * EDX[18]     PCONFIG                            Reserved
+	 * EDX[19]     ARCH_LBRS                          Reserved
+	 * EDX[20]     CET_IBT                            Reserved
+	 * EDX[21]     Reserved                           Reserved
+	 * EDX[22]     AMX_BF16                           Reserved
+	 * EDX[23]     AVX512_FP16                        Reserved
+	 * EDX[24]     AMX_TILE                           Reserved
+	 * EDX[25]     AMX_INT8                           Reserved
+	 * EDX[26]     IBRS_IBPB                          Reserved
+	 * EDX[27]     SPEC_CTRL_ST_PREDICTORS            Reserved
+	 * EDX[28]     L1D_FLUSH_INTERFACE                Reserved
+	 * EDX[29]     ARCH_CAPABILITIES                  Reserved
+	 * EDX[30]     CORE_CAPABILITIES                  Reserved
+	 * EDX[31]     SPEC_CTRL_SSBD                     Reserved
+	 */
 	features->leaf7_max_subleaf = leaf7->eax;
 
 	features->has[X86_64_CPU_FEATURE_FSGSBASE] =
@@ -311,6 +485,75 @@ static void decode_xsave(struct x86_64_cpu_features *features,
 
 static void decode_ext_leaf1(struct x86_64_cpu_features *features,
 			     const struct x86_64_cpuid_leaf *leaf_ext1) {
+	/*
+	 * Bit        Intel field                         AMD field
+	 *
+	 * ECX[0]     LAHF_SAHF_64                        LahfSahf
+	 * ECX[1]     Reserved                            CmpLegacy
+	 * ECX[2]     Reserved                            SVM
+	 * ECX[3]     Reserved                            ExtApicSpace
+	 * ECX[4]     Reserved                            AltMovCr8
+	 * ECX[5]     LZCNT                               ABM
+	 * ECX[6]     Reserved                            SSE4A
+	 * ECX[7]     Reserved                            MisAlignSse
+	 * ECX[8]     PREFETCHW                           3DNowPrefetch
+	 * ECX[9]     Reserved                            OSVW
+	 * ECX[10]    Reserved                            IBS
+	 * ECX[11]    Reserved                            XOP
+	 * ECX[12]    Reserved                            SKINIT
+	 * ECX[13]    Reserved                            WDT
+	 * ECX[14]    Reserved                            Reserved
+	 * ECX[15]    Reserved                            LWP
+	 * ECX[16]    Reserved                            FMA4
+	 * ECX[17]    Reserved                            TCE
+	 * ECX[18]    Reserved                            Reserved
+	 * ECX[19]    Reserved                            Reserved
+	 * ECX[20]    Reserved                            Reserved
+	 * ECX[21]    Reserved                            TBM
+	 * ECX[22]    Reserved                            TopologyExtensions
+	 * ECX[23]    Reserved                            PerfCtrExtCore
+	 * ECX[24]    Reserved                            PerfCtrExtNB
+	 * ECX[25]    Reserved                            Reserved
+	 * ECX[26]    Reserved                            DataBkptExt
+	 * ECX[27]    Reserved                            PerfTsc
+	 * ECX[28]    Reserved                            PerfCtrExtLLC
+	 * ECX[29]    Reserved                            MONITORX
+	 * ECX[30]    Reserved                            AddrMaskExt
+	 * ECX[31]    Reserved                            Reserved
+	 *
+	 * EDX[0]     Reserved                            FPU
+	 * EDX[1]     Reserved                            VME
+	 * EDX[2]     Reserved                            DE
+	 * EDX[3]     Reserved                            PSE
+	 * EDX[4]     Reserved                            TSC
+	 * EDX[5]     Reserved                            MSR
+	 * EDX[6]     Reserved                            PAE
+	 * EDX[7]     Reserved                            MCE
+	 * EDX[8]     Reserved                            CMPXCHG8B
+	 * EDX[9]     Reserved                            APIC
+	 * EDX[10]    Reserved                            Reserved
+	 * EDX[11]    SYSCALL_SYSRET_64                   SysCallSysRet
+	 * EDX[12]    Reserved                            MTRR
+	 * EDX[13]    Reserved                            PGE
+	 * EDX[14]    Reserved                            MCA
+	 * EDX[15]    Reserved                            CMOV
+	 * EDX[16]    Reserved                            PAT
+	 * EDX[17]    Reserved                            PSE36
+	 * EDX[18]    Reserved                            Reserved
+	 * EDX[19]    Reserved                            Reserved
+	 * EDX[20]    EXECUTE_DIS                         NX
+	 * EDX[21]    Reserved                            Reserved
+	 * EDX[22]    Reserved                            MmxExt
+	 * EDX[23]    Reserved                            MMX
+	 * EDX[24]    Reserved                            FXSR
+	 * EDX[25]    Reserved                            FFXSR
+	 * EDX[26]    PAGE_1GB                            Page1GB
+	 * EDX[27]    RDTSCP                              RDTSCP
+	 * EDX[28]    Reserved                            Reserved
+	 * EDX[29]    INTEL64                             LM
+	 * EDX[30]    Reserved                            3DNowExt
+	 * EDX[31]    Reserved                            3DNow
+	 */
 	features->has[X86_64_CPU_FEATURE_SYSCALL] =
 		(leaf_ext1->edx & CPUID_EXT_1_EDX_SYSCALL) != 0;
 	features->has[X86_64_CPU_FEATURE_NX] =

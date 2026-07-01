@@ -161,7 +161,8 @@ static int test_decode_intel_like_common_features(void) {
 	passed += expect_bool("ssse3", features.has[X86_64_CPU_FEATURE_SSSE3], true);
 	passed += expect_bool("fma", features.has[X86_64_CPU_FEATURE_FMA], true);
 	passed += expect_bool("cx16", features.has[X86_64_CPU_FEATURE_CX16], true);
-	passed += expect_bool("pcid", features.has[X86_64_CPU_FEATURE_PCID], true);
+	passed += expect_bool("intel pcid",
+			      features.has[X86_64_CPU_FEATURE_INTEL_PCID], true);
 	passed += expect_bool("sse4.1",
 			      features.has[X86_64_CPU_FEATURE_SSE4_1], true);
 	passed += expect_bool("sse4.2",
@@ -171,8 +172,9 @@ static int test_decode_intel_like_common_features(void) {
 	passed += expect_bool("movbe", features.has[X86_64_CPU_FEATURE_MOVBE], true);
 	passed += expect_bool("popcnt",
 			      features.has[X86_64_CPU_FEATURE_POPCNT], true);
-	passed += expect_bool("tsc deadline",
-			      features.has[X86_64_CPU_FEATURE_TSC_DEADLINE], true);
+	passed += expect_bool("intel tsc deadline",
+			      features.has[X86_64_CPU_FEATURE_INTEL_TSC_DEADLINE],
+			      true);
 	passed += expect_bool("aes", features.has[X86_64_CPU_FEATURE_AES], true);
 	passed += expect_bool("xsave", features.has[X86_64_CPU_FEATURE_XSAVE], true);
 	passed += expect_bool("osxsave",
@@ -250,7 +252,7 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 
 	raw.leaf0 = vendor_leaf(7, "AuthenticAMD");
 	raw.leaf1 = leaf(0x00800f82, (0x02u << 24) | (1u << 16) | (8u << 8),
-			 0, (1u << 5) | (1u << 16));
+			 (1u << 17) | (1u << 24), (1u << 5) | (1u << 16));
 	raw.leaf7_0 = leaf(0, 0, 0, (1u << 14));
 	raw.leaf_ext0 = vendor_leaf(0x80000004u, "AuthenticAMD");
 	raw.leaf_ext1 = leaf(0, 0, (1u << 0) | (1u << 5) | (1u << 8),
@@ -286,6 +288,12 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 			      features.has[X86_64_CPU_FEATURE_PREFETCHW], true);
 	passed += expect_bool("amd serialize reserved",
 			      features.has[X86_64_CPU_FEATURE_INTEL_SERIALIZE],
+			      false);
+	passed += expect_bool("amd pcid reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_PCID],
+			      false);
+	passed += expect_bool("amd tsc deadline reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_TSC_DEADLINE],
 			      false);
 
 	return passed;
@@ -329,7 +337,8 @@ static int test_unknown_vendor_keeps_common_decode(void) {
 	int passed = 0;
 
 	raw.leaf0 = vendor_leaf(7, "TCGTCGTCGTCG");
-	raw.leaf1 = leaf(0, 0, 0, (1u << 5) | (1u << 16) | (1u << 26));
+	raw.leaf1 = leaf(0, 0, (1u << 17) | (1u << 24),
+			 (1u << 5) | (1u << 16) | (1u << 26));
 	raw.leaf7_0 = leaf(0, 0, 0, (1u << 14));
 	raw.leaf_ext0 = vendor_leaf(0x80000001u, "TCGTCGTCGTCG");
 	raw.leaf_ext1 = leaf(0, 0, 0, (1u << 29));
@@ -349,6 +358,12 @@ static int test_unknown_vendor_keeps_common_decode(void) {
 			      features.has[X86_64_CPU_FEATURE_LONG_MODE], true);
 	passed += expect_bool("unknown serialize reserved",
 			      features.has[X86_64_CPU_FEATURE_INTEL_SERIALIZE],
+			      false);
+	passed += expect_bool("unknown pcid reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_PCID],
+			      false);
+	passed += expect_bool("unknown tsc deadline reserved",
+			      features.has[X86_64_CPU_FEATURE_INTEL_TSC_DEADLINE],
 			      false);
 
 	return passed;
@@ -415,13 +430,13 @@ int main(void) {
 	total += 82;
 
 	passed += test_decode_amd_like_extended_features_and_brand();
-	total += 14;
+	total += 16;
 
 	passed += test_vendor_signature_display_model_rules();
 	total += 4;
 
 	passed += test_unknown_vendor_keeps_common_decode();
-	total += 7;
+	total += 9;
 
 	passed += test_missing_leaves_default_to_zero();
 	total += 8;
