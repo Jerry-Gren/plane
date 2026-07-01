@@ -9,35 +9,65 @@
 extern void printk(const char *fmt, ...);
 extern void panic(const char *fmt, ...) __noreturn;
 
-#define BUG() do {                                                                  \
-	printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__);      \
-	panic("Kernel BUG!");                                                       \
+#define BUG() do {                                                          \
+	panic("BUG at %s:%d/%s()", __FILE__, __LINE__, __func__);           \
 } while (0)
 
-#define BUG_ON(condition) do {          \
-	if (unlikely(condition)) {      \
-		BUG();                  \
-	}                               \
+#define BUG_ON(condition) do {                                              \
+	if (unlikely(condition)) {                                          \
+		panic("BUG_ON(%s) at %s:%d/%s()", #condition, __FILE__,    \
+		      __LINE__, __func__);                                  \
+	}                                                                   \
 } while (0)
 
-#define DO_ONCE_LITE_IF(condition, func, ...) ({            \
-	static bool __done = false;                         \
-	int __ret_cond = !!(condition);                     \
-	if (unlikely(__ret_cond && !__done)) {              \
-		__done = true;                              \
-		func(__VA_ARGS__);                          \
-	}                                                   \
-	unlikely(__ret_cond);                               \
+#define BUG_ON_MSG(condition, fmt, ...) do {                                  \
+	if (unlikely(condition)) {                                            \
+		panic("BUG_ON(%s) at %s:%d/%s(): " fmt, #condition, __FILE__, \
+		      __LINE__, __func__, ##__VA_ARGS__);                     \
+	}                                                                     \
+} while (0)
+
+#define WARN_ON(condition) ({                                                \
+	int __ret_warn_on = !!(condition);                                   \
+	if (unlikely(__ret_warn_on)) {                                       \
+		printk("[WARN] WARN_ON(%s) at %s:%d/%s()\n", #condition,    \
+		       __FILE__, __LINE__, __func__);                       \
+	}                                                                    \
+	unlikely(__ret_warn_on);                                             \
 })
 
-#define WARN_ON(condition) ({                                       \
-	int __ret_warn_on = !!(condition);                          \
-	if (unlikely(__ret_warn_on))                                \
-		printk("WARNING: at %s:%d\n", __FILE__, __LINE__);  \
-	unlikely(__ret_warn_on);                                    \
+#define WARN_ON_MSG(condition, fmt, ...) ({                                   \
+	int __ret_warn_on = !!(condition);                                    \
+	if (unlikely(__ret_warn_on)) {                                        \
+		printk("[WARN] WARN_ON(%s) at %s:%d/%s(): " fmt "\n",        \
+		       #condition, __FILE__, __LINE__, __func__,             \
+		       ##__VA_ARGS__);                                       \
+	}                                                                     \
+	unlikely(__ret_warn_on);                                              \
 })
 
-#define WARN_ON_ONCE(condition) DO_ONCE_LITE_IF(condition, WARN_ON, 1)
+#define WARN_ON_ONCE(condition) ({                                            \
+	static bool __warned;                                                \
+	int __ret_warn_on = !!(condition);                                   \
+	if (unlikely(__ret_warn_on && !__warned)) {                          \
+		__warned = true;                                             \
+		printk("[WARN] WARN_ON_ONCE(%s) at %s:%d/%s()\n",            \
+		       #condition, __FILE__, __LINE__, __func__);            \
+	}                                                                    \
+	unlikely(__ret_warn_on);                                             \
+})
+
+#define WARN_ON_ONCE_MSG(condition, fmt, ...) ({                              \
+	static bool __warned;                                                \
+	int __ret_warn_on = !!(condition);                                   \
+	if (unlikely(__ret_warn_on && !__warned)) {                          \
+		__warned = true;                                             \
+		printk("[WARN] WARN_ON_ONCE(%s) at %s:%d/%s(): " fmt "\n",   \
+		       #condition, __FILE__, __LINE__, __func__,             \
+		       ##__VA_ARGS__);                                       \
+	}                                                                    \
+	unlikely(__ret_warn_on);                                             \
+})
 
 #define printk_once(fmt, ...) do {                          \
 	static bool __done = false;                         \

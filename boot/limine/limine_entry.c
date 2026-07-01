@@ -4,9 +4,11 @@
 #include <limine.h>
 
 #include <hal/cpu.h>
+#include <hal/serial.h>
 
 #include <plane/boot_info.h>
 #include <plane/entry.h>
+#include <plane/printk.h>
 
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
@@ -42,10 +44,10 @@ __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
 static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
-	if (framebuffer_request.response == NULL ||
-	    framebuffer_request.response->framebuffer_count < 1) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(framebuffer_request.response == NULL,
+		   "limine framebuffer response missing");
+	BUG_ON_MSG(framebuffer_request.response->framebuffer_count < 1,
+		   "limine framebuffer response has no framebuffers");
 	/* struct limine_framebuffer {
 	 *     LIMINE_PTR(void *) address;
 	 *     uint64_t width;
@@ -70,15 +72,15 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	/* fetch the first framebuffer */
 	struct limine_framebuffer *fb = framebuffer_request.response->framebuffers[0];
 
-	if (fb == NULL || fb->address == NULL ||
-	    fb->memory_model != LIMINE_FRAMEBUFFER_RGB) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(fb == NULL, "limine framebuffer pointer is null");
+	BUG_ON_MSG(fb->address == NULL, "limine framebuffer address is null");
+	BUG_ON_MSG(fb->memory_model != LIMINE_FRAMEBUFFER_RGB,
+		   "unsupported limine framebuffer memory model %u",
+		   fb->memory_model);
 
-	if (fb->width > UINT32_MAX || fb->height > UINT32_MAX ||
-	    fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(fb->width > UINT32_MAX || fb->height > UINT32_MAX ||
+		   fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX,
+		   "limine framebuffer fields exceed plane_video_info limits");
 
 	video->framebuffer_addr = (uint32_t *)fb->address;
 	video->width            = fb->width;
@@ -94,9 +96,8 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 }
 
 static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
-	if (memmap_request.response == NULL) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(memmap_request.response == NULL,
+		   "limine memmap response missing");
 	/*
 	 * struct limine_memmap_entry {
 	 *     uint64_t base;
@@ -139,10 +140,11 @@ static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
 }
 
 void _start(void) {
+	hal_serial_init();
+
 	/* Ensure the bootloader actually understands our base revision */
-	if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false,
+		   "limine base revision is not supported");
 
 	struct boot_info b_info = {0};
 	

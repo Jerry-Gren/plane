@@ -1,9 +1,31 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <hal/x86_64/cpu_features.h>
+
+void printk(const char *fmt, ...)
+{
+	va_list args;
+
+	(void)fmt;
+	va_start(args, fmt);
+	va_end(args);
+}
+
+void panic(const char *fmt, ...)
+{
+	va_list args;
+
+	(void)fmt;
+	va_start(args, fmt);
+	va_end(args);
+
+	__builtin_trap();
+	__builtin_unreachable();
+}
 
 static struct x86_64_cpuid_leaf leaf(uint32_t eax,
 				     uint32_t ebx,

@@ -1,9 +1,9 @@
 #include <boot/multiboot2/mb2_arch.h>
 
-#include <hal/cpu.h>
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/memmap.h>
+#include <plane/printk.h>
 
 /* in linker_grub.lds.S */
 extern char __kernel_phys_start[];
@@ -22,11 +22,12 @@ void boot_mb2_arch_reserve_kernel_image(struct plane_mem_info *mem) {
 	uint64_t kernel_phys_start = (uint64_t)__kernel_phys_start;
 	uint64_t kernel_phys_end = (uint64_t)__kernel_phys_end;
 
-	if (!plane_memmap_reserve(mem, kernel_phys_start,
-				  kernel_phys_end - kernel_phys_start,
-				  PLANE_MEM_EXECUTABLE_AND_MODULES)) {
-		hal_cpu_hang();
-	}
+	BUG_ON_MSG(!plane_memmap_reserve(mem, kernel_phys_start,
+					 kernel_phys_end - kernel_phys_start,
+					 PLANE_MEM_EXECUTABLE_AND_MODULES),
+		   "failed to reserve kernel image: start=0x%016llx end=0x%016llx",
+		   (unsigned long long)kernel_phys_start,
+		   (unsigned long long)kernel_phys_end);
 }
 
 void boot_mb2_arch_finish_handoff(void) {
