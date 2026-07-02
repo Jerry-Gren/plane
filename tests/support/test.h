@@ -2,9 +2,28 @@
 #define TEST_SUPPORT_TEST_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
+
+struct test_case {
+	const char *name;
+	int (*fn)(void);
+};
+
+static inline int test_fail(const char *fmt, ...)
+{
+	va_list args;
+
+	printf("FAIL: ");
+	va_start(args, fmt);
+	vprintf(fmt, args);
+	va_end(args);
+	printf("\n");
+	return 1;
+}
 
 static inline int test_expect_bool(const char *name, bool actual, bool expected)
 {
@@ -93,8 +112,58 @@ static inline int test_expect_str(const char *name,
 	return 1;
 }
 
+static inline int test_finish_suite(const char *suite_name, int failures)
+{
+	if (failures != 0) {
+		return 1;
+	}
+
+	printf("%s: ok\n", suite_name);
+	return 0;
+}
+
+static inline int test_run_cases_with_fixture(const char *suite_name,
+					      const struct test_case *cases,
+					      size_t count,
+					      void (*setup)(void),
+					      void (*teardown)(void))
+{
+	int failures = 0;
+
+	for (size_t i = 0; i < count; i++) {
+		if (setup != NULL) {
+			setup();
+		}
+
+		int case_failures = cases[i].fn();
+
+		if (teardown != NULL) {
+			teardown();
+		}
+
+		if (case_failures != 0) {
+			printf("FAIL: %s.%s (%d failures)\n",
+			       suite_name, cases[i].name, case_failures);
+			failures += case_failures;
+		}
+	}
+
+	return test_finish_suite(suite_name, failures);
+}
+
+static inline int test_run_cases(const char *suite_name,
+				 const struct test_case *cases,
+				 size_t count)
+{
+	return test_run_cases_with_fixture(suite_name, cases, count, NULL, NULL);
+}
+
 #define TEST_RUN(failures, fn) do { \
 	(failures) += (fn)();       \
 } while (0)
+
+#define TEST_ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+#define TEST_CASE(fn) { #fn, fn }
+#define TEST_CASE_NAMED(name, fn) { name, fn }
 
 #endif /* TEST_SUPPORT_TEST_H */

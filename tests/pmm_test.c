@@ -37,8 +37,7 @@ static int check_page_state(const char *name,
 		return 0;
 	}
 
-	printf("FAIL: %s expected=%d actual=%d\n", name, expected, actual);
-	return 1;
+	return test_fail("%s expected=%d actual=%d", name, expected, actual);
 }
 
 static uint64_t pages_for_bytes(uint64_t bytes)
@@ -481,31 +480,21 @@ static int test_init_fails_without_direct_map(void)
 
 int main(void)
 {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_init_accounts_all_memmap_types),
+		TEST_CASE(test_phys_to_page_metadata),
+		TEST_CASE(test_page_api_allocates_and_frees_metadata),
+		TEST_CASE(test_grub_like_reservations_are_counted),
+		TEST_CASE(test_limine_like_rich_memmap_is_counted),
+		TEST_CASE(test_single_page_allocation_order_and_exhaustion),
+		TEST_CASE(test_multi_page_alignment),
+		TEST_CASE(test_multi_page_phys_api_updates_metadata),
+		TEST_CASE(test_free_merges_ranges),
+		TEST_CASE(test_free_rejects_invalid_ranges),
+		TEST_CASE(test_init_fails_without_direct_map),
+	};
 
-#define RUN_PMM_TEST(fn) do {                                                   \
-	reset_direct_map_stub();                                               \
-	TEST_RUN(failures, fn);                                                \
-} while (0)
-
-	RUN_PMM_TEST(test_init_accounts_all_memmap_types);
-	RUN_PMM_TEST(test_phys_to_page_metadata);
-	RUN_PMM_TEST(test_page_api_allocates_and_frees_metadata);
-	RUN_PMM_TEST(test_grub_like_reservations_are_counted);
-	RUN_PMM_TEST(test_limine_like_rich_memmap_is_counted);
-	RUN_PMM_TEST(test_single_page_allocation_order_and_exhaustion);
-	RUN_PMM_TEST(test_multi_page_alignment);
-	RUN_PMM_TEST(test_multi_page_phys_api_updates_metadata);
-	RUN_PMM_TEST(test_free_merges_ranges);
-	RUN_PMM_TEST(test_free_rejects_invalid_ranges);
-	RUN_PMM_TEST(test_init_fails_without_direct_map);
-
-#undef RUN_PMM_TEST
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("pmm_test: ok\n");
-	return 0;
+	return test_run_cases_with_fixture("pmm_test", cases,
+					   TEST_ARRAY_SIZE(cases),
+					   reset_direct_map_stub, NULL);
 }

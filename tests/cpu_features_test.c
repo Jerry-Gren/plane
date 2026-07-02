@@ -1,33 +1,12 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <hal/x86_64/cpu_features.h>
 
+#include "support/printk_stubs.h"
 #include "support/test.h"
-
-void printk(const char *fmt, ...)
-{
-	va_list args;
-
-	(void)fmt;
-	va_start(args, fmt);
-	va_end(args);
-}
-
-void panic(const char *fmt, ...)
-{
-	va_list args;
-
-	(void)fmt;
-	va_start(args, fmt);
-	va_end(args);
-
-	__builtin_trap();
-	__builtin_unreachable();
-}
 
 static struct x86_64_cpuid_leaf leaf(uint32_t eax,
 				     uint32_t ebx,
@@ -409,19 +388,14 @@ static int test_feature_query_rejects_invalid_id(void) {
 }
 
 int main(void) {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_decode_intel_like_common_features),
+		TEST_CASE(test_decode_amd_like_extended_features_and_brand),
+		TEST_CASE(test_vendor_signature_display_model_rules),
+		TEST_CASE(test_unknown_vendor_keeps_common_decode),
+		TEST_CASE(test_missing_leaves_default_to_zero),
+		TEST_CASE(test_feature_query_rejects_invalid_id),
+	};
 
-	TEST_RUN(failures, test_decode_intel_like_common_features);
-	TEST_RUN(failures, test_decode_amd_like_extended_features_and_brand);
-	TEST_RUN(failures, test_vendor_signature_display_model_rules);
-	TEST_RUN(failures, test_unknown_vendor_keeps_common_decode);
-	TEST_RUN(failures, test_missing_leaves_default_to_zero);
-	TEST_RUN(failures, test_feature_query_rejects_invalid_id);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("cpu_features_test: ok\n");
-	return 0;
+	return test_run_cases("cpu_features_test", cases, TEST_ARRAY_SIZE(cases));
 }

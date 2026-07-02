@@ -74,15 +74,11 @@ static int test_existing_formats(void)
 
 int main(void)
 {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_size_length_modifier),
+		TEST_CASE(test_existing_formats),
+	};
 
-	TEST_RUN(failures, test_size_length_modifier);
-	TEST_RUN(failures, test_existing_formats);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("vsprintf_test: ok\n");
-	return 0;
+	return test_run_cases("vsprintf_test",
+			      cases, TEST_ARRAY_SIZE(cases));
 }

@@ -130,18 +130,14 @@ static int test_panic_from_bug_on_msg(void)
 
 int main(void)
 {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_warn_macros),
+		TEST_CASE(test_bug_macros_false_path),
+		TEST_CASE(test_panic_from_bug),
+		TEST_CASE(test_panic_from_bug_on),
+		TEST_CASE(test_panic_from_bug_on_msg),
+	};
 
-	TEST_RUN(failures, test_warn_macros);
-	TEST_RUN(failures, test_bug_macros_false_path);
-	TEST_RUN(failures, test_panic_from_bug);
-	TEST_RUN(failures, test_panic_from_bug_on);
-	TEST_RUN(failures, test_panic_from_bug_on_msg);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("printk_test: ok\n");
-	return 0;
+	return test_run_cases("printk_test",
+			      cases, TEST_ARRAY_SIZE(cases));
 }

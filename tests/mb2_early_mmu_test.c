@@ -125,15 +125,11 @@ static int test_rejects_invalid_mappings(void) {
 }
 
 int main(void) {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_maps_unaligned_framebuffer),
+		TEST_CASE(test_rejects_invalid_mappings),
+	};
 
-	TEST_RUN(failures, test_maps_unaligned_framebuffer);
-	TEST_RUN(failures, test_rejects_invalid_mappings);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("mb2_early_mmu_test: ok\n");
-	return 0;
+	return test_run_cases("mb2_early_mmu_test",
+			      cases, TEST_ARRAY_SIZE(cases));
 }

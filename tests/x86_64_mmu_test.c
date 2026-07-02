@@ -96,16 +96,12 @@ static int test_direct_map_rejects_uncovered_usable_memory(void)
 
 int main(void)
 {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_direct_map_rejects_uncovered_usable_memory),
+		TEST_CASE(test_direct_map_roundtrip),
+		TEST_CASE(test_bootloader_direct_map_base),
+	};
 
-	TEST_RUN(failures, test_direct_map_rejects_uncovered_usable_memory);
-	TEST_RUN(failures, test_direct_map_roundtrip);
-	TEST_RUN(failures, test_bootloader_direct_map_base);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("x86_64_mmu_test: ok\n");
-	return 0;
+	return test_run_cases("x86_64_mmu_test",
+			      cases, TEST_ARRAY_SIZE(cases));
 }

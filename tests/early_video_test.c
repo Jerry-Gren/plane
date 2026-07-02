@@ -60,7 +60,7 @@ static int test_draw_pattern_packs_rgb_formats(void) {
 		},
 	};
 
-	for (uint64_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(cases); i++) {
 		uint8_t framebuffer[16] = {0};
 		struct plane_video_info video = cases[i].video;
 		uint8_t bytes_per_pixel = video.bpp / 8;
@@ -71,8 +71,7 @@ static int test_draw_pattern_packs_rgb_formats(void) {
 		video.pitch = video.width * bytes_per_pixel;
 
 		if (!plane_early_video_draw_test_pattern(&video)) {
-			printf("FAIL: %s returned false\n", cases[i].name);
-			failures++;
+			failures += test_fail("%s returned false", cases[i].name);
 			continue;
 		}
 
@@ -126,8 +125,7 @@ static int test_draw_pattern_honors_pitch(void) {
 	video.pitch = 12;
 
 	if (!plane_early_video_draw_test_pattern(&video)) {
-		printf("FAIL: draw test pattern returned false\n");
-		return 1;
+		return test_fail("draw test pattern returned false");
 	}
 
 	uint32_t bottom_right = (uint32_t)framebuffer[12 + 4] |
@@ -135,22 +133,19 @@ static int test_draw_pattern_honors_pitch(void) {
 				((uint32_t)framebuffer[12 + 6] << 16) |
 				((uint32_t)framebuffer[12 + 7] << 24);
 	if (bottom_right == 0) {
-		printf("FAIL: draw test pattern did not write bottom-right pixel\n");
-		return 1;
+		return test_fail("draw test pattern did not write bottom-right pixel");
 	}
 
 	for (uint64_t i = 8; i < 12; i++) {
 		if (framebuffer[i] != 0x5a) {
-			printf("FAIL: first row padding overwritten at %llu\n",
-			       (unsigned long long)i);
-			return 1;
+			return test_fail("first row padding overwritten at %llu",
+					 (unsigned long long)i);
 		}
 	}
 	for (uint64_t i = 20; i < 24; i++) {
 		if (framebuffer[i] != 0x5a) {
-			printf("FAIL: second row padding overwritten at %llu\n",
-			       (unsigned long long)i);
-			return 1;
+			return test_fail("second row padding overwritten at %llu",
+					 (unsigned long long)i);
 		}
 	}
 
@@ -201,9 +196,8 @@ static int test_draw_rejects_short_pitch(void) {
 
 	for (uint64_t i = 0; i < sizeof(framebuffer); i++) {
 		if (framebuffer[i] != 0x5a) {
-			printf("FAIL: short pitch rejection wrote byte %llu\n",
-			       (unsigned long long)i);
-			return 1;
+			return test_fail("short pitch rejection wrote byte %llu",
+					 (unsigned long long)i);
 		}
 	}
 
@@ -211,18 +205,14 @@ static int test_draw_rejects_short_pitch(void) {
 }
 
 int main(void) {
-	int failures = 0;
+	static const struct test_case cases[] = {
+		TEST_CASE(test_draw_pattern_packs_rgb_formats),
+		TEST_CASE(test_format_supported),
+		TEST_CASE(test_draw_pattern_honors_pitch),
+		TEST_CASE(test_draw_rejects_invalid_inputs),
+		TEST_CASE(test_draw_rejects_short_pitch),
+	};
 
-	TEST_RUN(failures, test_draw_pattern_packs_rgb_formats);
-	TEST_RUN(failures, test_format_supported);
-	TEST_RUN(failures, test_draw_pattern_honors_pitch);
-	TEST_RUN(failures, test_draw_rejects_invalid_inputs);
-	TEST_RUN(failures, test_draw_rejects_short_pitch);
-
-	if (failures != 0) {
-		return 1;
-	}
-
-	printf("early_video_test: ok\n");
-	return 0;
+	return test_run_cases("early_video_test",
+			      cases, TEST_ARRAY_SIZE(cases));
 }
