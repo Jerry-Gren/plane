@@ -2,15 +2,23 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define APPEND_CHAR(c) do { \
+#define APPEND_CHAR(c) do {       \
+	char ch = (c);             \
 	if (str && written < size - 1) { \
-		str[written] = (c);      \
-	}                                \
-	written++;                       \
+		str[written] = ch; \
+	}                           \
+	written++;                  \
 } while (0)
 
 static const char *lower_digits = "0123456789abcdef";
 static const char *upper_digits = "0123456789ABCDEF";
+
+enum length_modifier {
+	LENGTH_DEFAULT,
+	LENGTH_LONG,
+	LENGTH_LONG_LONG,
+	LENGTH_SIZE,
+};
 
 static int print_number(char **str_ptr, size_t *size_ptr, size_t written, 
                         uint64_t num, int base, bool is_signed, 
@@ -87,11 +95,18 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
 			format++;
 		}
 
-		/* parse 'l'/'ll' */
-		int is_long = 0;
-		while (*format == 'l') {
-			is_long++;
+		/* parse length modifier */
+		enum length_modifier length = LENGTH_DEFAULT;
+		if (*format == 'z') {
+			length = LENGTH_SIZE;
 			format++;
+		} else if (*format == 'l') {
+			length = LENGTH_LONG;
+			format++;
+			if (*format == 'l') {
+				length = LENGTH_LONG_LONG;
+				format++;
+			}
 		}
 
 		/* parse specifier */
@@ -112,21 +127,48 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
 		}
 		case 'd':
 		case 'i': {
-			int64_t val = (is_long >= 2) ? va_arg(ap, int64_t) : 
-				(is_long == 1) ? va_arg(ap, long) : va_arg(ap, int);
+			int64_t val;
+
+			if (length == LENGTH_SIZE) {
+				val = (int64_t)va_arg(ap, intptr_t);
+			} else if (length == LENGTH_LONG_LONG) {
+				val = va_arg(ap, int64_t);
+			} else if (length == LENGTH_LONG) {
+				val = va_arg(ap, long);
+			} else {
+				val = va_arg(ap, int);
+			}
 			written += print_number(&str, &size, written, (uint64_t)val, 10, true, pad_width, pad_char, false);
 			break;
 		}
 		case 'u': {
-			uint64_t val = (is_long >= 2) ? va_arg(ap, uint64_t) : 
-				(is_long == 1) ? va_arg(ap, unsigned long) : va_arg(ap, unsigned int);
+			uint64_t val;
+
+			if (length == LENGTH_SIZE) {
+				val = (uint64_t)va_arg(ap, size_t);
+			} else if (length == LENGTH_LONG_LONG) {
+				val = va_arg(ap, uint64_t);
+			} else if (length == LENGTH_LONG) {
+				val = va_arg(ap, unsigned long);
+			} else {
+				val = va_arg(ap, unsigned int);
+			}
 			written += print_number(&str, &size, written, val, 10, false, pad_width, pad_char, false);
 			break;
 		}
 		case 'x':
 		case 'X': {
-			uint64_t val = (is_long >= 2) ? va_arg(ap, uint64_t) : 
-				(is_long == 1) ? va_arg(ap, unsigned long) : va_arg(ap, unsigned int);
+			uint64_t val;
+
+			if (length == LENGTH_SIZE) {
+				val = (uint64_t)va_arg(ap, size_t);
+			} else if (length == LENGTH_LONG_LONG) {
+				val = va_arg(ap, uint64_t);
+			} else if (length == LENGTH_LONG) {
+				val = va_arg(ap, unsigned long);
+			} else {
+				val = va_arg(ap, unsigned int);
+			}
 			written += print_number(&str, &size, written, val, 16, false, pad_width, pad_char, (specifier == 'X'));
 			break;
 		}

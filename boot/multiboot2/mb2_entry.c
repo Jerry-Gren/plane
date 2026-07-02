@@ -108,12 +108,11 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 	multiboot_memory_map_t *entry = mmap_tag->entries;
 	uint32_t entry_size = mmap_tag->entry_size;
 	BUG_ON_MSG(mmap_tag->size < sizeof(struct multiboot_tag_mmap),
-		   "multiboot2 mmap tag too small: size=%u min=%llu",
-		   mmap_tag->size,
-		   (unsigned long long)sizeof(struct multiboot_tag_mmap));
+		   "multiboot2 mmap tag too small: size=%u min=%zu",
+		   mmap_tag->size, sizeof(struct multiboot_tag_mmap));
 	BUG_ON_MSG(entry_size < sizeof(multiboot_memory_map_t),
-		   "multiboot2 mmap entry too small: entry_size=%u min=%llu",
-		   entry_size, (unsigned long long)sizeof(multiboot_memory_map_t));
+		   "multiboot2 mmap entry too small: entry_size=%u min=%zu",
+		   entry_size, sizeof(multiboot_memory_map_t));
 
 	uint32_t data_size = mmap_tag->size - sizeof(struct multiboot_tag_mmap);
 	BUG_ON_MSG((data_size % entry_size) != 0,
