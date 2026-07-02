@@ -11,12 +11,22 @@
  *
  * The returned addresses are physical addresses, not directly
  * dereferenceable virtual addresses. Allocated pages are not zeroed.
- * A future XNU-like VM page layer should add struct plane_page and
- * page-level APIs instead of broadening this early phys API.
+ * The page metadata API is an early XNU-like foundation: each managed
+ * physical page has a small struct plane_page, but full VM page queues,
+ * objects, coloring, and SMP locking are intentionally not here yet.
  */
+
+struct plane_page;
+
+enum plane_page_state {
+	PLANE_PAGE_INVALID = 0,
+	PLANE_PAGE_FREE,
+	PLANE_PAGE_ALLOCATED,
+};
 
 struct plane_pmm_stats {
 	uint64_t managed_pages;
+	uint64_t tracked_pages;
 	uint64_t free_pages;
 	uint64_t allocated_pages;
 	uint64_t usable_pages;
@@ -33,12 +43,17 @@ struct plane_pmm_stats {
 };
 
 bool plane_pmm_init(const struct plane_mem_info *mem);
+bool plane_pmm_alloc_page(struct plane_page **page);
+bool plane_pmm_free_page(struct plane_page *page);
 bool plane_pmm_alloc_page_phys(uint64_t *phys_addr);
 bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 				uint64_t alignment_pages,
 				uint64_t *phys_addr);
 bool plane_pmm_free_page_phys(uint64_t phys_addr);
 bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count);
+struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr);
+uint64_t plane_page_phys(const struct plane_page *page);
+enum plane_page_state plane_page_state(const struct plane_page *page);
 struct plane_pmm_stats plane_pmm_get_stats(void);
 
 #endif /* PLANE_PMM_H */
