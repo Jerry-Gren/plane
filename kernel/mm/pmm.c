@@ -33,11 +33,6 @@ static struct plane_pmm_stats pmm_stats;
 static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
 
-static bool set_page_state_range(uint64_t phys_addr,
-				 uint64_t page_count,
-				 enum plane_page_state expected,
-				 enum plane_page_state next);
-
 static bool is_power_of_two(uint64_t value)
 {
 	return value != 0 && (value & (value - 1)) == 0;
@@ -196,121 +191,6 @@ static bool append_usable_region(uint64_t base, uint64_t page_count)
 	}
 
 	pmm_stats.allocator.managed_pages = managed_pages;
-	return true;
-}
-
-static bool build_free_ranges_around_metadata(void)
-{
-	uint64_t metadata_end;
-
-	if (metadata_page_count == 0) {
-		return true;
-	}
-
-	if (!checked_page_range_end(metadata_phys_base, metadata_page_count,
-				    &metadata_end)) {
-		return false;
-	}
-
-	for (uint64_t i = 0; i < managed_range_count; i++) {
-		uint64_t range_base = managed_ranges[i].base;
-		uint64_t range_end;
-		uint64_t free_base;
-
-		if (!checked_page_range_end(range_base,
-					    managed_ranges[i].page_count,
-					    &range_end)) {
-			return false;
-		}
-
-		if (metadata_phys_base > range_base) {
-			uint64_t before_end = metadata_phys_base < range_end ?
-					      metadata_phys_base : range_end;
-
-			if (before_end > range_base &&
-			    !append_initial_free_range(range_base,
-						       page_count_for_region(
-							       range_base,
-							       before_end))) {
-				return false;
-			}
-		}
-
-		free_base = metadata_end > range_base ? metadata_end : range_base;
-		if (free_base < range_end &&
-		    !append_initial_free_range(free_base,
-					       page_count_for_region(free_base,
-								     range_end))) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-static bool init_page_metadata(void)
-{
-	uint64_t metadata_bytes;
-	uint64_t metadata_pages;
-	uint64_t metadata_size;
-
-	if (pmm_stats.allocator.managed_pages == 0) {
-		return true;
-	}
-
-	if (!checked_mul_u64(pmm_stats.allocator.managed_pages, sizeof(page_pool[0]),
-			     &metadata_bytes) ||
-	    !checked_align_up(metadata_bytes, PAGE_SIZE, &metadata_size)) {
-		return false;
-	}
-	metadata_pages = metadata_size / PAGE_SIZE;
-
-	for (uint64_t i = 0; i < managed_range_count; i++) {
-		if (managed_ranges[i].page_count >= metadata_pages) {
-			metadata_phys_base = managed_ranges[i].base;
-			metadata_page_count = metadata_pages;
-			break;
-		}
-	}
-
-	if (metadata_page_count == 0) {
-		return false;
-	}
-
-	page_pool = hal_mmu_direct_phys_to_virt(metadata_phys_base);
-	if (page_pool == NULL) {
-		return false;
-	}
-
-	pmm_stats.allocator.metadata_bytes = metadata_bytes;
-	pmm_stats.allocator.metadata_pages = metadata_pages;
-
-	for (uint64_t i = 0; i < managed_range_count; i++) {
-		for (uint64_t j = 0; j < managed_ranges[i].page_count; j++) {
-			uint64_t phys;
-			uint64_t page_index;
-
-			if (!checked_mul_u64(j, PAGE_SIZE, &phys) ||
-			    !checked_add_u64(managed_ranges[i].base, phys, &phys) ||
-			    !checked_add_u64(managed_ranges[i].page_index, j,
-					     &page_index)) {
-				return false;
-			}
-
-			page_pool[page_index].phys_addr = phys;
-			page_pool[page_index].state = PLANE_PAGE_FREE;
-		}
-	}
-
-	if (!set_page_state_range(metadata_phys_base, metadata_pages,
-				  PLANE_PAGE_FREE, PLANE_PAGE_METADATA)) {
-		return false;
-	}
-
-	if (!build_free_ranges_around_metadata()) {
-		return false;
-	}
-
 	return true;
 }
 
@@ -489,6 +369,121 @@ static bool set_page_state_range(uint64_t phys_addr,
 		page = plane_pmm_phys_to_page(page_phys);
 
 		page->state = next;
+	}
+
+	return true;
+}
+
+static bool build_free_ranges_around_metadata(void)
+{
+	uint64_t metadata_end;
+
+	if (metadata_page_count == 0) {
+		return true;
+	}
+
+	if (!checked_page_range_end(metadata_phys_base, metadata_page_count,
+				    &metadata_end)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < managed_range_count; i++) {
+		uint64_t range_base = managed_ranges[i].base;
+		uint64_t range_end;
+		uint64_t free_base;
+
+		if (!checked_page_range_end(range_base,
+					    managed_ranges[i].page_count,
+					    &range_end)) {
+			return false;
+		}
+
+		if (metadata_phys_base > range_base) {
+			uint64_t before_end = metadata_phys_base < range_end ?
+					      metadata_phys_base : range_end;
+
+			if (before_end > range_base &&
+			    !append_initial_free_range(range_base,
+						       page_count_for_region(
+							       range_base,
+							       before_end))) {
+				return false;
+			}
+		}
+
+		free_base = metadata_end > range_base ? metadata_end : range_base;
+		if (free_base < range_end &&
+		    !append_initial_free_range(free_base,
+					       page_count_for_region(free_base,
+								     range_end))) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool init_page_metadata(void)
+{
+	uint64_t metadata_bytes;
+	uint64_t metadata_pages;
+	uint64_t metadata_size;
+
+	if (pmm_stats.allocator.managed_pages == 0) {
+		return true;
+	}
+
+	if (!checked_mul_u64(pmm_stats.allocator.managed_pages, sizeof(page_pool[0]),
+			     &metadata_bytes) ||
+	    !checked_align_up(metadata_bytes, PAGE_SIZE, &metadata_size)) {
+		return false;
+	}
+	metadata_pages = metadata_size / PAGE_SIZE;
+
+	for (uint64_t i = 0; i < managed_range_count; i++) {
+		if (managed_ranges[i].page_count >= metadata_pages) {
+			metadata_phys_base = managed_ranges[i].base;
+			metadata_page_count = metadata_pages;
+			break;
+		}
+	}
+
+	if (metadata_page_count == 0) {
+		return false;
+	}
+
+	page_pool = hal_mmu_direct_phys_to_virt(metadata_phys_base);
+	if (page_pool == NULL) {
+		return false;
+	}
+
+	pmm_stats.allocator.metadata_bytes = metadata_bytes;
+	pmm_stats.allocator.metadata_pages = metadata_pages;
+
+	for (uint64_t i = 0; i < managed_range_count; i++) {
+		for (uint64_t j = 0; j < managed_ranges[i].page_count; j++) {
+			uint64_t phys;
+			uint64_t page_index;
+
+			if (!checked_mul_u64(j, PAGE_SIZE, &phys) ||
+			    !checked_add_u64(managed_ranges[i].base, phys, &phys) ||
+			    !checked_add_u64(managed_ranges[i].page_index, j,
+					     &page_index)) {
+				return false;
+			}
+
+			page_pool[page_index].phys_addr = phys;
+			page_pool[page_index].state = PLANE_PAGE_FREE;
+		}
+	}
+
+	if (!set_page_state_range(metadata_phys_base, metadata_pages,
+				  PLANE_PAGE_FREE, PLANE_PAGE_METADATA)) {
+		return false;
+	}
+
+	if (!build_free_ranges_around_metadata()) {
+		return false;
 	}
 
 	return true;
