@@ -107,10 +107,25 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {
 	multiboot_memory_map_t *entry = mmap_tag->entries;
 	uint32_t entry_size = mmap_tag->entry_size;
+	BUG_ON_MSG(mmap_tag->size < sizeof(struct multiboot_tag_mmap),
+		   "multiboot2 mmap tag too small: size=%u min=%llu",
+		   mmap_tag->size,
+		   (unsigned long long)sizeof(struct multiboot_tag_mmap));
+	BUG_ON_MSG(entry_size < sizeof(multiboot_memory_map_t),
+		   "multiboot2 mmap entry too small: entry_size=%u min=%llu",
+		   entry_size, (unsigned long long)sizeof(multiboot_memory_map_t));
+
 	uint32_t data_size = mmap_tag->size - sizeof(struct multiboot_tag_mmap);
+	BUG_ON_MSG((data_size % entry_size) != 0,
+		   "multiboot2 mmap data is not entry-aligned: data_size=%u entry_size=%u",
+		   data_size, entry_size);
 	uint32_t entry_count = data_size / entry_size;
 
-	for (uint32_t i = 0; i < entry_count && mem->entry_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
+	BUG_ON_MSG(entry_count > PLANE_MAX_MEMMAP_ENTRIES,
+		   "multiboot2 mmap has too many entries: count=%u max=%u",
+		   entry_count, PLANE_MAX_MEMMAP_ENTRIES);
+
+	for (uint32_t i = 0; i < entry_count; i++) {
 		uint64_t index = mem->entry_count;
 
 		/*
@@ -182,9 +197,31 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 
 	void *info_vaddr = boot_mb2_arch_phys_to_virt(info_addr);
 	struct multiboot_info_base *info_base = info_vaddr;
-	struct multiboot_tag *tag = (struct multiboot_tag *)((uint8_t *)info_vaddr + sizeof(struct multiboot_info_base));
+	BUG_ON_MSG(info_base->total_size < sizeof(struct multiboot_info_base) +
+		   sizeof(struct multiboot_tag),
+		   "multiboot2 info too small: total_size=%u",
+		   info_base->total_size);
 
-	while (tag->type != MULTIBOOT_TAG_TYPE_END) {
+	uint8_t *tag_cursor = (uint8_t *)info_vaddr + sizeof(struct multiboot_info_base);
+	uint8_t *info_end = (uint8_t *)info_vaddr + info_base->total_size;
+	struct multiboot_tag *tag = (struct multiboot_tag *)tag_cursor;
+
+	while (true) {
+		BUG_ON_MSG(tag_cursor + sizeof(struct multiboot_tag) > info_end,
+			   "multiboot2 tag header exceeds info size");
+		BUG_ON_MSG(tag->size < sizeof(struct multiboot_tag),
+			   "multiboot2 tag too small: type=%u size=%u",
+			   tag->type, tag->size);
+
+		uint64_t aligned_size = ALIGN(tag->size, MULTIBOOT_TAG_ALIGN);
+		BUG_ON_MSG(aligned_size < tag->size ||
+			   aligned_size > (uint64_t)(info_end - tag_cursor),
+			   "multiboot2 tag exceeds info size: type=%u size=%u total_size=%u",
+			   tag->type, tag->size, info_base->total_size);
+
+		if (tag->type == MULTIBOOT_TAG_TYPE_END) {
+			break;
+		}
 		
 		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
 			struct multiboot_tag_framebuffer *fb_tag = (struct multiboot_tag_framebuffer *)tag;
@@ -198,7 +235,8 @@ void mb2_entry(uint64_t magic, uint64_t info_addr) {
 			boot_mb2_collect_mmap(&b_info.mem, mmap_tag);
 		}
 
-		tag = (struct multiboot_tag *)((uint8_t *)tag + ALIGN(tag->size, MULTIBOOT_TAG_ALIGN));
+		tag_cursor += aligned_size;
+		tag = (struct multiboot_tag *)tag_cursor;
 	}
 
 	/* ensure we got a framebuffer */

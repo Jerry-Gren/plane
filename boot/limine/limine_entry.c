@@ -4,6 +4,7 @@
 #include <limine.h>
 
 #include <hal/cpu.h>
+#include <hal/mmu.h>
 #include <hal/serial.h>
 
 #include <plane/boot_info.h>
@@ -30,8 +31,14 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_memmap_request memmap_request = {
-    .id = LIMINE_MEMMAP_REQUEST_ID,
-    .revision = 0
+	.id = LIMINE_MEMMAP_REQUEST_ID,
+	.revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+	.id = LIMINE_HHDM_REQUEST_ID,
+	.revision = 0
 };
 
 // Finally, define the start and end markers for the Limine requests.
@@ -106,9 +113,18 @@ static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
 	 * };
 	 */
 	uint64_t count = memmap_request.response->entry_count;
-	for (uint64_t i = 0; i < count && mem->entry_count < PLANE_MAX_MEMMAP_ENTRIES; i++) {
+	BUG_ON_MSG(count > PLANE_MAX_MEMMAP_ENTRIES,
+		   "limine memmap has too many entries: count=%llu max=%u",
+		   (unsigned long long)count, PLANE_MAX_MEMMAP_ENTRIES);
+	BUG_ON_MSG(count != 0 && memmap_request.response->entries == NULL,
+		   "limine memmap entries pointer is null");
+
+	for (uint64_t i = 0; i < count; i++) {
 		struct limine_memmap_entry *entry = memmap_request.response->entries[i];
 		uint64_t index = mem->entry_count;
+
+		BUG_ON_MSG(entry == NULL, "limine memmap entry %llu is null",
+			   (unsigned long long)i);
 
 		mem->map[index].base = entry->base;
 		mem->map[index].length = entry->length;
@@ -139,6 +155,13 @@ static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
 	}
 }
 
+static void boot_limine_collect_hhdm(void)
+{
+	BUG_ON_MSG(hhdm_request.response == NULL,
+		   "limine HHDM response missing");
+	hal_mmu_set_direct_map_base(hhdm_request.response->offset);
+}
+
 void _start(void) {
 	hal_serial_init();
 
@@ -148,6 +171,7 @@ void _start(void) {
 
 	struct boot_info b_info = {0};
 	
+	boot_limine_collect_hhdm();
 	boot_limine_collect_framebuffer(&b_info.video);
 	boot_limine_collect_memmap(&b_info.mem);
 	

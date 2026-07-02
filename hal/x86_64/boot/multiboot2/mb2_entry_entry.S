@@ -77,9 +77,11 @@ mb2_info:  .long 0
 x86_64_mb2_early_pml4:      .skip 4096
 early_pdpt_ident:           .skip 4096
 early_pdpt_high:            .skip 4096
+early_pdpt_direct:          .skip 4096
 early_pd_ident:             .skip 4096
 x86_64_mb2_early_pd_kernel: .skip 4096
 x86_64_mb2_early_pd_fb:     .skip 4096
+early_pd_direct:            .skip (X86_64_DIRECT_MAP_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
 
 .align 16
 stack_bottom:
@@ -160,6 +162,10 @@ _start:
     or $(PAGE_PRESENT | PAGE_RW), %eax
     mov %eax, (PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
 
+    mov $early_pdpt_direct, %eax
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov %eax, (PML4_INDEX(X86_64_DIRECT_MAP_BASE) * 8)(%edi)
+
     /* PDPT */
     mov $early_pdpt_ident, %edi
     mov $early_pd_ident, %eax
@@ -176,6 +182,17 @@ _start:
     or $(PAGE_PRESENT | PAGE_RW), %eax
     mov %eax, (PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
+
+    mov $early_pdpt_direct, %edi
+    mov $early_pd_direct, %eax
+    or $(PAGE_PRESENT | PAGE_RW), %eax
+    mov $(X86_64_DIRECT_MAP_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
+.Lfill_direct_pdpt:
+    mov %eax, (%edi)
+    movl $0, 4(%edi)
+    add $ARCH_PAGE_SIZE, %eax
+    add $8, %edi
+    loop .Lfill_direct_pdpt
 
     /* PDT */
     # mov $boot_pd, %edi
@@ -216,6 +233,16 @@ _start:
     add $ARCH_LARGE_PAGE_SIZE, %eax
     add $8, %edi
     loop .Lfill_kernel_pd
+
+    mov $early_pd_direct, %edi
+    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
+    mov $(X86_64_DIRECT_MAP_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
+.Lfill_direct_pd:
+    mov %eax, (%edi)
+    movl $0, 4(%edi)
+    add $ARCH_LARGE_PAGE_SIZE, %eax
+    add $8, %edi
+    loop .Lfill_direct_pd
 
     /* CR3 = PML4 */
     mov $x86_64_mb2_early_pml4, %eax

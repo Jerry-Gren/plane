@@ -17,6 +17,11 @@
 	#error "Kernel and Multiboot2 framebuffer cannot share the same VMA base!"
 #endif
 
+#if X86_64_MB2_FRAMEBUFFER_VMA_BASE >= X86_64_DIRECT_MAP_BASE && \
+    X86_64_MB2_FRAMEBUFFER_VMA_BASE < X86_64_DIRECT_MAP_END
+	#error "X86_64_MB2_FRAMEBUFFER_VMA_BASE overlaps x86_64 direct map!"
+#endif
+
 #if ((KERNEL_VMA_BASE > X86_64_MB2_FRAMEBUFFER_VMA_BASE ? \
       KERNEL_VMA_BASE - X86_64_MB2_FRAMEBUFFER_VMA_BASE : \
       X86_64_MB2_FRAMEBUFFER_VMA_BASE - KERNEL_VMA_BASE) < 0x2000000ull)
