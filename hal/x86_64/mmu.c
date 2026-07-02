@@ -84,11 +84,13 @@ uint64_t hal_mmu_direct_virt_to_phys(const void *vaddr)
 	return offset;
 }
 
-void hal_mmu_invalidate_tlb(uintptr_t vaddr) {
+void hal_mmu_invalidate_tlb(uintptr_t vaddr)
+{
 	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");
 }
 
-void hal_mmu_flush_tlb_all(void) {
+void hal_mmu_flush_tlb_all(void)
+{
 	__asm__ volatile (
 		"mov %%cr3, %%rax\n\t"
 		"mov %%rax, %%cr3\n\t"

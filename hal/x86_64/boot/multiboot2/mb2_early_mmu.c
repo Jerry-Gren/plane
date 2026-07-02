@@ -11,7 +11,8 @@ extern uint64_t x86_64_mb2_early_pml4[];
 extern uint64_t x86_64_mb2_early_pd_kernel[];
 extern uint64_t x86_64_mb2_early_pd_fb[];
 
-static bool checked_align_up(uint64_t value, uint64_t align, uint64_t *out) {
+static bool checked_align_up(uint64_t value, uint64_t align, uint64_t *out)
+{
 	if (value > UINT64_MAX - (align - 1)) {
 		return false;
 	}
@@ -68,7 +69,8 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 	return true;
 }
 
-void x86_64_mb2_early_remove_identity_mapping(void) {
+void x86_64_mb2_early_remove_identity_mapping(void)
+{
 	x86_64_mb2_early_pml4[0] = 0;
 	hal_mmu_flush_tlb_all();
 }

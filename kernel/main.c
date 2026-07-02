@@ -7,7 +7,8 @@
 #include <hal/serial.h>
 #include <hal/hal.h>
 
-void kmain(struct boot_info *info) {
+void kmain(struct boot_info *info)
+{
 	hal_serial_init();
 	hal_arch_early_init();
 

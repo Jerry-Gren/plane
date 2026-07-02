@@ -13,7 +13,8 @@ static struct tss64 tss;
 extern void x86_64_gdt_flush(uint64_t gdtr_addr);
 extern void x86_64_tss_flush(void);
 
-static void set_gdt_descriptor(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t flags) {
+static void set_gdt_descriptor(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t flags)
+{
 	gdt[index].base_low    = (base & 0xffff);
 	gdt[index].base_middle = (base >> 16) & 0xff;
 	gdt[index].base_high   = (base >> 24) & 0xff;
@@ -24,7 +25,8 @@ static void set_gdt_descriptor(int index, uint32_t base, uint32_t limit, uint8_t
 	gdt[index].access      = access;
 }
 
-static void set_tss_descriptor(int index, uintptr_t base, uint32_t limit) {
+static void set_tss_descriptor(int index, uintptr_t base, uint32_t limit)
+{
 	set_gdt_descriptor(index, (uint32_t)base, limit, 
 			GDT_ACCESS(1, DPL_KERNEL, 0, TYPE_TSS_AVAILABLE), 
 			GDT_FLAGS(0, 0, 0, 0));
@@ -34,7 +36,8 @@ static void set_tss_descriptor(int index, uintptr_t base, uint32_t limit) {
 	tss_desc->reserved     = 0;
 }
 
-void x86_64_gdt_init(void) {
+void x86_64_gdt_init(void)
+{
 	/* set gdtr */
 	gdtr.limit = sizeof(gdt) - 1;
 	gdtr.base  = (uint64_t)&gdt;
@@ -78,6 +81,7 @@ void x86_64_gdt_init(void) {
 	x86_64_tss_flush();
 }
 
-void x86_64_tss_set_kernel_stack(uintptr_t stack) {
+void x86_64_tss_set_kernel_stack(uintptr_t stack)
+{
 	tss.rsp0 = stack;
 }

@@ -3,7 +3,8 @@
 
 #define COM1_PORT 0x3f8
 
-void hal_serial_init(void) {
+void hal_serial_init(void)
+{
 	/* initialize 16550 chip */
 	outb(COM1_PORT + 1, 0x00);    /* disable interrupt */
 	outb(COM1_PORT + 3, 0x80);    /* enable dlab */
@@ -14,11 +15,13 @@ void hal_serial_init(void) {
 	outb(COM1_PORT + 4, 0x0b);    /* enable irqs */
 }
 
-static int serial_is_transmit_empty(void) {
+static int serial_is_transmit_empty(void)
+{
 	return inb(COM1_PORT + 5) & 0x20;
 }
 
-void hal_serial_putchar(char c) {
+void hal_serial_putchar(char c)
+{
 	if (c == '\n') {
 		hal_serial_putchar('\r');
 	}

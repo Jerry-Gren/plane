@@ -28,7 +28,8 @@
 
 static struct x86_64_cpu_features boot_cpu_features;
 
-static struct x86_64_cpuid_leaf cpuid_count(uint32_t leaf, uint32_t subleaf) {
+static struct x86_64_cpuid_leaf cpuid_count(uint32_t leaf, uint32_t subleaf)
+{
 	struct x86_64_cpuid_leaf out;
 
 	__asm__ volatile (
@@ -40,7 +41,8 @@ static struct x86_64_cpuid_leaf cpuid_count(uint32_t leaf, uint32_t subleaf) {
 	return out;
 }
 
-static void write_u32_string(char *dst, uint32_t value) {
+static void write_u32_string(char *dst, uint32_t value)
+{
 	for (size_t byte = 0; byte < 4; byte++) {
 		dst[byte] = (char)(value >> (byte * 8));
 	}
@@ -54,7 +56,8 @@ static void set_vendor_string(char vendor[X86_64_CPU_VENDOR_LENGTH + 1],
 	vendor[X86_64_CPU_VENDOR_LENGTH] = '\0';
 }
 
-static enum x86_64_cpu_vendor vendor_id_from_string(const char *vendor) {
+static enum x86_64_cpu_vendor vendor_id_from_string(const char *vendor)
+{
 	if (memcmp(vendor, "GenuineIntel", X86_64_CPU_VENDOR_LENGTH) == 0) {
 		return X86_64_CPU_VENDOR_INTEL;
 	}
@@ -561,13 +564,15 @@ void x86_64_cpu_features_decode(struct x86_64_cpu_features *features,
 	}
 }
 
-static bool cpu_features_have_required(void) {
+static bool cpu_features_have_required(void)
+{
 	return boot_cpu_features.has[X86_64_CPU_FEATURE_MSR] &&
 	       boot_cpu_features.has[X86_64_CPU_FEATURE_PAT] &&
 	       boot_cpu_features.has[X86_64_CPU_FEATURE_LONG_MODE];
 }
 
-static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw) {
+static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw)
+{
 	memset(raw, 0, sizeof(*raw));
 
 	raw->leaf0 = cpuid_count(0, 0);
@@ -595,7 +600,8 @@ static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw) {
 	}
 }
 
-void x86_64_cpu_features_init(void) {
+void x86_64_cpu_features_init(void)
+{
 	struct x86_64_cpuid_raw raw;
 
 	collect_cpuid_raw(&raw);
@@ -608,11 +614,13 @@ void x86_64_cpu_features_init(void) {
 		   boot_cpu_features.has[X86_64_CPU_FEATURE_LONG_MODE]);
 }
 
-const struct x86_64_cpu_features *x86_64_cpu_features_get(void) {
+const struct x86_64_cpu_features *x86_64_cpu_features_get(void)
+{
 	return &boot_cpu_features;
 }
 
-bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature) {
+bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
+{
 	if (feature < 0 || feature >= X86_64_CPU_FEATURE_NR) {
 		return false;
 	}

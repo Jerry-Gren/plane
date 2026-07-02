@@ -15,18 +15,21 @@ static uintptr_t invalidated_vaddrs[X86_64_PAGE_TABLE_ENTRIES];
 static uint64_t invalidate_count;
 static uint64_t flush_count;
 
-void hal_mmu_invalidate_tlb(uintptr_t vaddr) {
+void hal_mmu_invalidate_tlb(uintptr_t vaddr)
+{
 	if (invalidate_count < X86_64_PAGE_TABLE_ENTRIES) {
 		invalidated_vaddrs[invalidate_count] = vaddr;
 	}
 	invalidate_count++;
 }
 
-void hal_mmu_flush_tlb_all(void) {
+void hal_mmu_flush_tlb_all(void)
+{
 	flush_count++;
 }
 
-static void reset_state(void) {
+static void reset_state(void)
+{
 	memset(x86_64_mb2_early_pml4, 0, sizeof(x86_64_mb2_early_pml4));
 	memset(x86_64_mb2_early_pd_kernel, 0,
 	       sizeof(x86_64_mb2_early_pd_kernel));
@@ -36,7 +39,8 @@ static void reset_state(void) {
 	flush_count = 0;
 }
 
-static int page_directory_untouched(void) {
+static int page_directory_untouched(void)
+{
 	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
 		if (x86_64_mb2_early_pd_fb[i] != 0 ||
 		    x86_64_mb2_early_pd_kernel[i] != 0) {
@@ -47,7 +51,8 @@ static int page_directory_untouched(void) {
 	return 1;
 }
 
-static int test_maps_unaligned_framebuffer(void) {
+static int test_maps_unaligned_framebuffer(void)
+{
 	int failures = 0;
 	void *vaddr = NULL;
 	uint64_t phys_addr = 0x123450;
@@ -104,7 +109,8 @@ static int check_map_failure(const char *name, uint64_t phys_addr,
 	return failures;
 }
 
-static int test_rejects_invalid_mappings(void) {
+static int test_rejects_invalid_mappings(void)
+{
 	int failures = 0;
 
 	failures += check_map_failure("reject zero framebuffer size", 0, 0);
@@ -123,7 +129,8 @@ static int test_rejects_invalid_mappings(void) {
 	return failures;
 }
 
-int main(void) {
+int main(void)
+{
 	static const struct test_case cases[] = {
 		TEST_CASE(test_maps_unaligned_framebuffer),
 		TEST_CASE(test_rejects_invalid_mappings),

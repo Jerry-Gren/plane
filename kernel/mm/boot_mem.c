@@ -4,7 +4,8 @@
 
 #define PLANE_MEMMAP_MAX_BOUNDARIES (PLANE_MAX_MEMMAP_ENTRIES * 2)
 
-static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end) {
+static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end)
+{
 	*end = base + length;
 	return *end >= base;
 }
@@ -48,7 +49,8 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 	return true;
 }
 
-static int mem_type_rank(uint32_t type) {
+static int mem_type_rank(uint32_t type)
+{
 	/*
 	 * Overlap priority:
 	 *   usable             : allocator input, lowest rank
@@ -92,7 +94,8 @@ static bool append_boundary(uint64_t *boundaries, uint64_t *boundary_count,
 	return true;
 }
 
-static void sort_boundaries(uint64_t *boundaries, uint64_t boundary_count) {
+static void sort_boundaries(uint64_t *boundaries, uint64_t boundary_count)
+{
 	for (uint64_t i = 0; i < boundary_count; i++) {
 		for (uint64_t j = 0; j < boundary_count - i - 1; j++) {
 			if (boundaries[j] > boundaries[j + 1]) {
@@ -153,7 +156,8 @@ static bool choose_interval_type(const struct plane_mem_info *mem,
 	return true;
 }
 
-bool plane_sanitize_memory_map(struct plane_mem_info *mem) {
+bool plane_sanitize_memory_map(struct plane_mem_info *mem)
+{
 	if (mem->entry_count == 0) return true;
 
 	/*

@@ -24,7 +24,8 @@ static struct plane_video_info rgb_video(uint8_t bpp,
 	return video;
 }
 
-static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel) {
+static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel)
+{
 	uint32_t pixel = 0;
 
 	for (uint8_t i = 0; i < bytes_per_pixel; i++) {
@@ -34,7 +35,8 @@ static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel) {
 	return pixel;
 }
 
-static int test_draw_pattern_packs_rgb_formats(void) {
+static int test_draw_pattern_packs_rgb_formats(void)
+{
 	int failures = 0;
 
 	struct {
@@ -85,7 +87,8 @@ static int test_draw_pattern_packs_rgb_formats(void) {
 	return failures;
 }
 
-static int test_format_supported(void) {
+static int test_format_supported(void)
+{
 	int failures = 0;
 
 	struct plane_video_info valid = rgb_video(32, 16, 8, 0, 8, 8, 8);
@@ -114,7 +117,8 @@ static int test_format_supported(void) {
 	return failures;
 }
 
-static int test_draw_pattern_honors_pitch(void) {
+static int test_draw_pattern_honors_pitch(void)
+{
 	uint8_t framebuffer[24];
 	memset(framebuffer, 0x5a, sizeof(framebuffer));
 
@@ -156,7 +160,8 @@ static int test_draw_pattern_honors_pitch(void) {
 	return 0;
 }
 
-static int test_draw_rejects_invalid_inputs(void) {
+static int test_draw_rejects_invalid_inputs(void)
+{
 	uint8_t framebuffer[16] = {0};
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
 	int failures = 0;
@@ -180,7 +185,8 @@ static int test_draw_rejects_invalid_inputs(void) {
 	return failures;
 }
 
-static int test_draw_rejects_short_pitch(void) {
+static int test_draw_rejects_short_pitch(void)
+{
 	uint8_t framebuffer[16];
 	int failures;
 	memset(framebuffer, 0x5a, sizeof(framebuffer));
@@ -209,7 +215,8 @@ static int test_draw_rejects_short_pitch(void) {
 	return 0;
 }
 
-int main(void) {
+int main(void)
+{
 	static const struct test_case cases[] = {
 		TEST_CASE(test_draw_pattern_packs_rgb_formats),
 		TEST_CASE(test_format_supported),

@@ -70,7 +70,8 @@ static int print_number(char **str_ptr, size_t *size_ptr, size_t written,
 	return written - start_written;
 }
 
-int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
+int vsnprintf(char *str, size_t size, const char *format, va_list ap)
+{
 	size_t written = 0;
 
 	while (*format) {
@@ -204,7 +205,8 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
 	return written;
 }
 
-int snprintf(char *str, size_t size, const char *format, ...) {
+int snprintf(char *str, size_t size, const char *format, ...)
+{
 	va_list ap;
 	va_start(ap, format);
 	int ret = vsnprintf(str, size, format, ap);

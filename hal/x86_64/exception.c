@@ -41,21 +41,24 @@ static const char *exception_names[32] = {
     "Reserved"                                  /* 31 */
 };
 
-static uint64_t read_cr2(void) {
+static uint64_t read_cr2(void)
+{
 	uint64_t cr2;
 
 	__asm__ volatile ("mov %%cr2, %0" : "=r" (cr2));
 	return cr2;
 }
 
-static int range_in_kernel_text(uint64_t addr, uint64_t size) {
+static int range_in_kernel_text(uint64_t addr, uint64_t size)
+{
 	uint64_t text_start = (uint64_t)__kernel_text_start;
 	uint64_t text_end = (uint64_t)__kernel_text_end;
 
 	return addr >= text_start && addr <= text_end && size <= text_end - addr;
 }
 
-static void dump_code(uint64_t rip, uint64_t int_no) {
+static void dump_code(uint64_t rip, uint64_t int_no)
+{
 	uint64_t code_addr = rip;
 
 	if (int_no == X86_EXCEPTION_BP) {
@@ -80,7 +83,8 @@ static void dump_code(uint64_t rip, uint64_t int_no) {
 	printk("\n");
 }
 
-void x86_64_exception_handler(struct interrupt_frame *frame) {
+void x86_64_exception_handler(struct interrupt_frame *frame)
+{
 	if (frame->int_no >= 32) {
 		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
 		return;

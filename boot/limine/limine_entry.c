@@ -50,7 +50,8 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 __attribute__((used, section(".limine_requests_end")))
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
-static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
+static void boot_limine_collect_framebuffer(struct plane_video_info *video)
+{
 	BUG_ON_MSG(framebuffer_request.response == NULL,
 		   "limine framebuffer response missing");
 	BUG_ON_MSG(framebuffer_request.response->framebuffer_count < 1,
@@ -102,7 +103,8 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video) {
 	video->blue_mask_shift  = fb->blue_mask_shift;
 }
 
-static void boot_limine_collect_memmap(struct plane_mem_info *mem) {
+static void boot_limine_collect_memmap(struct plane_mem_info *mem)
+{
 	BUG_ON_MSG(memmap_request.response == NULL,
 		   "limine memmap response missing");
 	/*
@@ -162,7 +164,8 @@ static void boot_limine_collect_hhdm(void)
 	hal_mmu_set_direct_map_base(hhdm_request.response->offset);
 }
 
-void _start(void) {
+void _start(void)
+{
 	hal_serial_init();
 
 	/* Ensure the bootloader actually understands our base revision */

@@ -8,7 +8,8 @@
 #define PRINTK_BUF_SIZE 1024
 
 /* TODO: spinlock */
-void printk(const char *fmt, ...) {
+void printk(const char *fmt, ...)
+{
 	char buf[PRINTK_BUF_SIZE];
 	va_list args;
 	
@@ -21,7 +22,8 @@ void printk(const char *fmt, ...) {
 	}
 }
 
-void panic(const char *fmt, ...) {
+void panic(const char *fmt, ...)
+{
 	char buf[PRINTK_BUF_SIZE];
 	va_list args;
 	

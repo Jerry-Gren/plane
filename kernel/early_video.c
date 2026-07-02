@@ -3,7 +3,8 @@
 
 #include <plane/early_video.h>
 
-static uint32_t scale_color(uint8_t value, uint8_t mask_size) {
+static uint32_t scale_color(uint8_t value, uint8_t mask_size)
+{
 	if (mask_size == 0) {
 		return 0;
 	}
@@ -19,7 +20,8 @@ static uint32_t pack_rgb(const struct plane_video_info *video,
 	       (scale_color(blue, video->blue_mask_size) << video->blue_mask_shift);
 }
 
-static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel) {
+static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel)
+{
 	/*
 	 * current targets are little-endian.
 	 * if big-endian support is added,
@@ -30,7 +32,8 @@ static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel) {
 	}
 }
 
-bool plane_early_video_format_supported(const struct plane_video_info *video) {
+bool plane_early_video_format_supported(const struct plane_video_info *video)
+{
 	if (video->bpp != 16 && video->bpp != 24 && video->bpp != 32) {
 		return false;
 	}
@@ -50,7 +53,8 @@ bool plane_early_video_format_supported(const struct plane_video_info *video) {
 	return true;
 }
 
-bool plane_early_video_draw_test_pattern(struct plane_video_info *video) {
+bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
+{
 	if (!plane_early_video_format_supported(video) ||
 	    video->framebuffer_addr == NULL ||
 	    video->width == 0 ||

@@ -20,7 +20,8 @@ static struct x86_64_cpuid_leaf leaf(uint32_t eax,
 	return out;
 }
 
-static uint32_t chars4(const char text[4]) {
+static uint32_t chars4(const char text[4])
+{
 	return ((uint32_t)text[0]) |
 	       ((uint32_t)text[1] << 8) |
 	       ((uint32_t)text[2] << 16) |
@@ -43,7 +44,8 @@ static void set_brand_leaf(struct x86_64_cpuid_leaf *out,
 		    chars4(&text[12]));
 }
 
-static int test_decode_intel_like_common_features(void) {
+static int test_decode_intel_like_common_features(void)
+{
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
 	int failures = 0;
@@ -209,7 +211,8 @@ static int test_decode_intel_like_common_features(void) {
 	return failures;
 }
 
-static int test_decode_amd_like_extended_features_and_brand(void) {
+static int test_decode_amd_like_extended_features_and_brand(void)
+{
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
 	int failures = 0;
@@ -263,7 +266,8 @@ static int test_decode_amd_like_extended_features_and_brand(void) {
 	return failures;
 }
 
-static int test_vendor_signature_display_model_rules(void) {
+static int test_vendor_signature_display_model_rules(void)
+{
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
 	int failures = 0;
@@ -295,7 +299,8 @@ static int test_vendor_signature_display_model_rules(void) {
 	return failures;
 }
 
-static int test_unknown_vendor_keeps_common_decode(void) {
+static int test_unknown_vendor_keeps_common_decode(void)
+{
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
 	int failures = 0;
@@ -333,7 +338,8 @@ static int test_unknown_vendor_keeps_common_decode(void) {
 	return failures;
 }
 
-static int test_missing_leaves_default_to_zero(void) {
+static int test_missing_leaves_default_to_zero(void)
+{
 	struct x86_64_cpuid_raw raw = {0};
 	struct x86_64_cpu_features features;
 	int failures = 0;
@@ -373,7 +379,8 @@ static int test_missing_leaves_default_to_zero(void) {
 	return failures;
 }
 
-static int test_feature_query_rejects_invalid_id(void) {
+static int test_feature_query_rejects_invalid_id(void)
+{
 	int failures = 0;
 
 	failures += test_expect_bool("invalid negative feature",
@@ -386,7 +393,8 @@ static int test_feature_query_rejects_invalid_id(void) {
 	return failures;
 }
 
-int main(void) {
+int main(void)
+{
 	static const struct test_case cases[] = {
 		TEST_CASE(test_decode_intel_like_common_features),
 		TEST_CASE(test_decode_amd_like_extended_features_and_brand),

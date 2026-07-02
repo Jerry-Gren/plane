@@ -8,7 +8,8 @@ _Static_assert(IDT_NR_DESCRIPTORS <= IDT_MAX_DESCRIPTORS, "idt descriptors excee
 /* in idt_flush.S */
 extern void x86_64_idt_flush(uint64_t idtr_addr);
 
-static void legacy_pic_disable(void) {
+static void legacy_pic_disable(void)
+{
 	outb(0x21, 0xff);  /* 0x21 pic1 data */
 	outb(0xa1, 0xff);  /* 0xa1 pic2 data */
 }
@@ -36,7 +37,8 @@ static void *x86_64_isr_stub_table[32] = {
 	x86_64_isr28, x86_64_isr29, x86_64_isr30, x86_64_isr31
 };
 
-static void set_idt_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes) {
+static void set_idt_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes)
+{
 	idt[vector].offset_low    = (uint16_t)(isr & 0xffff);
 	idt[vector].selector      = SELECTOR_KERNEL_CS;
 	idt[vector].ist           = 0;
@@ -46,7 +48,8 @@ static void set_idt_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes
 	idt[vector].reserved      = 0;
 }
 
-void x86_64_idt_init(void) {
+void x86_64_idt_init(void)
+{
 	/* set idtr */
 	idtr.limit = sizeof(idt) - 1;
 	idtr.base  = (uint64_t)&idt;

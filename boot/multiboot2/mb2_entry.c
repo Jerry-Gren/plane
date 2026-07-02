@@ -19,7 +19,8 @@ struct multiboot_info_base {
     uint32_t reserved;
 };
 
-static bool checked_u64_mul(uint64_t lhs, uint64_t rhs, uint64_t *out) {
+static bool checked_u64_mul(uint64_t lhs, uint64_t rhs, uint64_t *out)
+{
 	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
 		return false;
 	}
@@ -104,7 +105,8 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 		   (unsigned long long)phys_addr, (unsigned long long)fb_size);
 }
 
-static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag) {
+static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag)
+{
 	multiboot_memory_map_t *entry = mmap_tag->entries;
 	uint32_t entry_size = mmap_tag->entry_size;
 	BUG_ON_MSG(mmap_tag->size < sizeof(struct multiboot_tag_mmap),
@@ -182,7 +184,8 @@ static void boot_mb2_add_reservations(struct boot_info *info,
 		   (unsigned long long)framebuffer_size);
 }
 
-void mb2_entry(uint64_t magic, uint64_t info_addr) {
+void mb2_entry(uint64_t magic, uint64_t info_addr)
+{
 	hal_serial_init();
 	
 	/* check magic number passed by multiboot2 */
