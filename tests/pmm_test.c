@@ -1,10 +1,31 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <plane/memmap.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+
+static bool direct_map_available = true;
+static uint8_t direct_map_storage[64 * 1024] __attribute__((aligned(PAGE_SIZE)));
+
+void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+{
+	(void)phys_addr;
+
+	if (!direct_map_available) {
+		return NULL;
+	}
+
+	return direct_map_storage;
+}
+
+static void reset_direct_map_stub(void)
+{
+	direct_map_available = true;
+	memset(direct_map_storage, 0, sizeof(direct_map_storage));
+}
 
 static int expect_bool(const char *name, bool actual, bool expected)
 {
@@ -59,6 +80,36 @@ static int expect_page_state(const char *name,
 	return 1;
 }
 
+static uint64_t pages_for_bytes(uint64_t bytes)
+{
+	return (bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+}
+
+static int expect_metadata_stats(const char *prefix,
+				 const struct plane_pmm_stats *stats,
+				 uint64_t managed)
+{
+	int failures = 0;
+	char name[96];
+
+	if (managed == 0) {
+		snprintf(name, sizeof(name), "%s metadata_pages", prefix);
+		failures += expect_u64(name, stats->allocator.metadata_pages, 0);
+		snprintf(name, sizeof(name), "%s metadata_bytes", prefix);
+		failures += expect_u64(name, stats->allocator.metadata_bytes, 0);
+		return failures;
+	}
+
+	snprintf(name, sizeof(name), "%s metadata_bytes nonzero", prefix);
+	failures += expect_bool(name, stats->allocator.metadata_bytes != 0, true);
+	snprintf(name, sizeof(name), "%s metadata_pages", prefix);
+	failures += expect_u64(name, stats->allocator.metadata_pages,
+			       pages_for_bytes(stats->allocator.metadata_bytes));
+	snprintf(name, sizeof(name), "%s metadata_pages managed", prefix);
+	failures += expect_bool(name, stats->allocator.metadata_pages <= managed, true);
+	return failures;
+}
+
 static void add_region(struct plane_mem_info *mem, uint64_t base,
 		       uint64_t length, uint32_t type)
 {
@@ -88,28 +139,33 @@ static int expect_stats(const char *prefix,
 	int failures = 0;
 	char name[96];
 
-#define EXPECT_FIELD(field, expected) do {                                      \
-	snprintf(name, sizeof(name), "%s %s", prefix, #field);                 \
-	failures += expect_u64(name, stats->field, expected);                   \
+#define EXPECT_ALLOCATOR_FIELD(field, expected) do {                            \
+	snprintf(name, sizeof(name), "%s allocator.%s", prefix, #field);       \
+	failures += expect_u64(name, stats->allocator.field, expected);         \
 } while (0)
 
-	EXPECT_FIELD(managed_pages, managed);
-	EXPECT_FIELD(tracked_pages, managed);
-	EXPECT_FIELD(free_pages, free);
-	EXPECT_FIELD(allocated_pages, managed - free);
-	EXPECT_FIELD(usable_pages, usable);
-	EXPECT_FIELD(invalid_pages, invalid);
-	EXPECT_FIELD(reserved_pages, reserved);
-	EXPECT_FIELD(acpi_reclaimable_pages, acpi_reclaimable);
-	EXPECT_FIELD(acpi_nvs_pages, acpi_nvs);
-	EXPECT_FIELD(bootloader_reclaimable_pages, bootloader);
-	EXPECT_FIELD(executable_and_modules_pages, exec_modules);
-	EXPECT_FIELD(framebuffer_pages, framebuffer);
-	EXPECT_FIELD(bad_pages, bad);
-	EXPECT_FIELD(reserved_mapped_pages, reserved_mapped);
-	EXPECT_FIELD(free_range_count, free_ranges);
+#define EXPECT_MEMTYPE_FIELD(field, expected) do {                              \
+	snprintf(name, sizeof(name), "%s memtype.%s", prefix, #field);         \
+	failures += expect_u64(name, stats->memtype.field, expected);           \
+} while (0)
 
-#undef EXPECT_FIELD
+	EXPECT_ALLOCATOR_FIELD(managed_pages, managed);
+	EXPECT_ALLOCATOR_FIELD(free_pages, free);
+	EXPECT_ALLOCATOR_FIELD(free_range_count, free_ranges);
+	EXPECT_MEMTYPE_FIELD(usable_pages, usable);
+	EXPECT_MEMTYPE_FIELD(invalid_pages, invalid);
+	EXPECT_MEMTYPE_FIELD(reserved_pages, reserved);
+	EXPECT_MEMTYPE_FIELD(acpi_reclaimable_pages, acpi_reclaimable);
+	EXPECT_MEMTYPE_FIELD(acpi_nvs_pages, acpi_nvs);
+	EXPECT_MEMTYPE_FIELD(bootloader_reclaimable_pages, bootloader);
+	EXPECT_MEMTYPE_FIELD(executable_and_modules_pages, exec_modules);
+	EXPECT_MEMTYPE_FIELD(framebuffer_pages, framebuffer);
+	EXPECT_MEMTYPE_FIELD(bad_pages, bad);
+	EXPECT_MEMTYPE_FIELD(reserved_mapped_pages, reserved_mapped);
+	failures += expect_metadata_stats(prefix, stats, managed);
+
+#undef EXPECT_ALLOCATOR_FIELD
+#undef EXPECT_MEMTYPE_FIELD
 	return failures;
 }
 
@@ -127,14 +183,17 @@ static int test_phys_to_page_metadata(void)
 	failures += expect_ptr_not_null("metadata page 0x1000", page);
 	failures += expect_u64("metadata phys 0x1000",
 			       plane_page_phys(page), 0x1000);
-	failures += expect_page_state("metadata state free",
+	failures += expect_page_state("metadata state",
 				      plane_page_state(page),
-				      PLANE_PAGE_FREE);
+				      PLANE_PAGE_METADATA);
 
 	page = plane_pmm_phys_to_page(0x8000);
 	failures += expect_ptr_not_null("metadata non-contig page", page);
 	failures += expect_u64("metadata non-contig phys",
 			       plane_page_phys(page), 0x8000);
+	failures += expect_page_state("metadata non-contig state",
+				      plane_page_state(page),
+				      PLANE_PAGE_FREE);
 
 	failures += expect_ptr_null("metadata reject unaligned",
 				    plane_pmm_phys_to_page(0x1001));
@@ -171,7 +230,7 @@ static int test_init_accounts_all_memmap_types(void)
 				plane_pmm_init(&mem), true);
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("all types", &stats,
-				 3, 3, 3, 2, 1, 1, 1, 1, 2, 2, 1, 1, 1);
+				 3, 2, 3, 2, 1, 1, 1, 1, 2, 2, 1, 1, 1);
 
 	return failures;
 }
@@ -189,34 +248,34 @@ static int test_page_api_allocates_and_frees_metadata(void)
 
 	failures += expect_bool("reject null page output",
 				plane_pmm_alloc_page(NULL), false);
-	failures += expect_bool("alloc metadata page",
+	failures += expect_bool("alloc page api page",
 				plane_pmm_alloc_page(&page), true);
-	failures += expect_ptr_not_null("allocated metadata page", page);
-	failures += expect_u64("allocated metadata phys",
-			       plane_page_phys(page), 0x1000);
-	failures += expect_page_state("allocated metadata state",
+	failures += expect_ptr_not_null("allocated page api page", page);
+	failures += expect_u64("allocated page api phys",
+			       plane_page_phys(page), 0x2000);
+	failures += expect_page_state("allocated page api state",
 				      plane_page_state(page),
 				      PLANE_PAGE_ALLOCATED);
 
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("page api allocated", &stats,
-				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+				 3, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	failures += expect_bool("reject null metadata free",
 				plane_pmm_free_page(NULL), false);
 	failures += expect_bool("reject foreign metadata free",
 				plane_pmm_free_page(bad_page), false);
-	failures += expect_bool("free metadata page",
+	failures += expect_bool("free page api page",
 				plane_pmm_free_page(page), true);
-	failures += expect_page_state("freed metadata state",
+	failures += expect_page_state("freed page api state",
 				      plane_page_state(page),
 				      PLANE_PAGE_FREE);
-	failures += expect_bool("reject metadata double free",
+	failures += expect_bool("reject page api double free",
 				plane_pmm_free_page(page), false);
 
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("page api freed", &stats,
-				 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	return failures;
 }
@@ -245,7 +304,7 @@ static int test_grub_like_reservations_are_counted(void)
 				plane_pmm_init(&mem), true);
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("grub-like", &stats,
-				 5, 5, 5, 0, 0, 0, 0, 1, 2, 1, 0, 0, 4);
+				 5, 4, 5, 0, 0, 0, 0, 1, 2, 1, 0, 0, 3);
 
 	return failures;
 }
@@ -270,7 +329,7 @@ static int test_limine_like_rich_memmap_is_counted(void)
 				plane_pmm_init(&mem), true);
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("limine-like", &stats,
-				 5, 5, 5, 0, 0, 0, 0, 1, 2, 1, 0, 0, 4);
+				 5, 4, 5, 0, 0, 0, 0, 1, 2, 1, 0, 0, 3);
 
 	return failures;
 }
@@ -287,13 +346,10 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 
 	failures += expect_bool("alloc first page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("first page address", phys, 0x1000);
+	failures += expect_u64("first page address", phys, 0x2000);
 	failures += expect_bool("alloc second page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("second page address", phys, 0x2000);
-	failures += expect_bool("alloc third page",
-				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("third page address", phys, 0x3000);
+	failures += expect_u64("second page address", phys, 0x3000);
 	failures += expect_bool("alloc exhausted",
 				plane_pmm_alloc_page_phys(&phys), false);
 
@@ -331,7 +387,7 @@ static int test_multi_page_alignment(void)
 
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("aligned allocation", &stats,
-				 8, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
+				 8, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
 
 	return failures;
 }
@@ -349,7 +405,7 @@ static int test_multi_page_phys_api_updates_metadata(void)
 
 	failures += expect_bool("multi metadata alloc",
 				plane_pmm_alloc_pages_phys(3, 1, &phys), true);
-	failures += expect_u64("multi metadata alloc addr", phys, 0x1000);
+	failures += expect_u64("multi metadata alloc addr", phys, 0x2000);
 	for (uint64_t i = 0; i < 3; i++) {
 		failures += expect_page_state("multi metadata allocated",
 					      plane_page_state(
@@ -360,7 +416,7 @@ static int test_multi_page_phys_api_updates_metadata(void)
 
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("multi metadata allocated", &stats,
-				 6, 3, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+				 6, 2, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	failures += expect_bool("multi metadata free",
 				plane_pmm_free_pages_phys(phys, 3), true);
@@ -374,7 +430,7 @@ static int test_multi_page_phys_api_updates_metadata(void)
 
 	stats = plane_pmm_get_stats();
 	failures += expect_stats("multi metadata freed", &stats,
-				 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+				 6, 5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	return failures;
 }
@@ -390,31 +446,31 @@ static int test_free_merges_ranges(void)
 	failures += expect_bool("free merge init", plane_pmm_init(&mem), true);
 	failures += expect_bool("alloc page 1",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("alloc page 1 addr", phys, 0x1000);
+	failures += expect_u64("alloc page 1 addr", phys, 0x2000);
 	failures += expect_bool("alloc page 2",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("alloc page 2 addr", phys, 0x2000);
+	failures += expect_u64("alloc page 2 addr", phys, 0x3000);
 	failures += expect_bool("alloc page 3",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("alloc page 3 addr", phys, 0x3000);
+	failures += expect_u64("alloc page 3 addr", phys, 0x4000);
 
 	failures += expect_bool("free middle page",
-				plane_pmm_free_page_phys(0x2000), true);
-	stats = plane_pmm_get_stats();
-	failures += expect_stats("free middle", &stats,
-				 5, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
-
-	failures += expect_bool("free previous page",
-				plane_pmm_free_page_phys(0x1000), true);
-	stats = plane_pmm_get_stats();
-	failures += expect_stats("free previous", &stats,
-				 5, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
-
-	failures += expect_bool("free bridge page",
 				plane_pmm_free_page_phys(0x3000), true);
 	stats = plane_pmm_get_stats();
+	failures += expect_stats("free middle", &stats,
+				 5, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
+
+	failures += expect_bool("free previous page",
+				plane_pmm_free_page_phys(0x2000), true);
+	stats = plane_pmm_get_stats();
+	failures += expect_stats("free previous", &stats,
+				 5, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
+
+	failures += expect_bool("free bridge page",
+				plane_pmm_free_page_phys(0x4000), true);
+	stats = plane_pmm_get_stats();
 	failures += expect_stats("free bridge", &stats,
-				 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+				 5, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	return failures;
 }
@@ -427,21 +483,33 @@ static int test_free_rejects_invalid_ranges(void)
 
 	add_region(&mem, 0x1000, 0x2000, PLANE_MEM_USABLE);
 	failures += expect_bool("free reject init", plane_pmm_init(&mem), true);
-	failures += expect_bool("reject double-free before allocation",
+	failures += expect_bool("reject metadata free",
 				plane_pmm_free_page_phys(0x1000), false);
 	failures += expect_bool("allocate first for reject tests",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += expect_u64("allocated reject test page", phys, 0x1000);
+	failures += expect_u64("allocated reject test page", phys, 0x2000);
 	failures += expect_bool("reject unaligned free",
-				plane_pmm_free_page_phys(0x1001), false);
+				plane_pmm_free_page_phys(0x2001), false);
 	failures += expect_bool("reject unmanaged free",
 				plane_pmm_free_page_phys(0x9000), false);
-	failures += expect_bool("reject still-free page",
-				plane_pmm_free_page_phys(0x2000), false);
 	failures += expect_bool("free allocated page",
-				plane_pmm_free_page_phys(0x1000), true);
+				plane_pmm_free_page_phys(0x2000), true);
 	failures += expect_bool("reject double-free after release",
-				plane_pmm_free_page_phys(0x1000), false);
+				plane_pmm_free_page_phys(0x2000), false);
+
+	return failures;
+}
+
+static int test_init_fails_without_direct_map(void)
+{
+	struct plane_mem_info mem = {0};
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	direct_map_available = false;
+	failures += expect_bool("direct map missing init",
+				plane_pmm_init(&mem), false);
+	direct_map_available = true;
 
 	return failures;
 }
@@ -450,16 +518,24 @@ int main(void)
 {
 	int failures = 0;
 
-	failures += test_init_accounts_all_memmap_types();
-	failures += test_phys_to_page_metadata();
-	failures += test_page_api_allocates_and_frees_metadata();
-	failures += test_grub_like_reservations_are_counted();
-	failures += test_limine_like_rich_memmap_is_counted();
-	failures += test_single_page_allocation_order_and_exhaustion();
-	failures += test_multi_page_alignment();
-	failures += test_multi_page_phys_api_updates_metadata();
-	failures += test_free_merges_ranges();
-	failures += test_free_rejects_invalid_ranges();
+#define RUN_TEST(fn) do {                                                       \
+	reset_direct_map_stub();                                               \
+	failures += fn();                                                      \
+} while (0)
+
+	RUN_TEST(test_init_accounts_all_memmap_types);
+	RUN_TEST(test_phys_to_page_metadata);
+	RUN_TEST(test_page_api_allocates_and_frees_metadata);
+	RUN_TEST(test_grub_like_reservations_are_counted);
+	RUN_TEST(test_limine_like_rich_memmap_is_counted);
+	RUN_TEST(test_single_page_allocation_order_and_exhaustion);
+	RUN_TEST(test_multi_page_alignment);
+	RUN_TEST(test_multi_page_phys_api_updates_metadata);
+	RUN_TEST(test_free_merges_ranges);
+	RUN_TEST(test_free_rejects_invalid_ranges);
+	RUN_TEST(test_init_fails_without_direct_map);
+
+#undef RUN_TEST
 
 	if (failures != 0) {
 		return 1;

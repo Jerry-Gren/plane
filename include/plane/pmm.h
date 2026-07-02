@@ -22,13 +22,18 @@ enum plane_page_state {
 	PLANE_PAGE_INVALID = 0,
 	PLANE_PAGE_FREE,
 	PLANE_PAGE_ALLOCATED,
+	PLANE_PAGE_METADATA,
 };
 
-struct plane_pmm_stats {
+struct plane_pmm_allocator_stats {
 	uint64_t managed_pages;
-	uint64_t tracked_pages;
+	uint64_t metadata_pages;
+	uint64_t metadata_bytes;
 	uint64_t free_pages;
-	uint64_t allocated_pages;
+	uint64_t free_range_count;
+};
+
+struct plane_pmm_memtype_stats {
 	uint64_t usable_pages;
 	uint64_t invalid_pages;
 	uint64_t reserved_pages;
@@ -39,7 +44,11 @@ struct plane_pmm_stats {
 	uint64_t framebuffer_pages;
 	uint64_t bad_pages;
 	uint64_t reserved_mapped_pages;
-	uint64_t free_range_count;
+};
+
+struct plane_pmm_stats {
+	struct plane_pmm_allocator_stats allocator;
+	struct plane_pmm_memtype_stats memtype;
 };
 
 bool plane_pmm_init(const struct plane_mem_info *mem);
@@ -55,5 +64,6 @@ struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr);
 uint64_t plane_page_phys(const struct plane_page *page);
 enum plane_page_state plane_page_state(const struct plane_page *page);
 struct plane_pmm_stats plane_pmm_get_stats(void);
+void plane_pmm_log_stats(void);
 
 #endif /* PLANE_PMM_H */

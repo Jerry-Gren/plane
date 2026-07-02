@@ -17,27 +17,7 @@ void kmain(struct boot_info *info) {
 		   "failed to enable kernel direct map");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
-	struct plane_pmm_stats pmm_stats = plane_pmm_get_stats();
-	pr_info("PMM: managed=%llu tracked=%llu free=%llu allocated=%llu usable=%llu "
-		"invalid=%llu reserved=%llu acpi_reclaimable=%llu "
-		"acpi_nvs=%llu bootloader=%llu exec_modules=%llu "
-		"framebuffer=%llu bad=%llu reserved_mapped=%llu "
-		"ranges=%llu\n",
-		(unsigned long long)pmm_stats.managed_pages,
-		(unsigned long long)pmm_stats.tracked_pages,
-		(unsigned long long)pmm_stats.free_pages,
-		(unsigned long long)pmm_stats.allocated_pages,
-		(unsigned long long)pmm_stats.usable_pages,
-		(unsigned long long)pmm_stats.invalid_pages,
-		(unsigned long long)pmm_stats.reserved_pages,
-		(unsigned long long)pmm_stats.acpi_reclaimable_pages,
-		(unsigned long long)pmm_stats.acpi_nvs_pages,
-		(unsigned long long)pmm_stats.bootloader_reclaimable_pages,
-		(unsigned long long)pmm_stats.executable_and_modules_pages,
-		(unsigned long long)pmm_stats.framebuffer_pages,
-		(unsigned long long)pmm_stats.bad_pages,
-		(unsigned long long)pmm_stats.reserved_mapped_pages,
-		(unsigned long long)pmm_stats.free_range_count);
+	plane_pmm_log_stats();
 
 	/*
 	 * TODO:
