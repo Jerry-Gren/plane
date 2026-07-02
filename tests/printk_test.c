@@ -4,6 +4,8 @@
 
 #include <plane/printk.h>
 
+#include "support/test.h"
+
 static int printk_count;
 static int panic_count;
 static jmp_buf panic_env;
@@ -38,26 +40,6 @@ static void reset_counts(void)
 	panic_count = 0;
 }
 
-static int expect_bool(const char *name, int actual, int expected)
-{
-	if (!!actual == !!expected) {
-		return 0;
-	}
-
-	printf("FAIL: %s expected %d got %d\n", name, !!expected, !!actual);
-	return 1;
-}
-
-static int expect_int(const char *name, int actual, int expected)
-{
-	if (actual == expected) {
-		return 0;
-	}
-
-	printf("FAIL: %s expected %d got %d\n", name, expected, actual);
-	return 1;
-}
-
 static int trigger_warn_once(void)
 {
 	return WARN_ON_ONCE(true);
@@ -73,30 +55,30 @@ static int test_warn_macros(void)
 	int failures = 0;
 
 	reset_counts();
-	failures += expect_bool("WARN_ON(false)", WARN_ON(false), false);
-	failures += expect_int("printk after WARN_ON(false)", printk_count, 0);
+	failures += test_expect_bool("WARN_ON(false)", WARN_ON(false), false);
+	failures += test_expect_int("printk after WARN_ON(false)", printk_count, 0);
 
 	reset_counts();
-	failures += expect_bool("WARN_ON(true)", WARN_ON(true), true);
-	failures += expect_int("printk after WARN_ON(true)", printk_count, 1);
+	failures += test_expect_bool("WARN_ON(true)", WARN_ON(true), true);
+	failures += test_expect_int("printk after WARN_ON(true)", printk_count, 1);
 
 	reset_counts();
-	failures += expect_bool("WARN_ON_MSG(true)", WARN_ON_MSG(true, "value=%d", 7), true);
-	failures += expect_int("printk after WARN_ON_MSG(true)", printk_count, 1);
+	failures += test_expect_bool("WARN_ON_MSG(true)", WARN_ON_MSG(true, "value=%d", 7), true);
+	failures += test_expect_int("printk after WARN_ON_MSG(true)", printk_count, 1);
 
 	reset_counts();
-	failures += expect_bool("WARN_ON_ONCE(false)", WARN_ON_ONCE(false), false);
-	failures += expect_int("printk after WARN_ON_ONCE(false)", printk_count, 0);
+	failures += test_expect_bool("WARN_ON_ONCE(false)", WARN_ON_ONCE(false), false);
+	failures += test_expect_int("printk after WARN_ON_ONCE(false)", printk_count, 0);
 
 	reset_counts();
-	failures += expect_bool("WARN_ON_ONCE first", trigger_warn_once(), true);
-	failures += expect_bool("WARN_ON_ONCE second", trigger_warn_once(), true);
-	failures += expect_int("printk after WARN_ON_ONCE twice", printk_count, 1);
+	failures += test_expect_bool("WARN_ON_ONCE first", trigger_warn_once(), true);
+	failures += test_expect_bool("WARN_ON_ONCE second", trigger_warn_once(), true);
+	failures += test_expect_int("printk after WARN_ON_ONCE twice", printk_count, 1);
 
 	reset_counts();
-	failures += expect_bool("WARN_ON_ONCE_MSG first", trigger_warn_once_msg(), true);
-	failures += expect_bool("WARN_ON_ONCE_MSG second", trigger_warn_once_msg(), true);
-	failures += expect_int("printk after WARN_ON_ONCE_MSG twice", printk_count, 1);
+	failures += test_expect_bool("WARN_ON_ONCE_MSG first", trigger_warn_once_msg(), true);
+	failures += test_expect_bool("WARN_ON_ONCE_MSG second", trigger_warn_once_msg(), true);
+	failures += test_expect_int("printk after WARN_ON_ONCE_MSG twice", printk_count, 1);
 
 	return failures;
 }
@@ -108,12 +90,12 @@ static int test_bug_macros_false_path(void)
 	reset_counts();
 	BUG_ON(false);
 	BUG_ON_MSG(false, "value=%d", 7);
-	failures += expect_int("panic after false BUG_ON paths", panic_count, 0);
+	failures += test_expect_int("panic after false BUG_ON paths", panic_count, 0);
 
 	return failures;
 }
 
-static int expect_panic_from_bug(void)
+static int test_panic_from_bug(void)
 {
 	reset_counts();
 	if (setjmp(panic_env) == 0) {
@@ -121,10 +103,10 @@ static int expect_panic_from_bug(void)
 		return 1;
 	}
 
-	return expect_int("panic after BUG()", panic_count, 1);
+	return test_expect_int("panic after BUG()", panic_count, 1);
 }
 
-static int expect_panic_from_bug_on(void)
+static int test_panic_from_bug_on(void)
 {
 	reset_counts();
 	if (setjmp(panic_env) == 0) {
@@ -132,10 +114,10 @@ static int expect_panic_from_bug_on(void)
 		return 1;
 	}
 
-	return expect_int("panic after BUG_ON(true)", panic_count, 1);
+	return test_expect_int("panic after BUG_ON(true)", panic_count, 1);
 }
 
-static int expect_panic_from_bug_on_msg(void)
+static int test_panic_from_bug_on_msg(void)
 {
 	reset_counts();
 	if (setjmp(panic_env) == 0) {
@@ -143,18 +125,18 @@ static int expect_panic_from_bug_on_msg(void)
 		return 1;
 	}
 
-	return expect_int("panic after BUG_ON_MSG(true)", panic_count, 1);
+	return test_expect_int("panic after BUG_ON_MSG(true)", panic_count, 1);
 }
 
 int main(void)
 {
 	int failures = 0;
 
-	failures += test_warn_macros();
-	failures += test_bug_macros_false_path();
-	failures += expect_panic_from_bug();
-	failures += expect_panic_from_bug_on();
-	failures += expect_panic_from_bug_on_msg();
+	TEST_RUN(failures, test_warn_macros);
+	TEST_RUN(failures, test_bug_macros_false_path);
+	TEST_RUN(failures, test_panic_from_bug);
+	TEST_RUN(failures, test_panic_from_bug_on);
+	TEST_RUN(failures, test_panic_from_bug_on_msg);
 
 	if (failures != 0) {
 		return 1;

@@ -4,6 +4,8 @@
 
 #include <plane/early_video.h>
 
+#include "support/test.h"
+
 static struct plane_video_info rgb_video(uint8_t bpp,
 					 uint8_t red_shift,
 					 uint8_t green_shift,
@@ -23,25 +25,6 @@ static struct plane_video_info rgb_video(uint8_t bpp,
 	return video;
 }
 
-static int expect_u32(const char *name, uint32_t actual, uint32_t expected) {
-	if (actual == expected) {
-		return 1;
-	}
-
-	printf("FAIL: %s expected=0x%08x actual=0x%08x\n",
-	       name, expected, actual);
-	return 0;
-}
-
-static int expect_bool(const char *name, int actual, int expected) {
-	if (!!actual == !!expected) {
-		return 1;
-	}
-
-	printf("FAIL: %s expected=%d actual=%d\n", name, expected, actual);
-	return 0;
-}
-
 static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel) {
 	uint32_t pixel = 0;
 
@@ -53,7 +36,7 @@ static uint32_t read_le_pixel(const uint8_t *src, uint8_t bytes_per_pixel) {
 }
 
 static int test_draw_pattern_packs_rgb_formats(void) {
-	int passed = 0;
+	int failures = 0;
 
 	struct {
 		const char *name;
@@ -89,20 +72,22 @@ static int test_draw_pattern_packs_rgb_formats(void) {
 
 		if (!plane_early_video_draw_test_pattern(&video)) {
 			printf("FAIL: %s returned false\n", cases[i].name);
+			failures++;
 			continue;
 		}
 
 		uint64_t offset = video.pitch + bytes_per_pixel;
-		passed += expect_u32(cases[i].name,
-				     read_le_pixel(&framebuffer[offset], bytes_per_pixel),
-				     cases[i].expected);
+		failures += test_expect_u32(cases[i].name,
+					    read_le_pixel(&framebuffer[offset],
+							  bytes_per_pixel),
+					    cases[i].expected);
 	}
 
-	return passed;
+	return failures;
 }
 
 static int test_format_supported(void) {
-	int passed = 0;
+	int failures = 0;
 
 	struct plane_video_info valid = rgb_video(32, 16, 8, 0, 8, 8, 8);
 	struct plane_video_info bad_bpp = valid;
@@ -114,16 +99,20 @@ static int test_format_supported(void) {
 	mask_overflow.red_mask_shift = 28;
 	mask_overflow.red_mask_size = 8;
 
-	passed += expect_bool("valid format",
-			      plane_early_video_format_supported(&valid), 1);
-	passed += expect_bool("bad bpp",
-			      plane_early_video_format_supported(&bad_bpp), 0);
-	passed += expect_bool("empty mask",
-			      plane_early_video_format_supported(&empty_mask), 0);
-	passed += expect_bool("mask overflow",
-			      plane_early_video_format_supported(&mask_overflow), 0);
+	failures += test_expect_bool("valid format",
+				     plane_early_video_format_supported(&valid),
+				     true);
+	failures += test_expect_bool("bad bpp",
+				     plane_early_video_format_supported(&bad_bpp),
+				     false);
+	failures += test_expect_bool("empty mask",
+				     plane_early_video_format_supported(&empty_mask),
+				     false);
+	failures += test_expect_bool("mask overflow",
+				     plane_early_video_format_supported(&mask_overflow),
+				     false);
 
-	return passed;
+	return failures;
 }
 
 static int test_draw_pattern_honors_pitch(void) {
@@ -138,7 +127,7 @@ static int test_draw_pattern_honors_pitch(void) {
 
 	if (!plane_early_video_draw_test_pattern(&video)) {
 		printf("FAIL: draw test pattern returned false\n");
-		return 0;
+		return 1;
 	}
 
 	uint32_t bottom_right = (uint32_t)framebuffer[12 + 4] |
@@ -147,31 +136,31 @@ static int test_draw_pattern_honors_pitch(void) {
 				((uint32_t)framebuffer[12 + 7] << 24);
 	if (bottom_right == 0) {
 		printf("FAIL: draw test pattern did not write bottom-right pixel\n");
-		return 0;
+		return 1;
 	}
 
 	for (uint64_t i = 8; i < 12; i++) {
 		if (framebuffer[i] != 0x5a) {
 			printf("FAIL: first row padding overwritten at %llu\n",
 			       (unsigned long long)i);
-			return 0;
+			return 1;
 		}
 	}
 	for (uint64_t i = 20; i < 24; i++) {
 		if (framebuffer[i] != 0x5a) {
 			printf("FAIL: second row padding overwritten at %llu\n",
 			       (unsigned long long)i);
-			return 0;
+			return 1;
 		}
 	}
 
-	return 1;
+	return 0;
 }
 
 static int test_draw_rejects_invalid_inputs(void) {
 	uint8_t framebuffer[16] = {0};
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
-	int passed = 0;
+	int failures = 0;
 
 	video.framebuffer_addr = framebuffer;
 	video.width = 1;
@@ -179,19 +168,22 @@ static int test_draw_rejects_invalid_inputs(void) {
 	video.pitch = 4;
 
 	video.bpp = 15;
-	passed += expect_bool("draw rejects bad bpp",
-			      plane_early_video_draw_test_pattern(&video), 0);
+	failures += test_expect_bool("draw rejects bad bpp",
+				     plane_early_video_draw_test_pattern(&video),
+				     false);
 	video.bpp = 32;
 
 	video.framebuffer_addr = NULL;
-	passed += expect_bool("draw rejects null framebuffer",
-			      plane_early_video_draw_test_pattern(&video), 0);
+	failures += test_expect_bool("draw rejects null framebuffer",
+				     plane_early_video_draw_test_pattern(&video),
+				     false);
 
-	return passed;
+	return failures;
 }
 
 static int test_draw_rejects_short_pitch(void) {
 	uint8_t framebuffer[16];
+	int failures;
 	memset(framebuffer, 0x5a, sizeof(framebuffer));
 
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
@@ -200,46 +192,37 @@ static int test_draw_rejects_short_pitch(void) {
 	video.height = 2;
 	video.pitch = 4;
 
-	if (!expect_bool("draw rejects short pitch",
-			 plane_early_video_draw_test_pattern(&video), 0)) {
-		return 0;
+	failures = test_expect_bool("draw rejects short pitch",
+				    plane_early_video_draw_test_pattern(&video),
+				    false);
+	if (failures != 0) {
+		return failures;
 	}
 
 	for (uint64_t i = 0; i < sizeof(framebuffer); i++) {
 		if (framebuffer[i] != 0x5a) {
 			printf("FAIL: short pitch rejection wrote byte %llu\n",
 			       (unsigned long long)i);
-			return 0;
+			return 1;
 		}
 	}
 
-	return 1;
+	return 0;
 }
 
 int main(void) {
-	int passed = 0;
-	int total = 0;
+	int failures = 0;
 
-	passed += test_draw_pattern_packs_rgb_formats();
-	total += 3;
+	TEST_RUN(failures, test_draw_pattern_packs_rgb_formats);
+	TEST_RUN(failures, test_format_supported);
+	TEST_RUN(failures, test_draw_pattern_honors_pitch);
+	TEST_RUN(failures, test_draw_rejects_invalid_inputs);
+	TEST_RUN(failures, test_draw_rejects_short_pitch);
 
-	passed += test_format_supported();
-	total += 4;
-
-	passed += test_draw_pattern_honors_pitch();
-	total += 1;
-
-	passed += test_draw_rejects_invalid_inputs();
-	total += 2;
-
-	passed += test_draw_rejects_short_pitch();
-	total += 1;
-
-	if (passed != total) {
-		printf("early_video_test: %d/%d passed\n", passed, total);
+	if (failures != 0) {
 		return 1;
 	}
 
-	printf("early_video_test: %d cases passed\n", total);
+	printf("early_video_test: ok\n");
 	return 0;
 }

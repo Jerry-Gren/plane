@@ -6,6 +6,8 @@
 
 #include <plane/util.h>
 
+#include "support/test.h"
+
 uint64_t x86_64_mb2_early_pml4[X86_64_PAGE_TABLE_ENTRIES];
 uint64_t x86_64_mb2_early_pd_kernel[X86_64_PAGE_TABLE_ENTRIES];
 uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGE_TABLE_ENTRIES];
@@ -35,35 +37,6 @@ static void reset_state(void) {
 	flush_count = 0;
 }
 
-static int expect_bool(const char *name, int actual, int expected) {
-	if (!!actual == !!expected) {
-		return 1;
-	}
-
-	printf("FAIL: %s expected=%d actual=%d\n", name, expected, actual);
-	return 0;
-}
-
-static int expect_u64(const char *name, uint64_t actual, uint64_t expected) {
-	if (actual == expected) {
-		return 1;
-	}
-
-	printf("FAIL: %s expected=0x%016llx actual=0x%016llx\n",
-	       name, (unsigned long long)expected, (unsigned long long)actual);
-	return 0;
-}
-
-static int expect_ptr(const char *name, const void *actual,
-		      const void *expected) {
-	if (actual == expected) {
-		return 1;
-	}
-
-	printf("FAIL: %s expected=%p actual=%p\n", name, expected, actual);
-	return 0;
-}
-
 static int page_directory_untouched(void) {
 	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
 		if (x86_64_mb2_early_pd_fb[i] != 0 ||
@@ -76,7 +49,7 @@ static int page_directory_untouched(void) {
 }
 
 static int test_maps_unaligned_framebuffer(void) {
-	int passed = 0;
+	int failures = 0;
 	void *vaddr = NULL;
 	uint64_t phys_addr = 0x123450;
 	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
@@ -86,82 +59,81 @@ static int test_maps_unaligned_framebuffer(void) {
 
 	reset_state();
 
-	passed += expect_bool("map unaligned framebuffer",
-			      x86_64_mb2_early_map_framebuffer(phys_addr,
-							       0x300000,
-							       &vaddr),
-			      1);
-	passed += expect_ptr("mapped virtual address", vaddr,
-			     (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE +
-				      page_offset));
-	passed += expect_u64("first framebuffer pde",
-			     x86_64_mb2_early_pd_fb[start_idx],
-			     phys_base | flags);
-	passed += expect_u64("second framebuffer pde",
-			     x86_64_mb2_early_pd_fb[start_idx + 1],
-			     (phys_base + ARCH_LARGE_PAGE_SIZE) | flags);
-	passed += expect_u64("third framebuffer pde",
-			     x86_64_mb2_early_pd_fb[start_idx + 2],
-			     (phys_base + (2 * ARCH_LARGE_PAGE_SIZE)) | flags);
-	passed += expect_u64("invalidate count", invalidate_count, 3);
-	passed += expect_u64("first invalidated vaddr", invalidated_vaddrs[0],
-			     X86_64_MB2_FRAMEBUFFER_VMA_BASE);
+	failures += test_expect_bool("map unaligned framebuffer",
+				     x86_64_mb2_early_map_framebuffer(
+					     phys_addr, 0x300000, &vaddr),
+				     true);
+	failures += test_expect_ptr("mapped virtual address", vaddr,
+				    (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE +
+					     page_offset));
+	failures += test_expect_u64("first framebuffer pde",
+				    x86_64_mb2_early_pd_fb[start_idx],
+				    phys_base | flags);
+	failures += test_expect_u64("second framebuffer pde",
+				    x86_64_mb2_early_pd_fb[start_idx + 1],
+				    (phys_base + ARCH_LARGE_PAGE_SIZE) | flags);
+	failures += test_expect_u64("third framebuffer pde",
+				    x86_64_mb2_early_pd_fb[start_idx + 2],
+				    (phys_base + (2 * ARCH_LARGE_PAGE_SIZE)) |
+					    flags);
+	failures += test_expect_u64("invalidate count", invalidate_count, 3);
+	failures += test_expect_u64("first invalidated vaddr",
+				    invalidated_vaddrs[0],
+				    X86_64_MB2_FRAMEBUFFER_VMA_BASE);
 
-	return passed;
+	return failures;
 }
 
-static int expect_map_failure(const char *name, uint64_t phys_addr,
+static int check_map_failure(const char *name, uint64_t phys_addr,
 			      uint64_t size) {
 	void *vaddr = (void *)0xfeedface;
-	int passed = 0;
+	int failures = 0;
 
 	reset_state();
 
-	passed += expect_bool(name,
-			      x86_64_mb2_early_map_framebuffer(phys_addr,
-							       size, &vaddr),
-			      0);
-	passed += expect_ptr("failure leaves out pointer unchanged", vaddr,
-			     (void *)0xfeedface);
-	passed += expect_bool("failure leaves page directories untouched",
-			      page_directory_untouched(), 1);
-	passed += expect_u64("failure does not invalidate tlb",
-			     invalidate_count, 0);
+	failures += test_expect_bool(name,
+				     x86_64_mb2_early_map_framebuffer(
+					     phys_addr, size, &vaddr),
+				     false);
+	failures += test_expect_ptr("failure leaves out pointer unchanged",
+				    vaddr, (void *)0xfeedface);
+	failures += test_expect_bool("failure leaves page directories untouched",
+				     page_directory_untouched(), true);
+	failures += test_expect_u64("failure does not invalidate tlb",
+				    invalidate_count, 0);
 
-	return passed;
+	return failures;
 }
 
 static int test_rejects_invalid_mappings(void) {
-	int passed = 0;
+	int failures = 0;
 
-	passed += expect_map_failure("reject zero framebuffer size", 0, 0);
-	passed += expect_map_failure("reject size plus page offset overflow",
-				     1, UINT64_MAX);
-	passed += expect_map_failure("reject aligned size overflow",
-				     0, UINT64_MAX - 1);
-	passed += expect_map_failure("reject physical range overflow",
-				     UINT64_MAX - (ARCH_LARGE_PAGE_SIZE / 2),
-				     ARCH_LARGE_PAGE_SIZE);
-	passed += expect_map_failure("reject framebuffer beyond pd capacity",
-				     0,
-				     (X86_64_PAGE_TABLE_ENTRIES + 1) *
-				     ARCH_LARGE_PAGE_SIZE);
+	failures += check_map_failure("reject zero framebuffer size", 0, 0);
+	failures += check_map_failure("reject size plus page offset overflow",
+				       1, UINT64_MAX);
+	failures += check_map_failure("reject aligned size overflow",
+				       0, UINT64_MAX - 1);
+	failures += check_map_failure("reject physical range overflow",
+				       UINT64_MAX - (ARCH_LARGE_PAGE_SIZE / 2),
+				       ARCH_LARGE_PAGE_SIZE);
+	failures += check_map_failure("reject framebuffer beyond pd capacity",
+				       0,
+				       (X86_64_PAGE_TABLE_ENTRIES + 1) *
+					       ARCH_LARGE_PAGE_SIZE);
 
-	return passed;
+	return failures;
 }
 
 int main(void) {
-	int passed = 0;
-	int total = 7 + 20;
+	int failures = 0;
 
-	passed += test_maps_unaligned_framebuffer();
-	passed += test_rejects_invalid_mappings();
+	TEST_RUN(failures, test_maps_unaligned_framebuffer);
+	TEST_RUN(failures, test_rejects_invalid_mappings);
 
-	if (passed != total) {
-		printf("mb2_early_mmu_test: %d/%d passed\n", passed, total);
+	if (failures != 0) {
 		return 1;
 	}
 
-	printf("mb2_early_mmu_test: %d cases passed\n", passed);
+	printf("mb2_early_mmu_test: ok\n");
 	return 0;
 }

@@ -4,6 +4,8 @@
 
 #include <plane/memmap.h>
 
+#include "support/test.h"
+
 struct test_case {
 	const char *name;
 	struct plane_mem_region input[PLANE_MAX_MEMMAP_ENTRIES];
@@ -74,14 +76,14 @@ static int run_case(const struct test_case *tc) {
 
 	int ret = plane_sanitize_memory_map(&actual);
 	if (ret == 1 && maps_equal(&actual, &expected)) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: %s\n", tc->name);
 	printf("expected ret=1 actual ret=%d\n", ret);
 	dump_map("expected", &expected);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 struct reserve_test_case {
@@ -111,14 +113,14 @@ static int run_reserve_case(const struct reserve_test_case *tc) {
 				       tc->reserve_length,
 				       tc->reserve_type);
 	if (ret == tc->expected_ret && maps_equal(&actual, &expected)) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: %s\n", tc->name);
 	printf("expected ret=%d actual ret=%d\n", tc->expected_ret, ret);
 	dump_map("expected", &expected);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 static int run_full_map_reserve_failure_case(void) {
@@ -136,14 +138,14 @@ static int run_full_map_reserve_failure_case(void) {
 	int ret = plane_memmap_reserve(&actual, 0x1000, 0x1000,
 				       PLANE_MEM_RESERVED);
 	if (ret == 0 && maps_equal(&actual, &expected)) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: full map reserve fails without modifying map\n");
 	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("expected", &expected);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 static int run_sanitize_too_many_regions_failure_case(void) {
@@ -163,13 +165,13 @@ static int run_sanitize_too_many_regions_failure_case(void) {
 
 	int ret = plane_sanitize_memory_map(&actual);
 	if (ret == 0) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: sanitize reports too many output regions\n");
 	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 static int run_sanitize_overflow_failure_case(void) {
@@ -182,13 +184,13 @@ static int run_sanitize_overflow_failure_case(void) {
 
 	int ret = plane_sanitize_memory_map(&actual);
 	if (ret == 0) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: sanitize rejects overflowing region\n");
 	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 static int run_reserve_overflow_failure_case(void) {
@@ -204,14 +206,14 @@ static int run_reserve_overflow_failure_case(void) {
 	int ret = plane_memmap_reserve(&actual, UINT64_MAX - 0x1000, 0x2000,
 				       PLANE_MEM_RESERVED);
 	if (ret == 0 && maps_equal(&actual, &expected)) {
-		return 1;
+		return 0;
 	}
 
 	printf("FAIL: overflowing reserve fails without modifying map\n");
 	printf("expected ret=0 actual ret=%d\n", ret);
 	dump_map("expected", &expected);
 	dump_map("actual", &actual);
-	return 0;
+	return 1;
 }
 
 int main(void) {
@@ -476,27 +478,25 @@ int main(void) {
 		},
 	};
 
-	int passed = 0;
+	int failures = 0;
 	int sanitize_count = (int)(sizeof(cases) / sizeof(cases[0]));
 	int reserve_count = (int)(sizeof(reserve_cases) / sizeof(reserve_cases[0]));
-	int total = sanitize_count + reserve_count + 4;
 
 	for (int i = 0; i < sanitize_count; i++) {
-		passed += run_case(&cases[i]);
+		failures += run_case(&cases[i]);
 	}
 	for (int i = 0; i < reserve_count; i++) {
-		passed += run_reserve_case(&reserve_cases[i]);
+		failures += run_reserve_case(&reserve_cases[i]);
 	}
-	passed += run_full_map_reserve_failure_case();
-	passed += run_sanitize_too_many_regions_failure_case();
-	passed += run_sanitize_overflow_failure_case();
-	passed += run_reserve_overflow_failure_case();
+	TEST_RUN(failures, run_full_map_reserve_failure_case);
+	TEST_RUN(failures, run_sanitize_too_many_regions_failure_case);
+	TEST_RUN(failures, run_sanitize_overflow_failure_case);
+	TEST_RUN(failures, run_reserve_overflow_failure_case);
 
-	if (passed != total) {
-		printf("boot_mem_test: %d/%d passed\n", passed, total);
+	if (failures != 0) {
 		return 1;
 	}
 
-	printf("boot_mem_test: %d cases passed\n", total);
+	printf("boot_mem_test: ok\n");
 	return 0;
 }
