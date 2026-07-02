@@ -1,6 +1,5 @@
 #include <setjmp.h>
 #include <stdarg.h>
-#include <stdio.h>
 
 #include <plane/printk.h>
 

@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <plane/early_video.h>
@@ -71,7 +70,8 @@ static int test_draw_pattern_packs_rgb_formats(void) {
 		video.pitch = video.width * bytes_per_pixel;
 
 		if (!plane_early_video_draw_test_pattern(&video)) {
-			failures += test_fail("%s returned false", cases[i].name);
+			test_fail("%s returned false", cases[i].name);
+			failures++;
 			continue;
 		}
 
@@ -125,7 +125,8 @@ static int test_draw_pattern_honors_pitch(void) {
 	video.pitch = 12;
 
 	if (!plane_early_video_draw_test_pattern(&video)) {
-		return test_fail("draw test pattern returned false");
+		test_fail("draw test pattern returned false");
+		return 1;
 	}
 
 	uint32_t bottom_right = (uint32_t)framebuffer[12 + 4] |
@@ -133,19 +134,22 @@ static int test_draw_pattern_honors_pitch(void) {
 				((uint32_t)framebuffer[12 + 6] << 16) |
 				((uint32_t)framebuffer[12 + 7] << 24);
 	if (bottom_right == 0) {
-		return test_fail("draw test pattern did not write bottom-right pixel");
+		test_fail("draw test pattern did not write bottom-right pixel");
+		return 1;
 	}
 
 	for (uint64_t i = 8; i < 12; i++) {
 		if (framebuffer[i] != 0x5a) {
-			return test_fail("first row padding overwritten at %llu",
-					 (unsigned long long)i);
+			test_fail("first row padding overwritten at %llu",
+				  (unsigned long long)i);
+			return 1;
 		}
 	}
 	for (uint64_t i = 20; i < 24; i++) {
 		if (framebuffer[i] != 0x5a) {
-			return test_fail("second row padding overwritten at %llu",
-					 (unsigned long long)i);
+			test_fail("second row padding overwritten at %llu",
+				  (unsigned long long)i);
+			return 1;
 		}
 	}
 
@@ -196,8 +200,9 @@ static int test_draw_rejects_short_pitch(void) {
 
 	for (uint64_t i = 0; i < sizeof(framebuffer); i++) {
 		if (framebuffer[i] != 0x5a) {
-			return test_fail("short pitch rejection wrote byte %llu",
-					 (unsigned long long)i);
+			test_fail("short pitch rejection wrote byte %llu",
+				  (unsigned long long)i);
+			return 1;
 		}
 	}
 

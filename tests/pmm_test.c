@@ -1,6 +1,5 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <plane/memmap.h>
@@ -37,7 +36,8 @@ static int check_page_state(const char *name,
 		return 0;
 	}
 
-	return test_fail("%s expected=%d actual=%d", name, expected, actual);
+	test_fail("%s expected=%d actual=%d", name, expected, actual);
+	return 1;
 }
 
 static uint64_t pages_for_bytes(uint64_t bytes)

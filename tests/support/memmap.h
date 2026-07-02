@@ -83,6 +83,23 @@ static inline int test_memmaps_equal(const struct plane_mem_info *actual,
 		      actual->entry_count * sizeof(actual->map[0])) == 0;
 }
 
+static inline int test_report_memmap_failure(const char *name,
+					     int expected_ret,
+					     int actual_ret,
+					     const struct plane_mem_info *expected,
+					     const struct plane_mem_info *actual)
+{
+	test_fail("%s", name);
+	printf("ret: expected=%d actual=%d\n", expected_ret, actual_ret);
+	if (expected != NULL) {
+		test_dump_memmap("expected", expected);
+	}
+	if (actual != NULL) {
+		test_dump_memmap("actual", actual);
+	}
+	return 1;
+}
+
 static inline int test_run_memmap_sanitize_case(
 	const struct test_memmap_sanitize_case *tc)
 {
@@ -102,11 +119,7 @@ static inline int test_run_memmap_sanitize_case(
 		return 0;
 	}
 
-	(void)test_fail("%s", tc->name);
-	printf("expected ret=1 actual ret=%d\n", ret);
-	test_dump_memmap("expected", &expected);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(tc->name, 1, ret, &expected, &actual);
 }
 
 static inline int test_run_memmap_reserve_case(
@@ -129,11 +142,8 @@ static inline int test_run_memmap_reserve_case(
 		return 0;
 	}
 
-	(void)test_fail("%s", tc->name);
-	printf("expected ret=%d actual ret=%d\n", tc->expected_ret, ret);
-	test_dump_memmap("expected", &expected);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(tc->name, tc->expected_ret, ret,
+					  &expected, &actual);
 }
 
 static inline int test_run_memmap_sanitize_cases(

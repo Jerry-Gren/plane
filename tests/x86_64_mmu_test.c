@@ -1,6 +1,5 @@
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>

@@ -1,6 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
-
 #include <plane/memmap.h>
 
 #include "support/memmap.h"
@@ -25,11 +23,9 @@ static int run_full_map_reserve_failure_case(void)
 		return 0;
 	}
 
-	(void)test_fail("full map reserve fails without modifying map");
-	printf("expected ret=0 actual ret=%d\n", ret);
-	test_dump_memmap("expected", &expected);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(
+		"full map reserve fails without modifying map",
+		0, ret, &expected, &actual);
 }
 
 static int run_sanitize_too_many_regions_failure_case(void)
@@ -53,10 +49,9 @@ static int run_sanitize_too_many_regions_failure_case(void)
 		return 0;
 	}
 
-	(void)test_fail("sanitize reports too many output regions");
-	printf("expected ret=0 actual ret=%d\n", ret);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(
+		"sanitize reports too many output regions",
+		0, ret, NULL, &actual);
 }
 
 static int run_sanitize_overflow_failure_case(void)
@@ -73,10 +68,9 @@ static int run_sanitize_overflow_failure_case(void)
 		return 0;
 	}
 
-	(void)test_fail("sanitize rejects overflowing region");
-	printf("expected ret=0 actual ret=%d\n", ret);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(
+		"sanitize rejects overflowing region",
+		0, ret, NULL, &actual);
 }
 
 static int run_reserve_overflow_failure_case(void)
@@ -96,16 +90,12 @@ static int run_reserve_overflow_failure_case(void)
 		return 0;
 	}
 
-	(void)test_fail("overflowing reserve fails without modifying map");
-	printf("expected ret=0 actual ret=%d\n", ret);
-	test_dump_memmap("expected", &expected);
-	test_dump_memmap("actual", &actual);
-	return 1;
+	return test_report_memmap_failure(
+		"overflowing reserve fails without modifying map",
+		0, ret, &expected, &actual);
 }
 
-int main(void)
-{
-	const struct test_memmap_sanitize_case sanitize_cases[] = {
+static const struct test_memmap_sanitize_case sanitize_cases[] = {
 		{
 			.name = "drops zero-length entries and aligns usable regions",
 			.input = {
@@ -197,8 +187,9 @@ int main(void)
 			},
 			.expected_count = 3,
 		},
-	};
-	const struct test_memmap_reserve_case reserve_cases[] = {
+};
+
+static const struct test_memmap_reserve_case reserve_cases[] = {
 		{
 			.name = "reserve splits a usable region",
 			.input = {
@@ -364,17 +355,30 @@ int main(void)
 			},
 			.expected_count = 2,
 		},
+};
+
+static int test_sanitize_cases(void)
+{
+	return test_run_memmap_sanitize_cases(sanitize_cases,
+					      TEST_ARRAY_SIZE(sanitize_cases));
+}
+
+static int test_reserve_cases(void)
+{
+	return test_run_memmap_reserve_cases(reserve_cases,
+					     TEST_ARRAY_SIZE(reserve_cases));
+}
+
+int main(void)
+{
+	static const struct test_case cases[] = {
+		TEST_CASE(test_sanitize_cases),
+		TEST_CASE(test_reserve_cases),
+		TEST_CASE(run_full_map_reserve_failure_case),
+		TEST_CASE(run_sanitize_too_many_regions_failure_case),
+		TEST_CASE(run_sanitize_overflow_failure_case),
+		TEST_CASE(run_reserve_overflow_failure_case),
 	};
-	int failures = 0;
 
-	failures += test_run_memmap_sanitize_cases(sanitize_cases,
-						   TEST_ARRAY_SIZE(sanitize_cases));
-	failures += test_run_memmap_reserve_cases(reserve_cases,
-						  TEST_ARRAY_SIZE(reserve_cases));
-	TEST_RUN(failures, run_full_map_reserve_failure_case);
-	TEST_RUN(failures, run_sanitize_too_many_regions_failure_case);
-	TEST_RUN(failures, run_sanitize_overflow_failure_case);
-	TEST_RUN(failures, run_reserve_overflow_failure_case);
-
-	return test_finish_suite("boot_mem_test", failures);
+	return test_run_cases("boot_mem_test", cases, TEST_ARRAY_SIZE(cases));
 }

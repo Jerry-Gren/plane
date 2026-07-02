@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
