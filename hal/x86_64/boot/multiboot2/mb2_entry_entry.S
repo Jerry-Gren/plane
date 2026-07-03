@@ -3,23 +3,25 @@
 
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 #include <hal/x86_64/cpuid_defs.h>
+#include <hal/x86_64/gdt.h>
 #include <plane/bits.h>
 
 /* Macros */
-#define MB2_MAGIC          MULTIBOOT2_HEADER_MAGIC
-#define MB2_ARCH_I386      MULTIBOOT_ARCHITECTURE_I386
-#define MB2_TAG_END_TYPE   MULTIBOOT_HEADER_TAG_END
-#define MB2_TAG_FB_TYPE    MULTIBOOT_HEADER_TAG_FRAMEBUFFER
+#define EFLAGS_ID_BIT_NR   21
+#define EFLAGS_ID_BIT      BIT(EFLAGS_ID_BIT_NR)
+
+#define MB2_FB_TAG_SIZE    20
+#define MB2_END_TAG_SIZE   8
+#define MB2_FB_DEPTH       32
+
+#define X86_64_MB2_BOOT_STACK_SIZE 16384
+#define X86_64_MB2_GDT_ALIGN       8
 
 #define CR4_PAE_ENABLE     BIT(5)
 #define EFER_MSR           0xc0000080
 #define EFER_LM_ENABLE     BIT(8)
 #define CR0_PAGING_ENABLE  BIT(31)
 #define CR0_PROTECTED_MODE BIT(0)
-
-# /* DO NOT MODIFY THESE TWO LINES */
-# #define X86_PD_PAGE_SIZE  0x200000
-# #define X86_PD_PAGE_SHIFT 21
 
 #define GDT_PRESENT        BIT(7)
 #define GDT_NOT_SYS        BIT(4)
@@ -37,29 +39,29 @@
 /* Multiboot2 header */
 .code32
 .section .multiboot_header
-.align 8
+.align MULTIBOOT_HEADER_ALIGN
 header_start:
-    .long MB2_MAGIC              /* magic number (multiboot 2) */
-    .long MB2_ARCH_I386          /* architecture 0 (protected mode i386) */
+    .long MULTIBOOT2_HEADER_MAGIC       /* magic number (multiboot 2) */
+    .long MULTIBOOT_ARCHITECTURE_I386   /* protected mode i386 */
     .long header_end - header_start
     /* checksum */
-    .long - (MB2_MAGIC + MB2_ARCH_I386 + (header_end - header_start))
+    .long - (MULTIBOOT2_HEADER_MAGIC + MULTIBOOT_ARCHITECTURE_I386 + (header_end - header_start))
 
     /* insert optional multiboot tags here */
     /* framebuffer tag */
-    .align 8
-    .word MB2_TAG_FB_TYPE /* type */
-    .word 0               /* flags */
-    .long 20              /* size */
-    .long 0               /* width (0 = Let GRUB decide) */
-    .long 0               /* height (0 = Let GRUB decide) */
-    .long 32              /* depth */
+    .align MULTIBOOT_TAG_ALIGN
+    .word MULTIBOOT_HEADER_TAG_FRAMEBUFFER /* type */
+    .word 0                                /* flags */
+    .long MB2_FB_TAG_SIZE                  /* size */
+    .long 0                                /* width (0 = Let GRUB decide) */
+    .long 0                                /* height (0 = Let GRUB decide) */
+    .long MB2_FB_DEPTH                     /* depth */
 
     /* required end tag */
-    .align 8
-    .word MB2_TAG_END_TYPE /* type */
-    .word 0                /* flags */
-    .long 8                /* size */
+    .align MULTIBOOT_TAG_ALIGN
+    .word MULTIBOOT_HEADER_TAG_END /* type */
+    .word 0                        /* flags */
+    .long MB2_END_TAG_SIZE         /* size */
 header_end:
 
 /* Section data */
@@ -85,7 +87,7 @@ early_pd_direct:            .skip (X86_64_DIRECT_MAP_SIZE / ARCH_HUGE_PAGE_SIZE)
 
 .align 16
 stack_bottom:
-    .skip 16384
+    .skip X86_64_MB2_BOOT_STACK_SIZE
 stack_top:
 
 /* Section text */
@@ -118,7 +120,7 @@ _start:
     pushfl
     popl %eax
     movl %eax, %ecx
-    xorl $BIT(21), %eax
+    xorl $EFLAGS_ID_BIT, %eax
     pushl %eax
     popfl
     pushfl
@@ -195,9 +197,6 @@ _start:
     loop .Lfill_direct_pdpt
 
     /* PDT */
-    # mov $boot_pd, %edi
-    # mov $(PAGE_PRESENT | PAGE_READWRITE | PAGE_PS), %eax
-    # mov $X86_64_PAGE_TABLE_ENTRIES, %ecx
     mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
     mov %ebx, %eax
     add (%ebx), %eax
@@ -269,7 +268,7 @@ _start:
 
     /* load 64-bit gdt */
     lgdt gdt64_pointer
-    ljmp $0x08, $.Ltrampoline64
+    ljmp $SELECTOR_KERNEL_CS, $.Ltrampoline64
 
 .Lno_long_mode:
     cli
@@ -279,7 +278,7 @@ _start:
 
 .code64
 .Ltrampoline64:
-    mov $0x10, %ax
+    mov $SELECTOR_KERNEL_DS, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
@@ -321,7 +320,7 @@ realm64:
 
 /* GDT */
 .section .boot.rodata, "a"
-.align 8
+.align X86_64_MB2_GDT_ALIGN
 gdt64:
     /* null 0x00 */
     .Lnull_desc:
