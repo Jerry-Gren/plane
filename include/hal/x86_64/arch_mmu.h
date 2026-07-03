@@ -11,12 +11,24 @@
 #define PAGE_PS              BIT(7)
 
 #define X86_64_PAGE_TABLE_ENTRIES 512
+#define X86_64_PAGE_ENTRY_ADDR_LOW_BIT  12
+#define X86_64_PAGE_ENTRY_ADDR_HIGH_BIT 51
+#define X86_64_PAGE_TABLE_INDEX_BITS    9
+#define X86_64_PAGE_TABLE_INDEX_MASK \
+	((1 << X86_64_PAGE_TABLE_INDEX_BITS) - 1)
+
+#ifndef __ASSEMBLER__
+	/* Physical address field in CR3 and page-table entries. */
+	#define X86_64_PAGE_ENTRY_ADDR_MASK \
+		GENMASK_ULL(X86_64_PAGE_ENTRY_ADDR_HIGH_BIT, \
+			    X86_64_PAGE_ENTRY_ADDR_LOW_BIT)
+#endif /* !__ASSEMBLER__ */
 
 /* Page table indices */
-#define PML4_INDEX(vaddr) (((vaddr) >> 39) & 0x1ff)
-#define PDPT_INDEX(vaddr) (((vaddr) >> 30) & 0x1ff)
-#define PD_INDEX(vaddr)   (((vaddr) >> 21) & 0x1ff)
-#define PT_INDEX(vaddr)   (((vaddr) >> 12) & 0x1ff)
+#define PML4_INDEX(vaddr) (((vaddr) >> 39) & X86_64_PAGE_TABLE_INDEX_MASK)
+#define PDPT_INDEX(vaddr) (((vaddr) >> 30) & X86_64_PAGE_TABLE_INDEX_MASK)
+#define PD_INDEX(vaddr)   (((vaddr) >> 21) & X86_64_PAGE_TABLE_INDEX_MASK)
+#define PT_INDEX(vaddr)   (((vaddr) >> 12) & X86_64_PAGE_TABLE_INDEX_MASK)
 
 #ifdef __ASSEMBLER__
 	#define KERNEL_VMA_BASE        0xffffffff80000000
@@ -40,15 +52,15 @@
 
 #define X86_64_DIRECT_MAP_END (X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_SIZE)
 
-#if (KERNEL_VMA_BASE & 0x1fffff) != 0
+#if (KERNEL_VMA_BASE & (ARCH_LARGE_PAGE_SIZE - 1)) != 0
 	#error "KERNEL_VMA_BASE must be 2MB aligned!"
 #endif
 
-#if (X86_64_DIRECT_MAP_BASE & 0x1fffff) != 0
+#if (X86_64_DIRECT_MAP_BASE & (ARCH_LARGE_PAGE_SIZE - 1)) != 0
 	#error "X86_64_DIRECT_MAP_BASE must be 2MB aligned!"
 #endif
 
-#if (X86_64_DIRECT_MAP_SIZE & 0x1fffff) != 0
+#if (X86_64_DIRECT_MAP_SIZE & (ARCH_LARGE_PAGE_SIZE - 1)) != 0
 	#error "X86_64_DIRECT_MAP_SIZE must be 2MB aligned!"
 #endif
 

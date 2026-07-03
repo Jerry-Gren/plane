@@ -18,6 +18,8 @@ void kmain(struct boot_info *info)
 		   "failed to enable kernel direct map");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
+	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
+		   "failed to initialize kernel page tables");
 	plane_pmm_log_stats();
 
 	/*
