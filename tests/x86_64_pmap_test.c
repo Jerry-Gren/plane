@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/pmap.h>
 #include <plane/compiler.h>
@@ -244,6 +245,37 @@ static int test_active_kernel_map_invalidates(void)
 				    invalidate_count, 1);
 	failures += test_expect_u64("active map invalidated vaddr",
 				    invalidated_vaddr, vaddr);
+
+	return failures;
+}
+
+static int test_hal_kernel_page_wrappers(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t phys = UINT64_MAX;
+	int failures = 0;
+
+	failures += test_expect_bool("hal map",
+				     hal_mmu_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     HAL_MMU_MAP_WRITE),
+				     true);
+	failures += test_expect_u64("hal map invalidates",
+				    invalidate_count, 1);
+	failures += test_expect_bool("hal translate",
+				     hal_mmu_translate_kernel_page(vaddr, &phys),
+				     true);
+	failures += test_expect_u64("hal translate phys", phys,
+				    0x12345000ull);
+	failures += test_expect_bool("hal unmap",
+				     hal_mmu_unmap_kernel_page(vaddr), true);
+	failures += test_expect_u64("hal unmap invalidates",
+				    invalidate_count, 2);
+	failures += test_expect_bool("hal reject flags",
+				     hal_mmu_map_kernel_page(vaddr,
+							     0x12345000ull,
+							     BIT(8)),
+				     false);
 
 	return failures;
 }
@@ -711,6 +743,7 @@ int main(void)
 		TEST_CASE(test_map_page_allocates_missing_path),
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
+		TEST_CASE(test_hal_kernel_page_wrappers),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),
 		TEST_CASE(test_map_page_rejects_existing_leaf),
 		TEST_CASE(test_map_page_rejects_huge_intermediate),

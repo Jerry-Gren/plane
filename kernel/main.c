@@ -1,6 +1,7 @@
 #include <plane/boot_info.h>
 #include <plane/early_video.h>
 #include <plane/entry.h>
+#include <plane/kmem.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
 #include <hal/mmu.h>
@@ -20,6 +21,8 @@ void kmain(struct boot_info *info)
 		   "failed to initialize physical memory manager");
 	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
+	BUG_ON_MSG(!plane_kmem_init(),
+		   "failed to initialize kernel memory allocator");
 	plane_pmm_log_stats();
 
 	/*

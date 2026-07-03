@@ -106,6 +106,39 @@ static int test_bootloader_direct_map_base(void)
 	return failures;
 }
 
+static int test_kernel_vma_range(void)
+{
+	uint64_t base = 0;
+	uint64_t size = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("kernel range",
+				     hal_mmu_kernel_vma_range(&base, &size),
+				     true);
+	failures += test_expect_u64("kernel range base",
+				    base, X86_64_KERNEL_MAP_BASE);
+	failures += test_expect_u64("kernel range size",
+				    size, X86_64_KERNEL_MAP_SIZE);
+	failures += test_expect_bool("kernel range null base",
+				     hal_mmu_kernel_vma_range(NULL, &size),
+				     false);
+	failures += test_expect_bool("kernel range null size",
+				     hal_mmu_kernel_vma_range(&base, NULL),
+				     false);
+	failures += test_expect_bool(
+		"kernel range avoids direct map",
+		X86_64_KERNEL_MAP_BASE >= X86_64_DIRECT_MAP_END ||
+		X86_64_KERNEL_MAP_END <= X86_64_DIRECT_MAP_BASE,
+		true);
+	failures += test_expect_bool(
+		"kernel range avoids kernel image",
+		KERNEL_VMA_BASE < X86_64_KERNEL_MAP_BASE ||
+		KERNEL_VMA_BASE >= X86_64_KERNEL_MAP_END,
+		true);
+
+	return failures;
+}
+
 static int test_direct_map_rejects_uncovered_usable_memory(void)
 {
 	struct plane_mem_info mem = {0};
@@ -137,6 +170,7 @@ int main(void)
 		TEST_CASE(test_direct_map_roundtrip),
 		TEST_CASE(test_direct_map_rejects_invalid_ranges),
 		TEST_CASE(test_bootloader_direct_map_base),
+		TEST_CASE(test_kernel_vma_range),
 	};
 
 	return test_run_cases("x86_64_mmu_test",

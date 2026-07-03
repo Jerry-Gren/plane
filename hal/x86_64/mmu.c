@@ -93,6 +93,17 @@ uint64_t hal_mmu_direct_virt_to_phys(const void *vaddr)
 	return offset;
 }
 
+bool hal_mmu_kernel_vma_range(uint64_t *base, uint64_t *size)
+{
+	if (base == NULL || size == NULL) {
+		return false;
+	}
+
+	*base = X86_64_KERNEL_MAP_BASE;
+	*size = X86_64_KERNEL_MAP_SIZE;
+	return true;
+}
+
 void hal_mmu_invalidate_tlb(uintptr_t vaddr)
 {
 	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");

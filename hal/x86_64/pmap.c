@@ -482,6 +482,30 @@ bool x86_64_pmap_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 					     vaddr, phys_addr);
 }
 
+bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
+{
+	uint32_t pmap_flags = 0;
+
+	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
+		return false;
+	}
+	if ((flags & HAL_MMU_MAP_WRITE) != 0) {
+		pmap_flags |= X86_64_PMAP_WRITE;
+	}
+
+	return x86_64_pmap_map_kernel_page(vaddr, phys_addr, pmap_flags);
+}
+
+bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
+{
+	return x86_64_pmap_unmap_kernel_page(vaddr);
+}
+
+bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
+{
+	return x86_64_pmap_translate_kernel_page(vaddr, phys_addr);
+}
+
 bool hal_mmu_take_kernel_page_table_ownership(void)
 {
 	uint64_t new_pml4_phys;
