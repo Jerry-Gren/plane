@@ -24,6 +24,7 @@ struct plane_page {
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
+	uint32_t flags;
 	bool used;
 };
 
@@ -151,6 +152,7 @@ bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
 		if (!test_mappings[i].used) {
 			test_mappings[i].vaddr = vaddr;
 			test_mappings[i].phys_addr = phys_addr;
+			test_mappings[i].flags = flags;
 			test_mappings[i].used = true;
 			return true;
 		}
@@ -256,12 +258,39 @@ static int test_alloc_and_free_pages(void)
 	if (first != NULL) {
 		failures += test_expect_u64("first mapping phys",
 					    first->phys_addr, 0);
+		failures += test_expect_u32("first mapping writable",
+					    first->flags, HAL_MMU_MAP_WRITE);
 	}
 
 	failures += test_expect_bool("free pages",
 				     plane_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("free pmm pages", allocated_page_count(), 0);
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
+	return failures;
+}
+
+static int test_readonly_alloc_maps_without_write_flag(void)
+{
+	void *addr = NULL;
+	struct test_mapping *mapping;
+	int failures = 0;
+
+	failures += test_expect_bool("readonly init", plane_kmem_init(), true);
+	failures += test_expect_bool("readonly alloc",
+				     plane_kmem_alloc_pages(
+					     1, PLANE_KMEM_ALLOC_READONLY,
+					     &addr),
+				     true);
+	mapping = find_mapping(TEST_KMEM_BASE);
+	failures += test_expect_not_null("readonly mapping", mapping);
+	if (mapping != NULL) {
+		failures += test_expect_u32("readonly mapping flags",
+					    mapping->flags, 0);
+	}
+	failures += test_expect_u64("readonly pmm pages",
+				    allocated_page_count(), 1);
+	failures += test_expect_bool("readonly free",
+				     plane_kmem_free_pages(addr, 1), true);
 	return failures;
 }
 
@@ -405,6 +434,42 @@ static int test_byte_zero_flag_reaches_all_pages(void)
 	return failures;
 }
 
+static int test_readonly_zero_maps_without_write_and_zeros_pages(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("readonly zero init",
+				     plane_kmem_init(), true);
+	failures += test_expect_bool("readonly zero alloc",
+				     plane_kmem_alloc(PAGE_SIZE + 1,
+						      PLANE_KMEM_ALLOC_READONLY |
+						      PLANE_KMEM_ALLOC_ZERO,
+						      &addr),
+				     true);
+	failures += test_expect_u64("readonly zero pmm pages",
+				    allocated_page_count(), 2);
+	failures += test_expect_u64("readonly zero flagged pages",
+				    allocated_page_count_with_flags(
+					    PLANE_PMM_ALLOC_ZERO),
+				    2);
+	first = find_mapping(kmem_page_vaddr(0));
+	second = find_mapping(kmem_page_vaddr(1));
+	failures += test_expect_not_null("readonly zero first mapping", first);
+	failures += test_expect_not_null("readonly zero second mapping", second);
+	if (first != NULL) {
+		failures += test_expect_u32("readonly zero first flags",
+					    first->flags, 0);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("readonly zero second flags",
+					    second->flags, 0);
+	}
+	return failures;
+}
+
 static int test_guard_zero_flag_reaches_user_pages(void)
 {
 	void *addr = NULL;
@@ -426,6 +491,45 @@ static int test_guard_zero_flag_reaches_user_pages(void)
 				    2);
 	failures += test_expect_u32("guard zero last flag",
 				    last_pmm_flags, PLANE_PMM_ALLOC_ZERO);
+	return failures;
+}
+
+static int test_readonly_guard_maps_only_user_pages(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("readonly guard init",
+				     plane_kmem_init(), true);
+	failures += test_expect_bool("readonly guard alloc",
+				     plane_kmem_alloc_pages(
+					     2,
+					     PLANE_KMEM_ALLOC_READONLY |
+					     PLANE_KMEM_ALLOC_GUARD,
+					     &addr),
+				     true);
+	failures += test_expect_ptr("readonly guard user addr",
+				    addr, (void *)kmem_page_vaddr(1));
+	failures += test_expect_null("readonly guard left unmapped",
+				     find_mapping(kmem_page_vaddr(0)));
+	first = find_mapping(kmem_page_vaddr(1));
+	second = find_mapping(kmem_page_vaddr(2));
+	failures += test_expect_not_null("readonly guard first user", first);
+	failures += test_expect_not_null("readonly guard second user", second);
+	if (first != NULL) {
+		failures += test_expect_u32("readonly guard first flags",
+					    first->flags, 0);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("readonly guard second flags",
+					    second->flags, 0);
+	}
+	failures += test_expect_null("readonly guard right unmapped",
+				     find_mapping(kmem_page_vaddr(3)));
+	failures += test_expect_bool("readonly guard free",
+				     plane_kmem_free_pages(addr, 2), true);
 	return failures;
 }
 
@@ -656,13 +760,16 @@ int main(void)
 {
 	static const struct test_case cases[] = {
 		TEST_CASE(test_alloc_and_free_pages),
+		TEST_CASE(test_readonly_alloc_maps_without_write_flag),
 		TEST_CASE(test_guard_alloc_and_free_pages),
 		TEST_CASE(test_alloc_and_free_bytes),
 		TEST_CASE(test_byte_guard_alloc_and_free),
 		TEST_CASE(test_byte_alloc_rounds_up_to_pages),
 		TEST_CASE(test_zero_flag_reaches_pmm),
 		TEST_CASE(test_byte_zero_flag_reaches_all_pages),
+		TEST_CASE(test_readonly_zero_maps_without_write_and_zeros_pages),
 		TEST_CASE(test_guard_zero_flag_reaches_user_pages),
+		TEST_CASE(test_readonly_guard_maps_only_user_pages),
 		TEST_CASE(test_byte_guard_zero_flag_reaches_user_pages),
 		TEST_CASE(test_pmm_failure_rolls_back_vaddr),
 		TEST_CASE(test_map_failure_rolls_back_pages),

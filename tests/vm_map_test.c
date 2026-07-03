@@ -1,5 +1,6 @@
 #include <stdint.h>
 
+#include <plane/bits.h>
 #include <plane/mm.h>
 #include <plane/vm_map.h>
 
@@ -405,6 +406,118 @@ static int test_guarded_alloc_rejects_invalid_ranges(void)
 	return failures;
 }
 
+static int test_protected_alloc_rejects_invalid_protection(void)
+{
+	uint64_t vaddr = 0;
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	int failures = 0;
+
+	failures += test_expect_bool("prot init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_kernel_map_get_stats();
+	failures += test_expect_bool(
+		"prot rejects none",
+		plane_kernel_map_alloc_pages_protected(1, 0, 0, &vaddr),
+		false);
+	failures += test_expect_bool(
+		"prot rejects unknown",
+		plane_kernel_map_alloc_pages_protected(1, 0, BIT(8), &vaddr),
+		false);
+	after = plane_kernel_map_get_stats();
+	failures += test_expect_u64("prot reject free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("prot reject reserved unchanged",
+				    after.reserved_pages, before.reserved_pages);
+	failures += test_expect_u64("prot reject user unchanged",
+				    after.user_pages, before.user_pages);
+	failures += test_expect_u64("prot reject count unchanged",
+				    after.allocation_count, before.allocation_count);
+	return failures;
+}
+
+static int test_protected_alloc_accepts_write_only_protection(void)
+{
+	struct plane_kernel_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("write-only init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"write-only alloc",
+		plane_kernel_map_alloc_pages_protected(
+			1, 0, PLANE_VM_PROT_WRITE, &vaddr),
+		true);
+	failures += test_expect_bool(
+		"write-only lookup",
+		plane_kernel_map_lookup_allocation(vaddr, 1, &info),
+		true);
+	failures += test_expect_u64("write-only reserved start",
+				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+	failures += test_expect_u64("write-only reserved pages",
+				    info.reserved_pages, 1);
+	failures += test_expect_u64("write-only user start",
+				    info.user_start, TEST_KERNEL_MAP_BASE);
+	failures += test_expect_u64("write-only user pages",
+				    info.user_pages, 1);
+	failures += test_expect_u32("write-only prot",
+				    info.prot, PLANE_VM_PROT_WRITE);
+	return failures;
+}
+
+static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
+{
+	struct plane_kernel_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("prot guard init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"prot guard alloc",
+		plane_kernel_map_alloc_pages_protected(
+			2, 1, PLANE_VM_PROT_READ, &vaddr),
+		true);
+	failures += test_expect_u64("prot guard user address", vaddr,
+				    page_vaddr(1));
+	failures += test_expect_bool("prot guard has user allocation",
+				     plane_kernel_map_has_allocation(vaddr, 2),
+				     true);
+	failures += test_expect_bool("prot guard base not allocation",
+				     plane_kernel_map_has_allocation(page_vaddr(0),
+								     1),
+				     false);
+	failures += test_expect_bool(
+		"prot guard lookup",
+		plane_kernel_map_lookup_allocation(vaddr, 2, &info),
+		true);
+	failures += test_expect_u64("prot guard reserved start",
+				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+	failures += test_expect_u64("prot guard reserved pages",
+				    info.reserved_pages, 4);
+	failures += test_expect_u64("prot guard user start",
+				    info.user_start, page_vaddr(1));
+	failures += test_expect_u64("prot guard user pages",
+				    info.user_pages, 2);
+	failures += test_expect_u32("prot guard prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += check_stats("prot guard stats",
+				TEST_KERNEL_MAP_PAGES - 4, 4, 2, 1, 1);
+	failures += test_expect_bool("prot guard free",
+				     plane_kernel_map_free_pages(vaddr, 2),
+				     true);
+	failures += check_stats("prot guard free stats",
+				TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
+	return failures;
+}
+
 int main(void)
 {
 	static const struct test_case cases[] = {
@@ -419,6 +532,9 @@ int main(void)
 		TEST_CASE(test_holes_merge_after_entry_removal),
 		TEST_CASE(test_guarded_alloc_reserves_unmapped_sentinels),
 		TEST_CASE(test_guarded_alloc_rejects_invalid_ranges),
+		TEST_CASE(test_protected_alloc_rejects_invalid_protection),
+		TEST_CASE(test_protected_alloc_accepts_write_only_protection),
+		TEST_CASE(test_protected_guarded_alloc_keeps_user_range_semantics),
 	};
 
 	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));

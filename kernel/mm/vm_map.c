@@ -13,6 +13,7 @@ struct plane_vm_map_entry {
 	uint64_t end;
 	uint64_t user_start;
 	uint64_t user_end;
+	uint32_t prot;
 	uint64_t prev;
 	uint64_t next;
 	bool used;
@@ -66,6 +67,12 @@ static uint64_t page_count_from_size(uint64_t size)
 	return size / PAGE_SIZE;
 }
 
+static bool prot_valid(uint32_t prot)
+{
+	return prot != 0 &&
+	       (prot & ~(PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)) == 0;
+}
+
 static void reset_entries(void)
 {
 	for (uint64_t i = 0; i < ARRAY_SIZE(entries); i++) {
@@ -100,6 +107,7 @@ static void insert_entry(uint64_t index,
 			 uint64_t end,
 			 uint64_t user_start,
 			 uint64_t user_end,
+			 uint32_t prot,
 			 uint64_t prev,
 			 uint64_t next)
 {
@@ -107,6 +115,7 @@ static void insert_entry(uint64_t index,
 	entries[index].end = end;
 	entries[index].user_start = user_start;
 	entries[index].user_end = user_end;
+	entries[index].prot = prot;
 	entries[index].prev = prev;
 	entries[index].next = next;
 	entries[index].used = true;
@@ -280,12 +289,14 @@ bool plane_kernel_map_init(uint64_t base, uint64_t size)
 
 bool plane_kernel_map_alloc_pages(uint64_t page_count, uint64_t *vaddr)
 {
-	return plane_kernel_map_alloc_pages_guarded(page_count, 0, vaddr);
+	return plane_kernel_map_alloc_pages_protected(
+		page_count, 0, PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE, vaddr);
 }
 
-bool plane_kernel_map_alloc_pages_guarded(uint64_t page_count,
-					  uint64_t guard_pages,
-					  uint64_t *vaddr)
+bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
+					    uint64_t guard_pages,
+					    uint32_t prot,
+					    uint64_t *vaddr)
 {
 	int64_t entry_index;
 	uint64_t guard_total;
@@ -300,7 +311,10 @@ bool plane_kernel_map_alloc_pages_guarded(uint64_t page_count,
 	uint64_t user_size;
 	uint64_t user_end;
 
-	if (vaddr == NULL || !kernel_map.initialized || page_count == 0) {
+	if (vaddr == NULL ||
+	    !kernel_map.initialized ||
+	    page_count == 0 ||
+	    !prot_valid(prot)) {
 		return false;
 	}
 
@@ -322,20 +336,56 @@ bool plane_kernel_map_alloc_pages_guarded(uint64_t page_count,
 	}
 
 	insert_entry((uint64_t)entry_index, start, end, user_start, user_end,
-		     prev, next);
+		     prot, prev, next);
 	*vaddr = user_start;
 	return true;
 }
 
+bool plane_kernel_map_alloc_pages_guarded(uint64_t page_count,
+					  uint64_t guard_pages,
+					  uint64_t *vaddr)
+{
+	return plane_kernel_map_alloc_pages_protected(
+		page_count, guard_pages, PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
+		vaddr);
+}
+
 bool plane_kernel_map_has_allocation(uint64_t vaddr, uint64_t page_count)
 {
+	return plane_kernel_map_lookup_allocation(vaddr, page_count, NULL);
+}
+
+bool plane_kernel_map_lookup_allocation(
+	uint64_t vaddr,
+	uint64_t page_count,
+	struct plane_kernel_map_allocation_info *info)
+{
+	int64_t entry_index;
+
 	if (!kernel_map.initialized ||
 	    page_count == 0 ||
 	    !is_page_aligned(vaddr)) {
 		return false;
 	}
 
-	return find_exact_entry(vaddr, page_count) >= 0;
+	entry_index = find_exact_entry(vaddr, page_count);
+	if (entry_index < 0) {
+		return false;
+	}
+
+	if (info != NULL) {
+		struct plane_vm_map_entry *entry = &entries[entry_index];
+
+		info->reserved_start = entry->start;
+		info->reserved_pages = page_count_from_size(entry->end -
+							    entry->start);
+		info->user_start = entry->user_start;
+		info->user_pages = page_count_from_size(entry->user_end -
+							entry->user_start);
+		info->prot = entry->prot;
+	}
+
+	return true;
 }
 
 bool plane_kernel_map_free_pages(uint64_t vaddr, uint64_t page_count)

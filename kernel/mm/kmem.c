@@ -63,7 +63,9 @@ static bool is_page_aligned(uint64_t value)
 
 static bool kmem_flags_valid(uint32_t flags)
 {
-	return (flags & ~(PLANE_KMEM_ALLOC_ZERO | PLANE_KMEM_ALLOC_GUARD)) == 0;
+	return (flags & ~(PLANE_KMEM_ALLOC_ZERO |
+			  PLANE_KMEM_ALLOC_GUARD |
+			  PLANE_KMEM_ALLOC_READONLY)) == 0;
 }
 
 static uint32_t kmem_to_pmm_flags(uint32_t flags)
@@ -81,11 +83,18 @@ static bool reserve_kmem_vaddr(uint64_t page_count,
 			       uint32_t flags,
 			       uint64_t *base)
 {
+	uint64_t guard_pages = 0;
+	uint32_t prot = PLANE_VM_PROT_READ;
+
+	if ((flags & PLANE_KMEM_ALLOC_READONLY) == 0) {
+		prot |= PLANE_VM_PROT_WRITE;
+	}
 	if ((flags & PLANE_KMEM_ALLOC_GUARD) != 0) {
-		return plane_kernel_map_alloc_pages_guarded(page_count, 1, base);
+		guard_pages = 1;
 	}
 
-	return plane_kernel_map_alloc_pages(page_count, base);
+	return plane_kernel_map_alloc_pages_protected(page_count, guard_pages,
+						     prot, base);
 }
 
 static bool rollback_mapped_pages(uint64_t vaddr, uint64_t page_count)
@@ -114,10 +123,16 @@ static bool rollback_allocated_page(uint64_t phys_addr)
 
 static bool map_allocated_pages(uint64_t vaddr,
 				uint64_t page_count,
-				uint32_t flags)
+				uint32_t flags,
+				uint32_t prot)
 {
 	uint32_t pmm_flags = kmem_to_pmm_flags(flags);
+	uint32_t map_flags = 0;
 	uint64_t mapped_pages = 0;
+
+	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
+		map_flags |= HAL_MMU_MAP_WRITE;
+	}
 
 	for (uint64_t i = 0; i < page_count; i++) {
 		struct plane_page *page;
@@ -140,8 +155,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 
 		phys_addr = plane_page_phys(page);
 		if (phys_addr == UINT64_MAX ||
-		    !hal_mmu_map_kernel_page(page_vaddr, phys_addr,
-					     HAL_MMU_MAP_WRITE)) {
+		    !hal_mmu_map_kernel_page(page_vaddr, phys_addr, map_flags)) {
 			bool page_ok = rollback_allocated_page(phys_addr);
 			bool mappings_ok = rollback_mapped_pages(vaddr, mapped_pages);
 
@@ -202,6 +216,7 @@ bool plane_kmem_free(void *addr, uint64_t size)
 
 bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 {
+	struct plane_kernel_map_allocation_info info;
 	uint64_t base;
 
 	if (vaddr == NULL ||
@@ -215,7 +230,10 @@ bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 		return false;
 	}
 
-	if (!map_allocated_pages(base, page_count, flags)) {
+	BUG_ON_MSG(!plane_kernel_map_lookup_allocation(base, page_count, &info),
+		   "failed to find reserved kmem allocation");
+
+	if (!map_allocated_pages(base, page_count, flags, info.prot)) {
 		BUG_ON_MSG(!plane_kernel_map_free_pages(base, page_count),
 			   "failed to release kmem virtual reservation");
 		return false;

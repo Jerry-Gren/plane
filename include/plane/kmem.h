@@ -15,11 +15,14 @@
  * PLANE_KMEM_ALLOC_ZERO clears the complete backing page range.
  * PLANE_KMEM_ALLOC_GUARD reserves one unmapped guard page before and after the
  * returned allocation. Guard pages have no PMM backing.
+ * PLANE_KMEM_ALLOC_READONLY records read-only entry protection in the kernel
+ * map; kmem consumes that protection when creating page mappings.
  */
 
 enum plane_kmem_alloc_flags {
 	PLANE_KMEM_ALLOC_ZERO = BIT(0),
 	PLANE_KMEM_ALLOC_GUARD = BIT(1),
+	PLANE_KMEM_ALLOC_READONLY = BIT(2),
 };
 
 bool plane_kmem_init(void);
