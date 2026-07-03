@@ -63,7 +63,7 @@ static bool is_page_aligned(uint64_t value)
 
 static bool kmem_flags_valid(uint32_t flags)
 {
-	return (flags & ~PLANE_KMEM_ALLOC_ZERO) == 0;
+	return (flags & ~(PLANE_KMEM_ALLOC_ZERO | PLANE_KMEM_ALLOC_GUARD)) == 0;
 }
 
 static uint32_t kmem_to_pmm_flags(uint32_t flags)
@@ -75,6 +75,17 @@ static uint32_t kmem_to_pmm_flags(uint32_t flags)
 	}
 
 	return pmm_flags;
+}
+
+static bool reserve_kmem_vaddr(uint64_t page_count,
+			       uint32_t flags,
+			       uint64_t *base)
+{
+	if ((flags & PLANE_KMEM_ALLOC_GUARD) != 0) {
+		return plane_kernel_map_alloc_pages_guarded(page_count, 1, base);
+	}
+
+	return plane_kernel_map_alloc_pages(page_count, base);
 }
 
 static bool rollback_mapped_pages(uint64_t vaddr, uint64_t page_count)
@@ -200,7 +211,7 @@ bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 		return false;
 	}
 
-	if (!plane_kernel_map_alloc_pages(page_count, &base)) {
+	if (!reserve_kmem_vaddr(page_count, flags, &base)) {
 		return false;
 	}
 

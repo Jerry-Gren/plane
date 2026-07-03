@@ -13,10 +13,13 @@
  * pages. Byte-size allocations are rounded up to whole pages; this is a
  * small kmem/vm_map foundation, not a sub-page heap or pageable VM.
  * PLANE_KMEM_ALLOC_ZERO clears the complete backing page range.
+ * PLANE_KMEM_ALLOC_GUARD reserves one unmapped guard page before and after the
+ * returned allocation. Guard pages have no PMM backing.
  */
 
 enum plane_kmem_alloc_flags {
 	PLANE_KMEM_ALLOC_ZERO = BIT(0),
+	PLANE_KMEM_ALLOC_GUARD = BIT(1),
 };
 
 bool plane_kmem_init(void);
