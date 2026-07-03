@@ -28,6 +28,7 @@ override CFLAGS += \
 
 override HOSTCFLAGS += \
 	-I$(ROOT_DIR)/include \
+	-DPLANE_HOST_TEST \
 	-std=gnu11 \
 	-Wall -Wextra -Werror
 

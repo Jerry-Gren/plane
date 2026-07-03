@@ -40,8 +40,10 @@ to rewrite whole files unless explicitly asked; prefer small, manual patches.
   of including `hal/x86_64/...` from `boot/`.
 - Keep Multiboot2 early handoff helpers private to the x86_64 Multiboot2
   boundary. They are not generic HAL MMU APIs.
-- Test override seams must not leak into public or arch-private API headers
-  unless production code also needs that symbol.
+- Test override seams must not leak into production ABI. If a singleton or
+  arch helper needs a host-test hook, guard it with `PLANE_HOST_TEST` and
+  declare it from `tests/support/`, not public or arch-private production
+  headers.
 
 ## Headers
 
@@ -98,6 +100,8 @@ to rewrite whole files unless explicitly asked; prefer small, manual patches.
   formatting belongs in test support helpers.
 - Keep stubs at the test boundary. Do not move module-specific HAL, PMM, or
   printk stubs into generic support unless multiple tests genuinely need them.
+- Host-test-only reset or override hooks must be guarded by `PLANE_HOST_TEST`.
+  Production builds must keep normal one-shot init and real hardware helpers.
 - x86_64 arch-private tests should be named `x86_64_*_test`.
 - Tests may include arch-private headers when they explicitly test arch-private
   modules.

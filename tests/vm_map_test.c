@@ -4,19 +4,13 @@
 #include <plane/mm.h>
 #include <plane/vm_map.h>
 
+#include "support/mm_test_hooks.h"
 #include "support/test.h"
 
 #define TEST_KERNEL_MAP_BASE 0xffff900000000000ull
 #define TEST_KERNEL_MAP_PAGES 256
 #define TEST_KERNEL_MAP_SIZE (TEST_KERNEL_MAP_PAGES * PAGE_SIZE)
 #define TEST_MAP_ENTRIES 128
-
-static bool test_reset_enabled = true;
-
-bool plane_vm_map_test_reset_enabled(void)
-{
-	return test_reset_enabled;
-}
 
 static uint64_t page_vaddr(uint64_t page)
 {
@@ -101,7 +95,6 @@ static int test_init_is_one_shot_in_production_mode(void)
 	uint64_t vaddr = 0;
 	int failures = 0;
 
-	test_reset_enabled = true;
 	failures += test_expect_bool("oneshot init",
 				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
@@ -110,7 +103,6 @@ static int test_init_is_one_shot_in_production_mode(void)
 				     plane_kernel_map_alloc_pages(2, &vaddr),
 				     true);
 
-	test_reset_enabled = false;
 	failures += test_expect_bool("oneshot reject valid reinit",
 				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
@@ -125,7 +117,6 @@ static int test_init_is_one_shot_in_production_mode(void)
 	failures += check_stats("oneshot stats preserved",
 				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
 
-	test_reset_enabled = true;
 	return failures;
 }
 
@@ -715,5 +706,8 @@ int main(void)
 		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),
 	};
 
-	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));
+	return test_run_cases_with_fixture("vm_map_test", cases,
+					   TEST_ARRAY_SIZE(cases),
+					   plane_kernel_map_test_reset,
+					   NULL);
 }

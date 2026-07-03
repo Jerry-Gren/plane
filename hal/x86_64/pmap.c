@@ -8,14 +8,31 @@
 #include <plane/printk.h>
 #include <plane/pmm.h>
 
-/* Weak host-test seam; production reads the active CR3 register. */
-__weak uint64_t x86_64_pmap_current_root_phys(void)
+static uint64_t read_cr3_root_phys(void)
 {
 	uint64_t cr3;
 
 	__asm__ volatile ("mov %%cr3, %0" : "=r" (cr3));
 	return cr3 & X86_64_PAGE_ENTRY_ADDR_MASK;
 }
+
+#ifdef PLANE_HOST_TEST
+/* Weak host-test seam; production reads CR3 directly. */
+__weak uint64_t x86_64_pmap_test_current_root_phys(void)
+{
+	return read_cr3_root_phys();
+}
+
+static uint64_t pmap_current_root_phys(void)
+{
+	return x86_64_pmap_test_current_root_phys();
+}
+#else
+static uint64_t pmap_current_root_phys(void)
+{
+	return read_cr3_root_phys();
+}
+#endif
 
 static void write_cr3_phys(uint64_t phys_addr)
 {
@@ -447,7 +464,7 @@ bool x86_64_pmap_map_kernel_page(uint64_t vaddr,
 				 uint64_t phys_addr,
 				 uint32_t flags)
 {
-	if (!x86_64_pmap_map_page_in_owned_root(x86_64_pmap_current_root_phys(),
+	if (!x86_64_pmap_map_page_in_owned_root(pmap_current_root_phys(),
 						vaddr, phys_addr, flags)) {
 		return false;
 	}
@@ -458,7 +475,7 @@ bool x86_64_pmap_map_kernel_page(uint64_t vaddr,
 
 bool x86_64_pmap_unmap_kernel_page(uint64_t vaddr)
 {
-	if (!x86_64_pmap_unmap_page_in_owned_root(x86_64_pmap_current_root_phys(),
+	if (!x86_64_pmap_unmap_page_in_owned_root(pmap_current_root_phys(),
 						  vaddr)) {
 		return false;
 	}
@@ -469,13 +486,13 @@ bool x86_64_pmap_unmap_kernel_page(uint64_t vaddr)
 
 bool x86_64_pmap_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 {
-	return x86_64_pmap_translate_in_root(x86_64_pmap_current_root_phys(),
+	return x86_64_pmap_translate_in_root(pmap_current_root_phys(),
 					     vaddr, phys_addr);
 }
 
 bool x86_64_pmap_protect_kernel_page(uint64_t vaddr, uint32_t flags)
 {
-	uint64_t current_phys = x86_64_pmap_current_root_phys();
+	uint64_t current_phys = pmap_current_root_phys();
 	uint64_t *table;
 	uint64_t entry;
 	uint64_t index;
@@ -562,7 +579,7 @@ bool hal_mmu_take_kernel_page_table_ownership(void)
 {
 	uint64_t new_pml4_phys;
 
-	if (!x86_64_pmap_clone_kernel_page_tables(x86_64_pmap_current_root_phys(),
+	if (!x86_64_pmap_clone_kernel_page_tables(pmap_current_root_phys(),
 						  &new_pml4_phys)) {
 		return false;
 	}

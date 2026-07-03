@@ -1,6 +1,5 @@
 #include <stddef.h>
 
-#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/util.h>
 #include <plane/vm_map.h>
@@ -31,12 +30,6 @@ struct plane_vm_map {
 
 static struct plane_vm_map_entry entries[PLANE_KERNEL_MAP_MAX_ENTRIES];
 static struct plane_vm_map kernel_map;
-
-/* Weak host-test seam; production init is one-shot. */
-__weak bool plane_vm_map_test_reset_enabled(void)
-{
-	return false;
-}
 
 static bool is_page_aligned(uint64_t value)
 {
@@ -97,6 +90,13 @@ static void reset_kernel_map(void)
 	};
 	reset_entries();
 }
+
+#ifdef PLANE_HOST_TEST
+void plane_kernel_map_test_reset(void)
+{
+	reset_kernel_map();
+}
+#endif
 
 static int64_t alloc_entry_index(void)
 {
@@ -279,7 +279,7 @@ bool plane_kernel_map_init(uint64_t base, uint64_t size)
 {
 	uint64_t end;
 
-	if (kernel_map.initialized && !plane_vm_map_test_reset_enabled()) {
+	if (kernel_map.initialized) {
 		return false;
 	}
 	if (size == 0 ||

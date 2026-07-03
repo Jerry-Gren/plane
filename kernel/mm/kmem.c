@@ -2,7 +2,6 @@
 
 #include <hal/mmu.h>
 
-#include <plane/compiler.h>
 #include <plane/kmem.h>
 #include <plane/mm.h>
 #include <plane/printk.h>
@@ -11,11 +10,13 @@
 
 static bool kmem_initialized;
 
-/* Weak host-test seam; production init is one-shot. */
-__weak bool plane_kmem_test_reset_enabled(void)
+#ifdef PLANE_HOST_TEST
+void plane_kmem_test_reset(void)
 {
-	return false;
+	kmem_initialized = false;
 }
+#endif
+
 
 static bool checked_add_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
 {
@@ -209,11 +210,7 @@ bool plane_kmem_init(void)
 	uint64_t size;
 
 	if (kmem_initialized) {
-		if (!plane_kmem_test_reset_enabled()) {
-			return false;
-		}
-
-		kmem_initialized = false;
+		return false;
 	}
 
 	if (!hal_mmu_kernel_vma_range(&base, &size) ||

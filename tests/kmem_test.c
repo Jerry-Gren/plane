@@ -6,6 +6,7 @@
 #include <plane/mm.h>
 #include <plane/pmm.h>
 
+#include "support/mm_test_hooks.h"
 #include "support/test.h"
 
 #define TEST_KMEM_BASE 0xffff900000000000ull
@@ -38,20 +39,11 @@ static bool pmm_force_fail;
 static uint64_t map_attempts;
 static uint64_t map_fail_after;
 static uint32_t last_pmm_flags;
-static bool kmem_test_reset_enabled = true;
-
-bool plane_vm_map_test_reset_enabled(void)
-{
-	return kmem_test_reset_enabled;
-}
-
-bool plane_kmem_test_reset_enabled(void)
-{
-	return kmem_test_reset_enabled;
-}
-
 static void reset_kmem_test(void)
 {
+	plane_kmem_test_reset();
+	plane_kernel_map_test_reset();
+
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		test_pages[i].phys_addr = i * PAGE_SIZE;
 		test_pages[i].allocated = false;
@@ -70,7 +62,6 @@ static void reset_kmem_test(void)
 	map_attempts = 0;
 	map_fail_after = UINT64_MAX;
 	last_pmm_flags = 0;
-	kmem_test_reset_enabled = true;
 }
 
 static uint64_t allocated_page_count(void)
@@ -952,7 +943,6 @@ static int test_init_is_one_shot_in_production_mode(void)
 				     plane_kmem_alloc_pages(2, 0, &addr),
 				     true);
 
-	kmem_test_reset_enabled = false;
 	failures += test_expect_bool("oneshot repeat init",
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("oneshot preserved free",
@@ -960,7 +950,6 @@ static int test_init_is_one_shot_in_production_mode(void)
 	failures += test_expect_u64("oneshot free pmm pages",
 				    allocated_page_count(), 0);
 	failures += test_expect_u64("oneshot free mappings", mapping_count(), 0);
-	kmem_test_reset_enabled = true;
 	return failures;
 }
 

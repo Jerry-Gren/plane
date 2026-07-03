@@ -9,6 +9,7 @@
 #include <plane/mm.h>
 #include <plane/pmm.h>
 
+#include "support/mm_test_hooks.h"
 #include "support/test.h"
 
 #define TEST_PAGE_COUNT 32
@@ -29,7 +30,7 @@ static uint64_t test_page_phys(uint64_t page)
 	return page * PAGE_SIZE;
 }
 
-uint64_t x86_64_pmap_current_root_phys(void)
+uint64_t x86_64_pmap_test_current_root_phys(void)
 {
 	return test_page_phys(0);
 }
