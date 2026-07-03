@@ -13,9 +13,10 @@
  * virtual address ranges; physical backing and page-table mappings belong to
  * PMM and HAL/pmap.
  *
- * Protection is an entry attribute foundation. Current users only consume it
- * when creating kernel mappings; there is no fault-time enforcement here yet.
- * READ and WRITE follow XNU-style independent bitset semantics.
+ * Protection and max_protection are entry attribute foundations. Current
+ * users consume protection when creating or updating kernel mappings; there
+ * is no fault-time enforcement here yet. READ and WRITE follow XNU-style
+ * independent bitset semantics.
  */
 
 enum plane_vm_prot {
@@ -38,6 +39,7 @@ struct plane_kernel_map_allocation_info {
 	uint64_t user_start;
 	uint64_t user_pages;
 	uint32_t prot;
+	uint32_t max_prot;
 };
 
 bool plane_kernel_map_init(uint64_t base, uint64_t size);
@@ -59,6 +61,10 @@ bool plane_kernel_map_lookup_allocation(
 	uint64_t vaddr,
 	uint64_t page_count,
 	struct plane_kernel_map_allocation_info *info);
+/* Updates protection metadata for an exact user allocation range. */
+bool plane_kernel_map_protect_pages(uint64_t vaddr,
+				    uint64_t page_count,
+				    uint32_t prot);
 bool plane_kernel_map_free_pages(uint64_t vaddr, uint64_t page_count);
 struct plane_vm_map_stats plane_kernel_map_get_stats(void);
 

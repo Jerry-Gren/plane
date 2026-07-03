@@ -46,6 +46,7 @@ bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr,
 			     uint32_t flags);
 bool hal_mmu_unmap_kernel_page(uint64_t vaddr);
 bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr);
+bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags);
 
 void hal_mmu_invalidate_tlb(uintptr_t vaddr);
 void hal_mmu_flush_tlb_all(void);

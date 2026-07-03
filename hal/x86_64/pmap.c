@@ -473,6 +473,53 @@ bool x86_64_pmap_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 					     vaddr, phys_addr);
 }
 
+bool x86_64_pmap_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+{
+	uint64_t current_phys = x86_64_pmap_current_root_phys();
+	uint64_t *table;
+	uint64_t entry;
+	uint64_t index;
+
+	if (!pmap_vaddr_aligned(vaddr) || !pmap_flags_valid(flags)) {
+		return false;
+	}
+
+	for (uint8_t level = 4; level > 1; level--) {
+		table = direct_map_page_table(current_phys);
+		if (table == NULL) {
+			return false;
+		}
+
+		index = pmap_level_index(vaddr, level);
+		entry = table[index];
+		if (!page_table_entry_present(entry) ||
+		    page_table_entry_is_leaf(entry, level)) {
+			return false;
+		}
+
+		current_phys = page_table_entry_phys(entry);
+	}
+
+	table = direct_map_page_table(current_phys);
+	if (table == NULL) {
+		return false;
+	}
+
+	index = PT_INDEX(vaddr);
+	entry = table[index];
+	if (!page_table_entry_present(entry)) {
+		return false;
+	}
+
+	entry &= ~PAGE_RW;
+	if ((flags & X86_64_PMAP_WRITE) != 0) {
+		entry |= PAGE_RW;
+	}
+	table[index] = entry;
+	hal_mmu_invalidate_tlb((uintptr_t)vaddr);
+	return true;
+}
+
 bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
 {
 	uint32_t pmap_flags = 0;
@@ -495,6 +542,20 @@ bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
 bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 {
 	return x86_64_pmap_translate_kernel_page(vaddr, phys_addr);
+}
+
+bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+{
+	uint32_t pmap_flags = 0;
+
+	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
+		return false;
+	}
+	if ((flags & HAL_MMU_MAP_WRITE) != 0) {
+		pmap_flags |= X86_64_PMAP_WRITE;
+	}
+
+	return x86_64_pmap_protect_kernel_page(vaddr, pmap_flags);
 }
 
 bool hal_mmu_take_kernel_page_table_ownership(void)

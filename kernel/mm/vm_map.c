@@ -7,6 +7,7 @@
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
 #define VM_MAP_ENTRY_NONE UINT64_MAX
+#define VM_MAP_DEFAULT_MAX_PROT (PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)
 
 struct plane_vm_map_entry {
 	uint64_t start;
@@ -14,6 +15,7 @@ struct plane_vm_map_entry {
 	uint64_t user_start;
 	uint64_t user_end;
 	uint32_t prot;
+	uint32_t max_prot;
 	uint64_t prev;
 	uint64_t next;
 	bool used;
@@ -73,6 +75,12 @@ static bool prot_valid(uint32_t prot)
 	       (prot & ~(PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)) == 0;
 }
 
+static bool prot_allowed(uint32_t prot, uint32_t max_prot)
+{
+	return prot_valid(prot) && prot_valid(max_prot) &&
+	       (prot & ~max_prot) == 0;
+}
+
 static void reset_entries(void)
 {
 	for (uint64_t i = 0; i < ARRAY_SIZE(entries); i++) {
@@ -108,6 +116,7 @@ static void insert_entry(uint64_t index,
 			 uint64_t user_start,
 			 uint64_t user_end,
 			 uint32_t prot,
+			 uint32_t max_prot,
 			 uint64_t prev,
 			 uint64_t next)
 {
@@ -116,6 +125,7 @@ static void insert_entry(uint64_t index,
 	entries[index].user_start = user_start;
 	entries[index].user_end = user_end;
 	entries[index].prot = prot;
+	entries[index].max_prot = max_prot;
 	entries[index].prev = prev;
 	entries[index].next = next;
 	entries[index].used = true;
@@ -314,7 +324,7 @@ bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 	if (vaddr == NULL ||
 	    !kernel_map.initialized ||
 	    page_count == 0 ||
-	    !prot_valid(prot)) {
+	    !prot_allowed(prot, VM_MAP_DEFAULT_MAX_PROT)) {
 		return false;
 	}
 
@@ -336,7 +346,7 @@ bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 	}
 
 	insert_entry((uint64_t)entry_index, start, end, user_start, user_end,
-		     prot, prev, next);
+		     prot, VM_MAP_DEFAULT_MAX_PROT, prev, next);
 	*vaddr = user_start;
 	return true;
 }
@@ -383,8 +393,32 @@ bool plane_kernel_map_lookup_allocation(
 		info->user_pages = page_count_from_size(entry->user_end -
 							entry->user_start);
 		info->prot = entry->prot;
+		info->max_prot = entry->max_prot;
 	}
 
+	return true;
+}
+
+bool plane_kernel_map_protect_pages(uint64_t vaddr,
+				    uint64_t page_count,
+				    uint32_t prot)
+{
+	int64_t entry_index;
+
+	if (!kernel_map.initialized ||
+	    page_count == 0 ||
+	    !is_page_aligned(vaddr) ||
+	    !prot_valid(prot)) {
+		return false;
+	}
+
+	entry_index = find_exact_entry(vaddr, page_count);
+	if (entry_index < 0 ||
+	    (prot & ~entries[entry_index].max_prot) != 0) {
+		return false;
+	}
+
+	entries[entry_index].prot = prot;
 	return true;
 }
 

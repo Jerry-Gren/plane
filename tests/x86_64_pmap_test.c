@@ -243,6 +243,51 @@ static int test_active_kernel_map_invalidates(void)
 	return failures;
 }
 
+static int test_active_kernel_protect_updates_writable_bit(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t *pdpt;
+	uint64_t *pd;
+	uint64_t *pt;
+	uint64_t *pte;
+	int failures = 0;
+
+	failures += test_expect_bool("protect setup map",
+				     x86_64_pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     X86_64_PMAP_WRITE),
+				     true);
+	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[PML4_INDEX(vaddr)]));
+	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[PDPT_INDEX(vaddr)]));
+	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[PD_INDEX(vaddr)]));
+	pte = &pt[PT_INDEX(vaddr)];
+	failures += test_expect_u64("protect setup writable",
+				    *pte & PAGE_RW, PAGE_RW);
+
+	invalidate_count = 0;
+	invalidated_vaddr = UINTPTR_MAX;
+	failures += test_expect_bool("protect readonly",
+				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     true);
+	failures += test_expect_u64("protect readonly clears write",
+				    *pte & PAGE_RW, 0);
+	failures += test_expect_u64("protect readonly invalidates",
+				    invalidate_count, 1);
+	failures += test_expect_u64("protect readonly vaddr",
+				    invalidated_vaddr, vaddr);
+
+	failures += test_expect_bool("protect writable",
+				     x86_64_pmap_protect_kernel_page(
+					     vaddr, X86_64_PMAP_WRITE),
+				     true);
+	failures += test_expect_u64("protect writable sets write",
+				    *pte & PAGE_RW, PAGE_RW);
+	failures += test_expect_u64("protect writable invalidates again",
+				    invalidate_count, 2);
+	return failures;
+}
+
 static int test_hal_kernel_page_wrappers(void)
 {
 	uint64_t vaddr = 0xffff800000402000ull;
@@ -261,16 +306,53 @@ static int test_hal_kernel_page_wrappers(void)
 				     true);
 	failures += test_expect_u64("hal translate phys", phys,
 				    0x12345000ull);
+	failures += test_expect_bool("hal protect readonly",
+				     hal_mmu_protect_kernel_page(vaddr, 0),
+				     true);
 	failures += test_expect_bool("hal unmap",
 				     hal_mmu_unmap_kernel_page(vaddr), true);
-	failures += test_expect_u64("hal unmap invalidates",
-				    invalidate_count, 2);
+	failures += test_expect_u64("hal wrappers invalidate",
+				    invalidate_count, 3);
 	failures += test_expect_bool("hal reject flags",
 				     hal_mmu_map_kernel_page(vaddr,
 							     0x12345000ull,
 							     BIT(8)),
 				     false);
+	failures += test_expect_bool("hal reject protect flags",
+				     hal_mmu_protect_kernel_page(vaddr,
+								 BIT(8)),
+				     false);
 
+	return failures;
+}
+
+static int test_protect_page_rejects_invalid_paths(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t *pdpt = test_table(1);
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	failures += test_expect_bool("protect reject unaligned",
+				     x86_64_pmap_protect_kernel_page(vaddr + 1,
+								     0),
+				     false);
+	failures += test_expect_bool("protect reject bad flags",
+				     x86_64_pmap_protect_kernel_page(vaddr,
+								     BIT(31)),
+				     false);
+	failures += test_expect_bool("protect reject absent",
+				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     false);
+
+	pml4[PML4_INDEX(vaddr)] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
+	pdpt[PDPT_INDEX(vaddr)] = 0x40000000ull | PAGE_PRESENT | PAGE_RW |
+				  PAGE_PS;
+	failures += test_expect_bool("protect reject huge",
+				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     false);
+	failures += test_expect_u64("protect reject no invalidate",
+				    invalidate_count, 0);
 	return failures;
 }
 
@@ -678,7 +760,9 @@ int main(void)
 		TEST_CASE(test_map_page_allocates_missing_path),
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
+		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
 		TEST_CASE(test_hal_kernel_page_wrappers),
+		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),
 		TEST_CASE(test_map_page_rejects_existing_leaf),
 		TEST_CASE(test_map_page_rejects_huge_intermediate),

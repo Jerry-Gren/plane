@@ -68,6 +68,12 @@ static bool kmem_flags_valid(uint32_t flags)
 			  PLANE_KMEM_ALLOC_READONLY)) == 0;
 }
 
+static bool kmem_prot_valid(uint32_t prot)
+{
+	return prot != 0 &&
+	       (prot & ~(PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)) == 0;
+}
+
 static uint32_t kmem_to_pmm_flags(uint32_t flags)
 {
 	uint32_t pmm_flags = 0;
@@ -95,6 +101,17 @@ static bool reserve_kmem_vaddr(uint64_t page_count,
 
 	return plane_kernel_map_alloc_pages_protected(page_count, guard_pages,
 						     prot, base);
+}
+
+static uint32_t kmem_prot_to_map_flags(uint32_t prot)
+{
+	uint32_t map_flags = 0;
+
+	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
+		map_flags |= HAL_MMU_MAP_WRITE;
+	}
+
+	return map_flags;
 }
 
 static bool rollback_mapped_pages(uint64_t vaddr, uint64_t page_count)
@@ -127,12 +144,8 @@ static bool map_allocated_pages(uint64_t vaddr,
 				uint32_t prot)
 {
 	uint32_t pmm_flags = kmem_to_pmm_flags(flags);
-	uint32_t map_flags = 0;
+	uint32_t map_flags = kmem_prot_to_map_flags(prot);
 	uint64_t mapped_pages = 0;
-
-	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
-		map_flags |= HAL_MMU_MAP_WRITE;
-	}
 
 	for (uint64_t i = 0; i < page_count; i++) {
 		struct plane_page *page;
@@ -165,6 +178,26 @@ static bool map_allocated_pages(uint64_t vaddr,
 		}
 
 		mapped_pages++;
+	}
+
+	return true;
+}
+
+static bool protect_mapped_pages(uint64_t vaddr,
+				 uint64_t page_count,
+				 uint32_t prot)
+{
+	uint32_t map_flags = kmem_prot_to_map_flags(prot);
+
+	for (uint64_t i = 0; i < page_count; i++) {
+		uint64_t page_vaddr;
+		uint64_t offset;
+
+		if (!checked_page_offset(i, &offset) ||
+		    !checked_add_u64(vaddr, offset, &page_vaddr) ||
+		    !hal_mmu_protect_kernel_page(page_vaddr, map_flags)) {
+			return false;
+		}
 	}
 
 	return true;
@@ -214,6 +247,17 @@ bool plane_kmem_free(void *addr, uint64_t size)
 	return plane_kmem_free_pages(addr, page_count);
 }
 
+bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot)
+{
+	uint64_t page_count;
+
+	if (!kmem_size_to_pages(size, &page_count)) {
+		return false;
+	}
+
+	return plane_kmem_protect_pages(addr, page_count, prot);
+}
+
 bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 {
 	struct plane_kernel_map_allocation_info info;
@@ -240,6 +284,33 @@ bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 	}
 
 	*vaddr = (void *)(uintptr_t)base;
+	return true;
+}
+
+bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot)
+{
+	struct plane_kernel_map_allocation_info info;
+	uint64_t addr = (uint64_t)(uintptr_t)vaddr;
+
+	if (!kmem_initialized ||
+	    vaddr == NULL ||
+	    page_count == 0 ||
+	    !is_page_aligned(addr) ||
+	    !kmem_prot_valid(prot)) {
+		return false;
+	}
+
+	if (!plane_kernel_map_lookup_allocation(addr, page_count, &info)) {
+		return false;
+	}
+	if ((prot & ~info.max_prot) != 0) {
+		return false;
+	}
+
+	BUG_ON_MSG(!protect_mapped_pages(addr, page_count, prot),
+		   "failed to protect kmem backing pages");
+	BUG_ON_MSG(!plane_kernel_map_protect_pages(addr, page_count, prot),
+		   "failed to update kmem virtual protection");
 	return true;
 }
 

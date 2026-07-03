@@ -173,6 +173,23 @@ bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
 	return true;
 }
 
+bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+{
+	struct test_mapping *mapping;
+
+	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
+		return false;
+	}
+
+	mapping = find_mapping(vaddr);
+	if (mapping == NULL) {
+		return false;
+	}
+
+	mapping->flags = flags;
+	return true;
+}
+
 bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 {
 	struct test_mapping *mapping;
@@ -291,6 +308,186 @@ static int test_readonly_alloc_maps_without_write_flag(void)
 				    allocated_page_count(), 1);
 	failures += test_expect_bool("readonly free",
 				     plane_kmem_free_pages(addr, 1), true);
+	return failures;
+}
+
+static int test_protect_pages_updates_mapping_flags(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("protect init", plane_kmem_init(), true);
+	failures += test_expect_bool("protect alloc",
+				     plane_kmem_alloc_pages(2, 0, &addr),
+				     true);
+	first = find_mapping(kmem_page_vaddr(0));
+	second = find_mapping(kmem_page_vaddr(1));
+	failures += test_expect_not_null("protect first mapping", first);
+	failures += test_expect_not_null("protect second mapping", second);
+	if (first != NULL) {
+		failures += test_expect_u32("protect first writable",
+					    first->flags, HAL_MMU_MAP_WRITE);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("protect second writable",
+					    second->flags, HAL_MMU_MAP_WRITE);
+	}
+
+	failures += test_expect_bool("protect readonly",
+				     plane_kmem_protect_pages(
+					     addr, 2, PLANE_VM_PROT_READ),
+				     true);
+	if (first != NULL) {
+		failures += test_expect_u32("protect first readonly",
+					    first->flags, 0);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("protect second readonly",
+					    second->flags, 0);
+	}
+
+	failures += test_expect_bool("protect writable",
+				     plane_kmem_protect_pages(
+					     addr, 2,
+					     PLANE_VM_PROT_READ |
+					     PLANE_VM_PROT_WRITE),
+				     true);
+	if (first != NULL) {
+		failures += test_expect_u32("protect first writable again",
+					    first->flags, HAL_MMU_MAP_WRITE);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("protect second writable again",
+					    second->flags, HAL_MMU_MAP_WRITE);
+	}
+	return failures;
+}
+
+static int test_protect_bytes_rounds_to_exact_allocation(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("byte protect init", plane_kmem_init(), true);
+	failures += test_expect_bool("byte protect alloc",
+				     plane_kmem_alloc(PAGE_SIZE + 1, 0, &addr),
+				     true);
+	first = find_mapping(kmem_page_vaddr(0));
+	second = find_mapping(kmem_page_vaddr(1));
+	failures += test_expect_bool("byte protect rejects partial",
+				     plane_kmem_protect(addr, 1,
+							PLANE_VM_PROT_READ),
+				     false);
+	if (first != NULL) {
+		failures += test_expect_u32("byte partial first unchanged",
+					    first->flags, HAL_MMU_MAP_WRITE);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("byte partial second unchanged",
+					    second->flags, HAL_MMU_MAP_WRITE);
+	}
+	failures += test_expect_bool("byte protect exact rounded",
+				     plane_kmem_protect(addr, PAGE_SIZE + 1,
+							PLANE_VM_PROT_READ),
+				     true);
+	if (first != NULL) {
+		failures += test_expect_u32("byte protect first readonly",
+					    first->flags, 0);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("byte protect second readonly",
+					    second->flags, 0);
+	}
+	return failures;
+}
+
+static int test_guard_protect_updates_only_user_pages(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("guard protect init",
+				     plane_kmem_init(), true);
+	failures += test_expect_bool("guard protect alloc",
+				     plane_kmem_alloc_pages(
+					     2, PLANE_KMEM_ALLOC_GUARD, &addr),
+				     true);
+	failures += test_expect_bool("guard protect readonly",
+				     plane_kmem_protect_pages(
+					     addr, 2, PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_null("guard protect left unmapped",
+				     find_mapping(kmem_page_vaddr(0)));
+	first = find_mapping(kmem_page_vaddr(1));
+	second = find_mapping(kmem_page_vaddr(2));
+	failures += test_expect_not_null("guard protect first user", first);
+	failures += test_expect_not_null("guard protect second user", second);
+	if (first != NULL) {
+		failures += test_expect_u32("guard protect first readonly",
+					    first->flags, 0);
+	}
+	if (second != NULL) {
+		failures += test_expect_u32("guard protect second readonly",
+					    second->flags, 0);
+	}
+	failures += test_expect_null("guard protect right unmapped",
+				     find_mapping(kmem_page_vaddr(3)));
+	return failures;
+}
+
+static int test_protect_rejects_invalid_inputs(void)
+{
+	void *addr = NULL;
+	struct test_mapping *mapping;
+	int failures = 0;
+
+	failures += test_expect_bool("protect invalid init",
+				     plane_kmem_init(), true);
+	failures += test_expect_bool("protect invalid alloc",
+				     plane_kmem_alloc_pages(2, 0, &addr),
+				     true);
+	mapping = find_mapping(kmem_page_vaddr(0));
+	failures += test_expect_bool("protect null",
+				     plane_kmem_protect_pages(NULL, 2,
+							      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("protect zero pages",
+				     plane_kmem_protect_pages(addr, 0,
+							      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("protect unaligned",
+				     plane_kmem_protect_pages(
+					     (void *)(TEST_KMEM_BASE + 1), 2,
+					     PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("protect none",
+				     plane_kmem_protect_pages(addr, 2, 0),
+				     false);
+	failures += test_expect_bool("protect unknown",
+				     plane_kmem_protect_pages(addr, 2, BIT(8)),
+				     false);
+	failures += test_expect_bool("protect partial",
+				     plane_kmem_protect_pages(
+					     addr, 1, PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("byte protect zero",
+				     plane_kmem_protect(addr, 0,
+							PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("byte protect overflow",
+				     plane_kmem_protect(addr, UINT64_MAX,
+							PLANE_VM_PROT_READ),
+				     false);
+	if (mapping != NULL) {
+		failures += test_expect_u32("protect invalid unchanged",
+					    mapping->flags, HAL_MMU_MAP_WRITE);
+	}
 	return failures;
 }
 
@@ -761,6 +958,10 @@ int main(void)
 	static const struct test_case cases[] = {
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_readonly_alloc_maps_without_write_flag),
+		TEST_CASE(test_protect_pages_updates_mapping_flags),
+		TEST_CASE(test_protect_bytes_rounds_to_exact_allocation),
+		TEST_CASE(test_guard_protect_updates_only_user_pages),
+		TEST_CASE(test_protect_rejects_invalid_inputs),
 		TEST_CASE(test_guard_alloc_and_free_pages),
 		TEST_CASE(test_alloc_and_free_bytes),
 		TEST_CASE(test_byte_guard_alloc_and_free),

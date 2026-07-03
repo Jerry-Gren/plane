@@ -467,6 +467,9 @@ static int test_protected_alloc_accepts_write_only_protection(void)
 				    info.user_pages, 1);
 	failures += test_expect_u32("write-only prot",
 				    info.prot, PLANE_VM_PROT_WRITE);
+	failures += test_expect_u32("write-only max prot",
+				    info.max_prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
 	return failures;
 }
 
@@ -508,6 +511,9 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 				    info.user_pages, 2);
 	failures += test_expect_u32("prot guard prot",
 				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("prot guard max prot",
+				    info.max_prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
 	failures += check_stats("prot guard stats",
 				TEST_KERNEL_MAP_PAGES - 4, 4, 2, 1, 1);
 	failures += test_expect_bool("prot guard free",
@@ -515,6 +521,92 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 				     true);
 	failures += check_stats("prot guard free stats",
 				TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
+	return failures;
+}
+
+static int test_protect_pages_updates_exact_allocation(void)
+{
+	struct plane_kernel_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("protect init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("protect alloc",
+				     plane_kernel_map_alloc_pages(2, &vaddr),
+				     true);
+	failures += test_expect_bool("protect readonly",
+				     plane_kernel_map_protect_pages(
+					     vaddr, 2, PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_bool("protect lookup readonly",
+				     plane_kernel_map_lookup_allocation(vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u32("protect readonly prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect readonly max",
+				    info.max_prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+	failures += test_expect_bool("protect writable again",
+				     plane_kernel_map_protect_pages(
+					     vaddr, 2,
+					     PLANE_VM_PROT_READ |
+					     PLANE_VM_PROT_WRITE),
+				     true);
+	failures += test_expect_bool("protect lookup writable",
+				     plane_kernel_map_lookup_allocation(vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u32("protect writable prot",
+				    info.prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+	return failures;
+}
+
+static int test_protect_pages_rejects_invalid_ranges(void)
+{
+	struct plane_kernel_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("protect reject init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("protect reject alloc",
+				     plane_kernel_map_alloc_pages(2, &vaddr),
+				     true);
+	failures += test_expect_bool("protect rejects none",
+				     plane_kernel_map_protect_pages(vaddr, 2, 0),
+				     false);
+	failures += test_expect_bool("protect rejects unknown",
+				     plane_kernel_map_protect_pages(vaddr, 2,
+								    BIT(8)),
+				     false);
+	failures += test_expect_bool("protect rejects partial",
+				     plane_kernel_map_protect_pages(
+					     vaddr, 1, PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("protect rejects absent",
+				     plane_kernel_map_protect_pages(
+					     page_vaddr(10), 1,
+					     PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("protect unchanged lookup",
+				     plane_kernel_map_lookup_allocation(vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u32("protect unchanged prot",
+				    info.prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+	failures += check_stats("protect reject stats",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
 	return failures;
 }
 
@@ -535,6 +627,8 @@ int main(void)
 		TEST_CASE(test_protected_alloc_rejects_invalid_protection),
 		TEST_CASE(test_protected_alloc_accepts_write_only_protection),
 		TEST_CASE(test_protected_guarded_alloc_keeps_user_range_semantics),
+		TEST_CASE(test_protect_pages_updates_exact_allocation),
+		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
 	};
 
 	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));

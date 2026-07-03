@@ -36,5 +36,6 @@ bool x86_64_pmap_map_kernel_page(uint64_t vaddr,
 				 uint32_t flags);
 bool x86_64_pmap_unmap_kernel_page(uint64_t vaddr);
 bool x86_64_pmap_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr);
+bool x86_64_pmap_protect_kernel_page(uint64_t vaddr, uint32_t flags);
 
 #endif /* HAL_X86_64_PMAP_H */
