@@ -3,6 +3,7 @@
 #include <plane/bits.h>
 #include <plane/mm.h>
 #include <plane/vm_map.h>
+#include <plane/vm_object.h>
 
 #include "support/test.h"
 
@@ -13,10 +14,12 @@
 
 static struct plane_vm_map_entry test_entries[TEST_MAP_ENTRIES];
 static struct plane_vm_map test_map;
+static struct plane_vm_object test_object;
 
 static void reset_vm_map_test(void)
 {
 	test_map = (struct plane_vm_map){0};
+	test_object = (struct plane_vm_object){0};
 	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
 		test_entries[i] = (struct plane_vm_map_entry){0};
 	}
@@ -709,6 +712,101 @@ static int test_wire_pages_rejects_invalid_ranges(void)
 	return failures;
 }
 
+static int test_object_allocation_records_object_and_offset(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object alloc init",
+				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object alloc",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 2, 0, &test_object,
+					     4 * PAGE_SIZE,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("object alloc vaddr", vaddr,
+				    TEST_KERNEL_MAP_BASE);
+	failures += test_expect_bool("object alloc lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 2, &info),
+				     true);
+	failures += test_expect_ptr("object alloc object",
+				    info.object, &test_object);
+	failures += test_expect_u64("object alloc offset",
+				    info.object_offset, 4 * PAGE_SIZE);
+	return failures;
+}
+
+static int test_object_auto_offset_uses_user_range(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object auto init",
+				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object auto alloc",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 2, 1, &test_object,
+					     PLANE_VM_MAP_OBJECT_OFFSET_AUTO,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("object auto user vaddr", vaddr,
+				    page_vaddr(1));
+	failures += test_expect_bool("object auto lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 2, &info),
+				     true);
+	failures += test_expect_ptr("object auto object",
+				    info.object, &test_object);
+	failures += test_expect_u64("object auto offset",
+				    info.object_offset, PAGE_SIZE);
+	failures += test_expect_u64("object auto reserved",
+				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+	return failures;
+}
+
+static int test_object_allocation_rejects_invalid_offset(void)
+{
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object reject init",
+				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("object reject null with offset",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 1, 0, NULL, PAGE_SIZE,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_bool("object reject unaligned offset",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 1, 0, &test_object, 1,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("object reject free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("object reject allocations unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	return failures;
+}
+
 static int test_protected_max_allocation_records_explicit_max(void)
 {
 	struct plane_vm_map_allocation_info info = {0};
@@ -817,6 +915,9 @@ int main(void)
 		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
 		TEST_CASE(test_wire_pages_updates_exact_allocation),
 		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
+		TEST_CASE(test_object_allocation_records_object_and_offset),
+		TEST_CASE(test_object_auto_offset_uses_user_range),
+		TEST_CASE(test_object_allocation_rejects_invalid_offset),
 		TEST_CASE(test_protected_max_allocation_records_explicit_max),
 		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),
 	};

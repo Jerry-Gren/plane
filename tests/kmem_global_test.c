@@ -226,6 +226,17 @@ uint64_t plane_page_phys(const struct plane_page *page)
 	return page->phys_addr;
 }
 
+enum plane_page_state plane_page_state(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return PLANE_PAGE_INVALID;
+	}
+
+	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
+}
+
 bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||

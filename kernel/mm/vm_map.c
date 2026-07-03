@@ -88,6 +88,8 @@ static void insert_entry(struct plane_vm_map *map,
 			 uint64_t end,
 			 uint64_t user_start,
 			 uint64_t user_end,
+			 struct plane_vm_object *object,
+			 uint64_t object_offset,
 			 uint32_t prot,
 			 uint32_t max_prot,
 			 uint64_t prev,
@@ -97,6 +99,8 @@ static void insert_entry(struct plane_vm_map *map,
 	map->entries[index].end = end;
 	map->entries[index].user_start = user_start;
 	map->entries[index].user_end = user_end;
+	map->entries[index].object = object;
+	map->entries[index].object_offset = object_offset;
 	map->entries[index].prot = prot;
 	map->entries[index].max_prot = max_prot;
 	map->entries[index].prev = prev;
@@ -303,6 +307,19 @@ bool plane_vm_map_alloc_pages_protected_max(struct plane_vm_map *map,
 					    uint32_t max_prot,
 					    uint64_t *vaddr)
 {
+	return plane_vm_map_alloc_pages_object(
+		map, page_count, guard_pages, NULL, 0, prot, max_prot, vaddr);
+}
+
+bool plane_vm_map_alloc_pages_object(struct plane_vm_map *map,
+				     uint64_t page_count,
+				     uint64_t guard_pages,
+				     struct plane_vm_object *object,
+				     uint64_t object_offset,
+				     uint32_t prot,
+				     uint32_t max_prot,
+				     uint64_t *vaddr)
+{
 	int64_t entry_index;
 	uint64_t guard_total;
 	uint64_t total_pages;
@@ -315,11 +332,16 @@ bool plane_vm_map_alloc_pages_protected_max(struct plane_vm_map *map,
 	uint64_t user_start;
 	uint64_t user_size;
 	uint64_t user_end;
+	uint64_t entry_object_offset = object_offset;
 
 	if (vaddr == NULL ||
 	    map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
+	    (object == NULL && object_offset != 0) ||
+	    (object != NULL &&
+	     object_offset != PLANE_VM_MAP_OBJECT_OFFSET_AUTO &&
+	     !is_page_aligned(object_offset)) ||
 	    !prot_allowed(prot, max_prot)) {
 		return false;
 	}
@@ -341,8 +363,13 @@ bool plane_vm_map_alloc_pages_protected_max(struct plane_vm_map *map,
 		return false;
 	}
 
+	if (object != NULL &&
+	    object_offset == PLANE_VM_MAP_OBJECT_OFFSET_AUTO) {
+		entry_object_offset = user_start - map->base;
+	}
+
 	insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,
-		     prot, max_prot, prev, next);
+		     object, entry_object_offset, prot, max_prot, prev, next);
 	*vaddr = user_start;
 	return true;
 }
@@ -376,6 +403,8 @@ bool plane_vm_map_lookup_allocation(
 		info->user_start = entry->user_start;
 		info->user_pages = page_count_from_size(entry->user_end -
 							entry->user_start);
+		info->object = entry->object;
+		info->object_offset = entry->object_offset;
 		info->wired_count = entry->wired_count;
 		info->prot = entry->prot;
 		info->max_prot = entry->max_prot;

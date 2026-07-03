@@ -8,6 +8,7 @@
 #include <plane/vm_prot.h>
 
 struct plane_vm_map;
+struct plane_vm_object;
 
 /*
  * Early kernel virtual allocator.
@@ -43,10 +44,12 @@ bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot);
  * They are not generic VM object or pageable map backing APIs.
  */
 bool plane_kmem_alloc_in_map(struct plane_vm_map *map,
+			     struct plane_vm_object *object,
 			     uint64_t size,
 			     uint32_t flags,
 			     void **addr);
 bool plane_kmem_free_in_map(struct plane_vm_map *map,
+			    struct plane_vm_object *object,
 			    void *addr,
 			    uint64_t size);
 bool plane_kmem_protect_in_map(struct plane_vm_map *map,
@@ -54,10 +57,12 @@ bool plane_kmem_protect_in_map(struct plane_vm_map *map,
 			       uint64_t size,
 			       uint32_t prot);
 bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
+				   struct plane_vm_object *object,
 				   uint64_t page_count,
 				   uint32_t flags,
 				   void **vaddr);
 bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
+				  struct plane_vm_object *object,
 				  void *vaddr,
 				  uint64_t page_count);
 bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,

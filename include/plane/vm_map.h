@@ -6,6 +6,10 @@
 
 #include <plane/vm_prot.h>
 
+#define PLANE_VM_MAP_OBJECT_OFFSET_AUTO UINT64_MAX
+
+struct plane_vm_object;
+
 /*
  * Early kernel virtual map.
  *
@@ -39,6 +43,8 @@ struct plane_vm_map_entry {
 	uint64_t end;
 	uint64_t user_start;
 	uint64_t user_end;
+	struct plane_vm_object *object;
+	uint64_t object_offset;
 	uint64_t wired_count;
 	uint32_t prot;
 	uint32_t max_prot;
@@ -63,6 +69,8 @@ struct plane_vm_map_allocation_info {
 	uint64_t reserved_pages;
 	uint64_t user_start;
 	uint64_t user_pages;
+	struct plane_vm_object *object;
+	uint64_t object_offset;
 	uint64_t wired_count;
 	uint32_t prot;
 	uint32_t max_prot;
@@ -87,6 +95,14 @@ bool plane_vm_map_alloc_pages_protected_max(struct plane_vm_map *map,
 					    uint32_t prot,
 					    uint32_t max_prot,
 					    uint64_t *vaddr);
+bool plane_vm_map_alloc_pages_object(struct plane_vm_map *map,
+				     uint64_t page_count,
+				     uint64_t guard_pages,
+				     struct plane_vm_object *object,
+				     uint64_t object_offset,
+				     uint32_t prot,
+				     uint32_t max_prot,
+				     uint64_t *vaddr);
 /* Lookup and free use an exact user range match. */
 bool plane_vm_map_lookup_allocation(
 	struct plane_vm_map *map,
