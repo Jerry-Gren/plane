@@ -472,7 +472,8 @@ static bool init_page_metadata(void)
 		return false;
 	}
 
-	page_pool = hal_mmu_direct_phys_to_virt(metadata_phys_base);
+	page_pool = hal_mmu_direct_phys_range_to_virt(metadata_phys_base,
+						     metadata_size);
 	if (page_pool == NULL) {
 		return false;
 	}

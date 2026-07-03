@@ -4,6 +4,7 @@
 
 #include <plane/kmem.h>
 #include <plane/mm.h>
+#include <plane/printk.h>
 #include <plane/pmm.h>
 #include <plane/vm_map.h>
 
@@ -108,16 +109,14 @@ static bool map_allocated_pages(uint64_t vaddr,
 
 		if (!checked_page_offset(i, &offset) ||
 		    !checked_add_u64(vaddr, offset, &page_vaddr)) {
-			if (!rollback_mapped_pages(vaddr, mapped_pages)) {
-				return false;
-			}
+			BUG_ON_MSG(!rollback_mapped_pages(vaddr, mapped_pages),
+				   "failed to rollback kmem mappings");
 			return false;
 		}
 
 		if (!plane_pmm_alloc_page_flags(pmm_flags, &page)) {
-			if (!rollback_mapped_pages(vaddr, mapped_pages)) {
-				return false;
-			}
+			BUG_ON_MSG(!rollback_mapped_pages(vaddr, mapped_pages),
+				   "failed to rollback kmem mappings");
 			return false;
 		}
 
@@ -125,10 +124,10 @@ static bool map_allocated_pages(uint64_t vaddr,
 		if (phys_addr == UINT64_MAX ||
 		    !hal_mmu_map_kernel_page(page_vaddr, phys_addr,
 					     HAL_MMU_MAP_WRITE)) {
-			if (!rollback_allocated_page(phys_addr) ||
-			    !rollback_mapped_pages(vaddr, mapped_pages)) {
-				return false;
-			}
+			BUG_ON_MSG(!rollback_allocated_page(phys_addr),
+				   "failed to rollback kmem physical page");
+			BUG_ON_MSG(!rollback_mapped_pages(vaddr, mapped_pages),
+				   "failed to rollback kmem mappings");
 			return false;
 		}
 
@@ -192,9 +191,8 @@ bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
 	}
 
 	if (!map_allocated_pages(base, page_count, flags)) {
-		if (!plane_kernel_map_free_pages(base, page_count)) {
-			return false;
-		}
+		BUG_ON_MSG(!plane_kernel_map_free_pages(base, page_count),
+			   "failed to release kmem virtual reservation");
 		return false;
 	}
 
@@ -217,9 +215,10 @@ bool plane_kmem_free_pages(void *vaddr, uint64_t page_count)
 		return false;
 	}
 
-	if (!rollback_mapped_pages(addr, page_count)) {
-		return false;
-	}
+	BUG_ON_MSG(!rollback_mapped_pages(addr, page_count),
+		   "failed to release kmem backing pages");
 
-	return plane_kernel_map_free_pages(addr, page_count);
+	BUG_ON_MSG(!plane_kernel_map_free_pages(addr, page_count),
+		   "failed to release kmem virtual reservation");
+	return true;
 }

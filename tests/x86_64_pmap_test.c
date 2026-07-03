@@ -19,7 +19,6 @@ static uint8_t phys_storage[TEST_PHYS_SIZE] __aligned(PAGE_SIZE);
 static bool page_allocated[TEST_PAGE_COUNT];
 static uint64_t alloc_attempts;
 static uint64_t alloc_fail_after;
-static uint64_t free_fail_phys;
 static uint64_t direct_map_blocked_phys;
 static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
@@ -69,7 +68,6 @@ static void reset_pmap_test(void)
 	memset(page_allocated, 0, sizeof(page_allocated));
 	alloc_attempts = 0;
 	alloc_fail_after = UINT64_MAX;
-	free_fail_phys = UINT64_MAX;
 	direct_map_blocked_phys = UINT64_MAX;
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
@@ -148,10 +146,6 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 
 	if ((phys_addr & (PAGE_SIZE - 1)) != 0 || page >= TEST_PAGE_COUNT ||
 	    !page_allocated[page]) {
-		return false;
-	}
-
-	if (phys_addr == free_fail_phys) {
 		return false;
 	}
 
@@ -479,48 +473,6 @@ static int test_unmap_page_clears_leaf(void)
 	return failures;
 }
 
-static int test_unmap_preserves_parent_on_free_failure(void)
-{
-	uint64_t *pml4 = test_table(0);
-	uint64_t vaddr = 0xffff800000402000ull;
-	uint64_t pdpt_phys;
-	uint64_t pd_phys;
-	uint64_t pt_phys;
-	uint64_t *pdpt;
-	uint64_t *pd;
-	uint64_t *pt;
-	uint64_t parent_entry;
-	int failures = 0;
-
-	failures += test_expect_bool("free failure setup map",
-				     x86_64_pmap_map_page_in_owned_root(
-					     test_page_phys(0), vaddr,
-					     0x12345000ull, 0),
-				     true);
-
-	pdpt_phys = pte_phys(pml4[PML4_INDEX(vaddr)]);
-	pdpt = hal_mmu_direct_phys_to_virt(pdpt_phys);
-	pd_phys = pte_phys(pdpt[PDPT_INDEX(vaddr)]);
-	pd = hal_mmu_direct_phys_to_virt(pd_phys);
-	pt_phys = pte_phys(pd[PD_INDEX(vaddr)]);
-	pt = hal_mmu_direct_phys_to_virt(pt_phys);
-	parent_entry = pd[PD_INDEX(vaddr)];
-
-	free_fail_phys = pt_phys;
-	failures += test_expect_bool("unmap reports free failure",
-				     x86_64_pmap_unmap_page_in_owned_root(
-					     test_page_phys(0), vaddr),
-				     false);
-	failures += test_expect_u64("unmap preserves parent entry",
-				    pd[PD_INDEX(vaddr)], parent_entry);
-	failures += test_expect_u64("unmap keeps failed table allocated",
-				    allocated_page_count(), 3);
-	failures += test_expect_u64("unmap clears requested leaf",
-				    pt[PT_INDEX(vaddr)], 0);
-
-	return failures;
-}
-
 static int test_active_kernel_unmap_invalidates(void)
 {
 	uint64_t vaddr = 0xffff800000402000ull;
@@ -751,7 +703,6 @@ int main(void)
 		TEST_CASE(test_map_page_rolls_back_on_direct_map_failure),
 		TEST_CASE(test_translate_handles_leaf_sizes),
 		TEST_CASE(test_unmap_page_clears_leaf),
-		TEST_CASE(test_unmap_preserves_parent_on_free_failure),
 		TEST_CASE(test_active_kernel_unmap_invalidates),
 		TEST_CASE(test_unmap_keeps_shared_tables_until_empty),
 		TEST_CASE(test_unmap_page_rejects_invalid_paths),

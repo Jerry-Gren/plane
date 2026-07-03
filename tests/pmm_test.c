@@ -736,6 +736,20 @@ static int test_init_fails_without_direct_map(void)
 	return failures;
 }
 
+static int test_init_fails_without_metadata_range_coverage(void)
+{
+	struct plane_mem_info mem = {0};
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	direct_map_limit = 0x1001;
+	failures += test_expect_bool("metadata range missing init",
+				plane_pmm_init(&mem), false);
+	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
+
+	return failures;
+}
+
 int main(void)
 {
 	static const struct test_case cases[] = {
@@ -759,6 +773,7 @@ int main(void)
 		TEST_CASE(test_free_merges_ranges),
 		TEST_CASE(test_free_rejects_invalid_ranges),
 		TEST_CASE(test_init_fails_without_direct_map),
+		TEST_CASE(test_init_fails_without_metadata_range_coverage),
 	};
 
 	return test_run_cases_with_fixture("pmm_test", cases,

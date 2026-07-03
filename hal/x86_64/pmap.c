@@ -5,6 +5,7 @@
 #include <hal/x86_64/pmap.h>
 #include <plane/compiler.h>
 #include <plane/mm.h>
+#include <plane/printk.h>
 #include <plane/pmm.h>
 
 /* Weak host-test seam; production reads the active CR3 register. */
@@ -78,7 +79,9 @@ static bool free_cloned_page_table(uint64_t table_phys, uint8_t level)
 		}
 	}
 
-	return plane_pmm_free_page_phys(table_phys);
+	BUG_ON_MSG(!plane_pmm_free_page_phys(table_phys),
+		   "failed to free cloned page table");
+	return true;
 }
 
 static bool clone_page_table(uint64_t source_phys,
@@ -101,9 +104,8 @@ static bool clone_page_table(uint64_t source_phys,
 
 	clone = direct_map_page_table(new_phys);
 	if (clone == NULL) {
-		if (!plane_pmm_free_page_phys(new_phys)) {
-			return false;
-		}
+		BUG_ON_MSG(!plane_pmm_free_page_phys(new_phys),
+			   "failed to free unreachable page table");
 		return false;
 	}
 
@@ -223,9 +225,8 @@ static bool pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 	while (count > 0) {
 		struct pmap_allocated_table *table = &tables[count - 1];
 
-		if (!plane_pmm_free_page_phys(table->phys_addr)) {
-			return false;
-		}
+		BUG_ON_MSG(!plane_pmm_free_page_phys(table->phys_addr),
+			   "failed to rollback page table allocation");
 		table->parent[table->index] = 0;
 		count--;
 	}
@@ -258,9 +259,8 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 	}
 
 	if (direct_map_page_table(phys_addr) == NULL) {
-		if (!plane_pmm_free_page_phys(phys_addr)) {
-			return false;
-		}
+		BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),
+			   "failed to free unreachable child page table");
 		return false;
 	}
 
@@ -406,9 +406,8 @@ bool x86_64_pmap_unmap_page_in_owned_root(uint64_t root_pml4_phys,
 			break;
 		}
 
-		if (!plane_pmm_free_page_phys(child->phys_addr)) {
-			return false;
-		}
+		BUG_ON_MSG(!plane_pmm_free_page_phys(child->phys_addr),
+			   "failed to free empty page table");
 		parent->table[parent->index] = 0;
 	}
 
