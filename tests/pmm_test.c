@@ -98,7 +98,7 @@ static int check_stats(const char *prefix,
 			uint64_t framebuffer,
 			uint64_t bad,
 			uint64_t reserved_mapped,
-			uint64_t free_ranges)
+			uint64_t free_runs)
 {
 	int failures = 0;
 	char name[96];
@@ -115,7 +115,7 @@ static int check_stats(const char *prefix,
 
 	EXPECT_ALLOCATOR_FIELD(managed_pages, managed);
 	EXPECT_ALLOCATOR_FIELD(free_pages, free);
-	EXPECT_ALLOCATOR_FIELD(free_range_count, free_ranges);
+	EXPECT_ALLOCATOR_FIELD(free_run_count, free_runs);
 	EXPECT_MEMTYPE_FIELD(usable_pages, usable);
 	EXPECT_MEMTYPE_FIELD(invalid_pages, invalid);
 	EXPECT_MEMTYPE_FIELD(reserved_pages, reserved);
@@ -324,6 +324,37 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 	return failures;
 }
 
+static int test_single_page_free_reuses_lowest_address(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x5000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("reuse lowest init",
+				plane_pmm_init(&mem), true);
+
+	failures += test_expect_bool("reuse alloc first",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("reuse first addr", phys, 0x2000);
+	failures += test_expect_bool("reuse alloc second",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("reuse second addr", phys, 0x3000);
+	failures += test_expect_bool("reuse alloc third",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("reuse third addr", phys, 0x4000);
+
+	failures += test_expect_bool("reuse free second",
+				plane_pmm_free_page_phys(0x3000), true);
+	failures += test_expect_bool("reuse free first",
+				plane_pmm_free_page_phys(0x2000), true);
+	failures += test_expect_bool("reuse alloc lowest",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("reuse lowest addr", phys, 0x2000);
+
+	return failures;
+}
+
 static int test_multi_page_alignment(void)
 {
 	struct plane_mem_info mem = {0};
@@ -352,6 +383,39 @@ static int test_multi_page_alignment(void)
 	stats = plane_pmm_get_stats();
 	failures += check_stats("aligned allocation", &stats,
 				 8, 6, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
+
+	return failures;
+}
+
+static int test_multi_page_rejects_non_contiguous_ranges(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x2000, PLANE_MEM_USABLE);
+	add_region(&mem, 0x4000, 0x1000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("non-contig init", plane_pmm_init(&mem), true);
+	failures += test_expect_bool("non-contig two pages",
+				plane_pmm_alloc_pages_phys(2, 1, &phys), false);
+
+	return failures;
+}
+
+static int test_multi_page_rejects_metadata_run(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("metadata run init",
+				plane_pmm_init(&mem), true);
+	failures += test_expect_bool("metadata run rejects full range",
+				plane_pmm_alloc_pages_phys(3, 1, &phys), false);
+	failures += test_expect_bool("metadata run allows free tail",
+				plane_pmm_alloc_pages_phys(2, 1, &phys), true);
+	failures += test_expect_u64("metadata run tail addr", phys, 0x2000);
 
 	return failures;
 }
@@ -487,7 +551,10 @@ int main(void)
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),
 		TEST_CASE(test_single_page_allocation_order_and_exhaustion),
+		TEST_CASE(test_single_page_free_reuses_lowest_address),
 		TEST_CASE(test_multi_page_alignment),
+		TEST_CASE(test_multi_page_rejects_non_contiguous_ranges),
+		TEST_CASE(test_multi_page_rejects_metadata_run),
 		TEST_CASE(test_multi_page_phys_api_updates_metadata),
 		TEST_CASE(test_free_merges_ranges),
 		TEST_CASE(test_free_rejects_invalid_ranges),

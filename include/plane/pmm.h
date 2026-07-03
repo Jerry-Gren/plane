@@ -30,7 +30,7 @@ struct plane_pmm_allocator_stats {
 	uint64_t metadata_pages;
 	uint64_t metadata_bytes;
 	uint64_t free_pages;
-	uint64_t free_range_count;
+	uint64_t free_run_count;
 };
 
 struct plane_pmm_memtype_stats {
