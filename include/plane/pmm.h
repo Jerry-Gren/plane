@@ -11,11 +11,11 @@
  * Early physical page allocator.
  *
  * The returned addresses are physical addresses, not directly
- * dereferenceable virtual addresses. Allocated pages are not zeroed.
+ * dereferenceable virtual addresses. Pages are not zeroed unless
+ * PLANE_PMM_ALLOC_ZERO is requested.
  * The page metadata API is an early XNU-like foundation: each managed
  * physical page has a small struct plane_page, but full VM page queues,
  * objects, coloring, and SMP locking are intentionally not here yet.
- * Pages are not zeroed unless PLANE_PMM_ALLOC_ZERO is requested.
  */
 
 struct plane_page;

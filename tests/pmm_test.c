@@ -10,21 +10,32 @@
 
 static bool direct_map_available = true;
 #define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
+static uint64_t direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
 static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
 	__attribute__((aligned(PAGE_SIZE)));
 
-void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
 {
-	if (!direct_map_available || phys_addr >= DIRECT_MAP_STORAGE_SIZE) {
+	if (!direct_map_available || size == 0 ||
+	    phys_addr > direct_map_limit ||
+	    size > direct_map_limit - phys_addr ||
+	    phys_addr > DIRECT_MAP_STORAGE_SIZE ||
+	    size > DIRECT_MAP_STORAGE_SIZE - phys_addr) {
 		return NULL;
 	}
 
 	return &direct_map_storage[phys_addr];
 }
 
+void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+{
+	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
+}
+
 static void reset_direct_map_stub(void)
 {
 	direct_map_available = true;
+	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
 	memset(direct_map_storage, 0, sizeof(direct_map_storage));
 }
 
@@ -450,6 +461,39 @@ static int test_zeroed_allocation_rolls_back_without_direct_map(void)
 	return failures;
 }
 
+static int test_zeroed_allocation_rolls_back_without_range_coverage(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	uint64_t phys = UINT64_MAX;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("zero range rollback init",
+				     plane_pmm_init(&mem), true);
+
+	direct_map_limit = 0x2800;
+	failures += test_expect_bool("zero range rollback alloc",
+				plane_pmm_alloc_pages_phys_flags(
+					1, 1, PLANE_PMM_ALLOC_ZERO, &phys),
+				false);
+	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("zero range rollback stats", &stats,
+				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+	failures += check_page_state("zero range rollback page state",
+				      plane_page_state(
+					      plane_pmm_phys_to_page(0x2000)),
+				      PLANE_PAGE_FREE);
+	failures += test_expect_bool("zero range rollback reuses page",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("zero range rollback reused phys", phys,
+				    0x2000);
+
+	return failures;
+}
+
 static int test_allocation_flags_reject_unknown_bits(void)
 {
 	struct plane_mem_info mem = {0};
@@ -704,6 +748,7 @@ int main(void)
 		TEST_CASE(test_zeroed_single_page_allocation),
 		TEST_CASE(test_zeroed_multi_page_allocation),
 		TEST_CASE(test_zeroed_allocation_rolls_back_without_direct_map),
+		TEST_CASE(test_zeroed_allocation_rolls_back_without_range_coverage),
 		TEST_CASE(test_allocation_flags_reject_unknown_bits),
 		TEST_CASE(test_single_page_free_reuses_lowest_address),
 		TEST_CASE(test_multi_page_alignment),

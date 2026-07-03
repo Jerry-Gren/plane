@@ -60,7 +60,16 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 
 void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
 {
-	if (!direct_map_initialized || phys_addr >= X86_64_DIRECT_MAP_SIZE) {
+	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
+}
+
+void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
+{
+	uint64_t end;
+
+	if (!direct_map_initialized || size == 0 ||
+	    !checked_add_u64(phys_addr, size, &end) ||
+	    end > X86_64_DIRECT_MAP_SIZE) {
 		return NULL;
 	}
 

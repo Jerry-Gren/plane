@@ -147,6 +147,10 @@ void x86_64_cpu_features_init(void);
 const struct x86_64_cpu_features *x86_64_cpu_features_get(void);
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature);
 
+/*
+ * Testable raw CPUID decoder. Normal boot code should call
+ * x86_64_cpu_features_init().
+ */
 void x86_64_cpu_features_decode(struct x86_64_cpu_features *features,
 				const struct x86_64_cpuid_raw *raw);
 

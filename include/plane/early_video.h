@@ -10,6 +10,10 @@
  * this consumes bootloader-provided video info only; it is not a video driver
  * and does not do device probing, mode setting, or lifetime management.
  */
+/*
+ * Public for host tests and early helper reuse; if no external caller remains,
+ * this can move back into kernel/early_video.c.
+ */
 bool plane_early_video_format_supported(const struct plane_video_info *video);
 bool plane_early_video_draw_test_pattern(struct plane_video_info *video);
 

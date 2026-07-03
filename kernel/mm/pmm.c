@@ -576,12 +576,44 @@ static bool zero_allocated_pages(uint64_t phys_addr, uint64_t page_count)
 		return false;
 	}
 
-	vaddr = hal_mmu_direct_phys_to_virt(phys_addr);
+	vaddr = hal_mmu_direct_phys_range_to_virt(phys_addr, size);
 	if (vaddr == NULL) {
 		return false;
 	}
 
 	memset(vaddr, 0, size);
+	return true;
+}
+
+static bool rollback_allocated_page_run(uint64_t phys_addr,
+					uint64_t page_count)
+{
+	if (!page_state_range_matches(phys_addr, page_count,
+				      PLANE_PAGE_ALLOCATED)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < page_count; i++) {
+		struct plane_page *page;
+		uint64_t page_phys;
+		uint64_t offset;
+
+		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
+		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+			return false;
+		}
+
+		page = plane_pmm_phys_to_page(page_phys);
+		if (page == NULL || page->on_free_queue) {
+			return false;
+		}
+
+		page->state = PLANE_PAGE_FREE;
+		if (!free_queue_insert_ordered(page)) {
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -707,7 +739,7 @@ bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 
 	if ((flags & PLANE_PMM_ALLOC_ZERO) != 0 &&
 	    !zero_allocated_pages(alloc_base, page_count)) {
-		if (!plane_pmm_free_pages_phys(alloc_base, page_count)) {
+		if (!rollback_allocated_page_run(alloc_base, page_count)) {
 			return false;
 		}
 		return false;
