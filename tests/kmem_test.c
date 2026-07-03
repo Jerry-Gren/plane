@@ -350,9 +350,7 @@ static int test_protect_pages_updates_mapping_flags(void)
 
 	failures += test_expect_bool("protect writable",
 				     plane_kmem_protect_pages(
-					     addr, 2,
-					     PLANE_VM_PROT_READ |
-					     PLANE_VM_PROT_WRITE),
+					     addr, 2, PLANE_VM_PROT_DEFAULT),
 				     true);
 	if (first != NULL) {
 		failures += test_expect_u32("protect first writable again",
@@ -361,6 +359,36 @@ static int test_protect_pages_updates_mapping_flags(void)
 	if (second != NULL) {
 		failures += test_expect_u32("protect second writable again",
 					    second->flags, HAL_MMU_MAP_WRITE);
+	}
+	return failures;
+}
+
+static int test_readonly_allocation_can_be_promoted_to_writable(void)
+{
+	void *addr = NULL;
+	struct test_mapping *mapping;
+	int failures = 0;
+
+	failures += test_expect_bool("readonly promote init",
+				     plane_kmem_init(), true);
+	failures += test_expect_bool("readonly promote alloc",
+				     plane_kmem_alloc_pages(
+					     1, PLANE_KMEM_ALLOC_READONLY,
+					     &addr),
+				     true);
+	mapping = find_mapping(TEST_KMEM_BASE);
+	failures += test_expect_not_null("readonly promote mapping", mapping);
+	if (mapping != NULL) {
+		failures += test_expect_u32("readonly promote starts ro",
+					    mapping->flags, 0);
+	}
+	failures += test_expect_bool("readonly promote writable",
+				     plane_kmem_protect_pages(
+					     addr, 1, PLANE_VM_PROT_DEFAULT),
+				     true);
+	if (mapping != NULL) {
+		failures += test_expect_u32("readonly promote flags",
+					    mapping->flags, HAL_MMU_MAP_WRITE);
 	}
 	return failures;
 }
@@ -959,6 +987,7 @@ int main(void)
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_readonly_alloc_maps_without_write_flag),
 		TEST_CASE(test_protect_pages_updates_mapping_flags),
+		TEST_CASE(test_readonly_allocation_can_be_promoted_to_writable),
 		TEST_CASE(test_protect_bytes_rounds_to_exact_allocation),
 		TEST_CASE(test_guard_protect_updates_only_user_pages),
 		TEST_CASE(test_protect_rejects_invalid_inputs),

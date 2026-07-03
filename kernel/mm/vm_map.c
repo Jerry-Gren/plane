@@ -7,7 +7,6 @@
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
 #define VM_MAP_ENTRY_NONE UINT64_MAX
-#define VM_MAP_DEFAULT_MAX_PROT (PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)
 
 struct plane_vm_map_entry {
 	uint64_t start;
@@ -71,8 +70,8 @@ static uint64_t page_count_from_size(uint64_t size)
 
 static bool prot_valid(uint32_t prot)
 {
-	return prot != 0 &&
-	       (prot & ~(PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)) == 0;
+	return prot != PLANE_VM_PROT_NONE &&
+	       (prot & ~PLANE_VM_PROT_ALL) == 0;
 }
 
 static bool prot_allowed(uint32_t prot, uint32_t max_prot)
@@ -300,13 +299,23 @@ bool plane_kernel_map_init(uint64_t base, uint64_t size)
 bool plane_kernel_map_alloc_pages(uint64_t page_count, uint64_t *vaddr)
 {
 	return plane_kernel_map_alloc_pages_protected(
-		page_count, 0, PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE, vaddr);
+		page_count, 0, PLANE_VM_PROT_DEFAULT, vaddr);
 }
 
 bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 					    uint64_t guard_pages,
 					    uint32_t prot,
 					    uint64_t *vaddr)
+{
+	return plane_kernel_map_alloc_pages_protected_max(
+		page_count, guard_pages, prot, PLANE_VM_PROT_ALL, vaddr);
+}
+
+bool plane_kernel_map_alloc_pages_protected_max(uint64_t page_count,
+						uint64_t guard_pages,
+						uint32_t prot,
+						uint32_t max_prot,
+						uint64_t *vaddr)
 {
 	int64_t entry_index;
 	uint64_t guard_total;
@@ -324,7 +333,7 @@ bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 	if (vaddr == NULL ||
 	    !kernel_map.initialized ||
 	    page_count == 0 ||
-	    !prot_allowed(prot, VM_MAP_DEFAULT_MAX_PROT)) {
+	    !prot_allowed(prot, max_prot)) {
 		return false;
 	}
 
@@ -346,7 +355,7 @@ bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 	}
 
 	insert_entry((uint64_t)entry_index, start, end, user_start, user_end,
-		     prot, VM_MAP_DEFAULT_MAX_PROT, prev, next);
+		     prot, max_prot, prev, next);
 	*vaddr = user_start;
 	return true;
 }
@@ -356,8 +365,7 @@ bool plane_kernel_map_alloc_pages_guarded(uint64_t page_count,
 					  uint64_t *vaddr)
 {
 	return plane_kernel_map_alloc_pages_protected(
-		page_count, guard_pages, PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
-		vaddr);
+		page_count, guard_pages, PLANE_VM_PROT_DEFAULT, vaddr);
 }
 
 bool plane_kernel_map_has_allocation(uint64_t vaddr, uint64_t page_count)

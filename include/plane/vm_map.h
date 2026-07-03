@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <plane/bits.h>
+#include <plane/vm_prot.h>
 
 /*
  * Early kernel virtual map.
@@ -13,16 +13,10 @@
  * virtual address ranges; physical backing and page-table mappings belong to
  * PMM and HAL/pmap.
  *
- * Protection and max_protection are entry attribute foundations. Current
- * users consume protection when creating or updating kernel mappings; there
- * is no fault-time enforcement here yet. READ and WRITE follow XNU-style
- * independent bitset semantics.
+ * Protection and max_protection are entry attribute foundations. Explicit
+ * max protection is allocation-time metadata, not a complete
+ * vm_map_protect(set_maximum) implementation.
  */
-
-enum plane_vm_prot {
-	PLANE_VM_PROT_READ = BIT(0),
-	PLANE_VM_PROT_WRITE = BIT(1),
-};
 
 struct plane_vm_map_stats {
 	uint64_t total_pages;
@@ -48,6 +42,11 @@ bool plane_kernel_map_alloc_pages_protected(uint64_t page_count,
 					    uint64_t guard_pages,
 					    uint32_t prot,
 					    uint64_t *vaddr);
+bool plane_kernel_map_alloc_pages_protected_max(uint64_t page_count,
+						uint64_t guard_pages,
+						uint32_t prot,
+						uint32_t max_prot,
+						uint64_t *vaddr);
 /*
  * Reserves a virtual range with guard_pages before and after the user range.
  * The returned address is the user range start. Allocation lookup and free use

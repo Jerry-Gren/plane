@@ -469,7 +469,7 @@ static int test_protected_alloc_accepts_write_only_protection(void)
 				    info.prot, PLANE_VM_PROT_WRITE);
 	failures += test_expect_u32("write-only max prot",
 				    info.max_prot,
-				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+				    PLANE_VM_PROT_ALL);
 	return failures;
 }
 
@@ -513,7 +513,7 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 				    info.prot, PLANE_VM_PROT_READ);
 	failures += test_expect_u32("prot guard max prot",
 				    info.max_prot,
-				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+				    PLANE_VM_PROT_ALL);
 	failures += check_stats("prot guard stats",
 				TEST_KERNEL_MAP_PAGES - 4, 4, 2, 1, 1);
 	failures += test_expect_bool("prot guard free",
@@ -549,13 +549,10 @@ static int test_protect_pages_updates_exact_allocation(void)
 	failures += test_expect_u32("protect readonly prot",
 				    info.prot, PLANE_VM_PROT_READ);
 	failures += test_expect_u32("protect readonly max",
-				    info.max_prot,
-				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+				    info.max_prot, PLANE_VM_PROT_ALL);
 	failures += test_expect_bool("protect writable again",
 				     plane_kernel_map_protect_pages(
-					     vaddr, 2,
-					     PLANE_VM_PROT_READ |
-					     PLANE_VM_PROT_WRITE),
+					     vaddr, 2, PLANE_VM_PROT_DEFAULT),
 				     true);
 	failures += test_expect_bool("protect lookup writable",
 				     plane_kernel_map_lookup_allocation(vaddr,
@@ -563,8 +560,7 @@ static int test_protect_pages_updates_exact_allocation(void)
 								       &info),
 				     true);
 	failures += test_expect_u32("protect writable prot",
-				    info.prot,
-				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+				    info.prot, PLANE_VM_PROT_DEFAULT);
 	return failures;
 }
 
@@ -603,10 +599,96 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 								       &info),
 				     true);
 	failures += test_expect_u32("protect unchanged prot",
-				    info.prot,
-				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+				    info.prot, PLANE_VM_PROT_DEFAULT);
 	failures += check_stats("protect reject stats",
 				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
+	return failures;
+}
+
+static int test_protected_max_allocation_records_explicit_max(void)
+{
+	struct plane_kernel_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("max init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"max readonly alloc",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, PLANE_VM_PROT_READ, PLANE_VM_PROT_READ, &vaddr),
+		true);
+	failures += test_expect_bool(
+		"max readonly lookup",
+		plane_kernel_map_lookup_allocation(vaddr, 1, &info),
+		true);
+	failures += test_expect_u32("max readonly prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("max readonly max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool(
+		"max readonly protect read",
+		plane_kernel_map_protect_pages(vaddr, 1, PLANE_VM_PROT_READ),
+		true);
+	failures += test_expect_bool(
+		"max readonly reject write",
+		plane_kernel_map_protect_pages(vaddr, 1, PLANE_VM_PROT_WRITE),
+		false);
+	failures += test_expect_bool(
+		"max readonly reject rw",
+		plane_kernel_map_protect_pages(vaddr, 1, PLANE_VM_PROT_DEFAULT),
+		false);
+	return failures;
+}
+
+static int test_protected_max_allocation_rejects_invalid_pairs(void)
+{
+	uint64_t vaddr = 0;
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	int failures = 0;
+
+	failures += test_expect_bool("max reject init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_kernel_map_get_stats();
+	failures += test_expect_bool(
+		"max rejects prot none",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, PLANE_VM_PROT_NONE, PLANE_VM_PROT_ALL, &vaddr),
+		false);
+	failures += test_expect_bool(
+		"max rejects max none",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, PLANE_VM_PROT_READ, PLANE_VM_PROT_NONE, &vaddr),
+		false);
+	failures += test_expect_bool(
+		"max rejects prot outside max",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, PLANE_VM_PROT_DEFAULT, PLANE_VM_PROT_READ, &vaddr),
+		false);
+	failures += test_expect_bool(
+		"max rejects unknown prot",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, BIT(8), PLANE_VM_PROT_ALL, &vaddr),
+		false);
+	failures += test_expect_bool(
+		"max rejects unknown max",
+		plane_kernel_map_alloc_pages_protected_max(
+			1, 0, PLANE_VM_PROT_READ, BIT(8), &vaddr),
+		false);
+	after = plane_kernel_map_get_stats();
+	failures += test_expect_u64("max reject free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("max reject reserved unchanged",
+				    after.reserved_pages, before.reserved_pages);
+	failures += test_expect_u64("max reject user unchanged",
+				    after.user_pages, before.user_pages);
+	failures += test_expect_u64("max reject count unchanged",
+				    after.allocation_count, before.allocation_count);
 	return failures;
 }
 
@@ -629,6 +711,8 @@ int main(void)
 		TEST_CASE(test_protected_guarded_alloc_keeps_user_range_semantics),
 		TEST_CASE(test_protect_pages_updates_exact_allocation),
 		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
+		TEST_CASE(test_protected_max_allocation_records_explicit_max),
+		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),
 	};
 
 	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));

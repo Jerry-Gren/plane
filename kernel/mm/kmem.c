@@ -70,8 +70,8 @@ static bool kmem_flags_valid(uint32_t flags)
 
 static bool kmem_prot_valid(uint32_t prot)
 {
-	return prot != 0 &&
-	       (prot & ~(PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE)) == 0;
+	return prot != PLANE_VM_PROT_NONE &&
+	       (prot & ~PLANE_VM_PROT_ALL) == 0;
 }
 
 static uint32_t kmem_to_pmm_flags(uint32_t flags)
@@ -99,8 +99,8 @@ static bool reserve_kmem_vaddr(uint64_t page_count,
 		guard_pages = 1;
 	}
 
-	return plane_kernel_map_alloc_pages_protected(page_count, guard_pages,
-						     prot, base);
+	return plane_kernel_map_alloc_pages_protected_max(
+		page_count, guard_pages, prot, PLANE_VM_PROT_ALL, base);
 }
 
 static uint32_t kmem_prot_to_map_flags(uint32_t prot)

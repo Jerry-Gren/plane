@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include <plane/bits.h>
-#include <plane/vm_map.h>
+#include <plane/vm_prot.h>
 
 /*
  * Early kernel virtual allocator.
