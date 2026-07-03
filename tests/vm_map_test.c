@@ -616,6 +616,99 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 	return failures;
 }
 
+static int test_wire_pages_updates_exact_allocation(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("wire map init",
+				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("wire map alloc",
+				     plane_vm_map_alloc_pages(&test_map, 2, &vaddr),
+				     true);
+	failures += test_expect_bool("wire map first",
+				     plane_vm_map_wire_pages(&test_map, vaddr, 2),
+				     true);
+	failures += test_expect_bool("wire map second",
+				     plane_vm_map_wire_pages(&test_map, vaddr, 2),
+				     true);
+	failures += test_expect_bool("wire map lookup",
+				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u64("wire map count", info.wired_count, 2);
+	failures += test_expect_bool("wire map free rejected",
+				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     false);
+	failures += test_expect_bool("wire map unwire",
+				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     true);
+	failures += test_expect_bool("wire map lookup one",
+				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u64("wire map count one",
+				    info.wired_count, 1);
+	failures += test_expect_bool("wire map unwire second",
+				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     true);
+	failures += test_expect_bool("wire map unwire zero rejected",
+				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     false);
+	failures += test_expect_bool("wire map free",
+				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     true);
+	return failures;
+}
+
+static int test_wire_pages_rejects_invalid_ranges(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("wire reject init",
+				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("wire reject alloc",
+				     plane_vm_map_alloc_pages(&test_map, 2, &vaddr),
+				     true);
+	failures += test_expect_bool("wire reject zero pages",
+				     plane_vm_map_wire_pages(&test_map, vaddr, 0),
+				     false);
+	failures += test_expect_bool("wire reject partial",
+				     plane_vm_map_wire_pages(&test_map, vaddr, 1),
+				     false);
+	failures += test_expect_bool("wire reject absent",
+				     plane_vm_map_wire_pages(&test_map, page_vaddr(10),
+							     1),
+				     false);
+	failures += test_expect_bool("unwire reject zero pages",
+				     plane_vm_map_unwire_pages(&test_map, vaddr, 0),
+				     false);
+	failures += test_expect_bool("unwire reject partial",
+				     plane_vm_map_unwire_pages(&test_map, vaddr, 1),
+				     false);
+	failures += test_expect_bool("unwire reject absent",
+				     plane_vm_map_unwire_pages(&test_map,
+							       page_vaddr(10), 1),
+				     false);
+	failures += test_expect_bool("wire reject lookup unchanged",
+				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+								       2,
+								       &info),
+				     true);
+	failures += test_expect_u64("wire reject count unchanged",
+				    info.wired_count, 0);
+	return failures;
+}
+
 static int test_protected_max_allocation_records_explicit_max(void)
 {
 	struct plane_vm_map_allocation_info info = {0};
@@ -722,6 +815,8 @@ int main(void)
 		TEST_CASE(test_protected_guarded_alloc_keeps_user_range_semantics),
 		TEST_CASE(test_protect_pages_updates_exact_allocation),
 		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
+		TEST_CASE(test_wire_pages_updates_exact_allocation),
+		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
 		TEST_CASE(test_protected_max_allocation_records_explicit_max),
 		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),
 	};

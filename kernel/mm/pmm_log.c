@@ -8,7 +8,7 @@ void plane_pmm_log_stats(void)
 			     stats.allocator.free_pages;
 
 	pr_info("PMM: managed=%llu free=%llu allocated=%llu "
-		"metadata_pages=%llu metadata_bytes=%llu runs=%llu "
+		"wired=%llu metadata_pages=%llu metadata_bytes=%llu runs=%llu "
 		"memtype: usable=%llu invalid=%llu reserved=%llu "
 		"acpi_reclaimable=%llu acpi_nvs=%llu bootloader=%llu "
 		"exec_modules=%llu framebuffer=%llu bad=%llu "
@@ -16,6 +16,7 @@ void plane_pmm_log_stats(void)
 		(unsigned long long)stats.allocator.managed_pages,
 		(unsigned long long)stats.allocator.free_pages,
 		(unsigned long long)allocated,
+		(unsigned long long)stats.allocator.wired_pages,
 		(unsigned long long)stats.allocator.metadata_pages,
 		(unsigned long long)stats.allocator.metadata_bytes,
 		(unsigned long long)stats.allocator.free_run_count,

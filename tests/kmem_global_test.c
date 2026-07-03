@@ -16,6 +16,7 @@
 
 struct plane_page {
 	uint64_t phys_addr;
+	uint64_t wire_count;
 	bool allocated;
 };
 
@@ -47,6 +48,19 @@ static uint64_t mapping_count(void)
 
 	for (uint64_t i = 0; i < TEST_MAP_COUNT; i++) {
 		if (test_mappings[i].used) {
+			count++;
+		}
+	}
+
+	return count;
+}
+
+static uint64_t wired_page_count(void)
+{
+	uint64_t count = 0;
+
+	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
+		if (test_pages[i].wire_count != 0) {
 			count++;
 		}
 	}
@@ -152,12 +166,53 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 
 	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
 	    page >= TEST_PAGE_COUNT ||
-	    !test_pages[page].allocated) {
+	    !test_pages[page].allocated ||
+	    test_pages[page].wire_count != 0) {
 		return false;
 	}
 
 	test_pages[page].allocated = false;
 	return true;
+}
+
+bool plane_pmm_wire_page(struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    !page->allocated ||
+	    page->wire_count == UINT64_MAX) {
+		return false;
+	}
+
+	page->wire_count++;
+	return true;
+}
+
+bool plane_pmm_unwire_page(struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    !page->allocated ||
+	    page->wire_count == 0) {
+		return false;
+	}
+
+	page->wire_count--;
+	return true;
+}
+
+struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr)
+{
+	uint64_t page = phys_addr / PAGE_SIZE;
+
+	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
+	    page >= TEST_PAGE_COUNT) {
+		return NULL;
+	}
+
+	return &test_pages[page];
 }
 
 uint64_t plane_page_phys(const struct plane_page *page)
@@ -171,6 +226,19 @@ uint64_t plane_page_phys(const struct plane_page *page)
 	return page->phys_addr;
 }
 
+bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
+{
+	if (wire_count == NULL ||
+	    page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	*wire_count = page->wire_count;
+	return true;
+}
+
 static int test_global_kmem_init_is_one_shot(void)
 {
 	void *addr = NULL;
@@ -180,12 +248,16 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_bool("global alloc",
 				     plane_kmem_alloc_pages(2, 0, &addr),
 				     true);
+	failures += test_expect_u64("global wired pages",
+				    wired_page_count(), 2);
 	failures += test_expect_bool("global repeat init",
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("global preserved free",
 				     plane_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("global free pmm pages",
 				    allocated_page_count(), 0);
+	failures += test_expect_u64("global free wired pages",
+				    wired_page_count(), 0);
 	failures += test_expect_u64("global free mappings",
 				    mapping_count(), 0);
 	return failures;

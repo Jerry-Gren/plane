@@ -376,6 +376,7 @@ bool plane_vm_map_lookup_allocation(
 		info->user_start = entry->user_start;
 		info->user_pages = page_count_from_size(entry->user_end -
 							entry->user_start);
+		info->wired_count = entry->wired_count;
 		info->prot = entry->prot;
 		info->max_prot = entry->max_prot;
 	}
@@ -408,6 +409,52 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 	return true;
 }
 
+bool plane_vm_map_wire_pages(struct plane_vm_map *map,
+			     uint64_t vaddr,
+			     uint64_t page_count)
+{
+	int64_t entry_index;
+
+	if (map == NULL ||
+	    !map->initialized ||
+	    page_count == 0 ||
+	    !is_page_aligned(vaddr)) {
+		return false;
+	}
+
+	entry_index = find_exact_entry(map, vaddr, page_count);
+	if (entry_index < 0 ||
+	    map->entries[entry_index].wired_count == UINT64_MAX) {
+		return false;
+	}
+
+	map->entries[entry_index].wired_count++;
+	return true;
+}
+
+bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
+			       uint64_t vaddr,
+			       uint64_t page_count)
+{
+	int64_t entry_index;
+
+	if (map == NULL ||
+	    !map->initialized ||
+	    page_count == 0 ||
+	    !is_page_aligned(vaddr)) {
+		return false;
+	}
+
+	entry_index = find_exact_entry(map, vaddr, page_count);
+	if (entry_index < 0 ||
+	    map->entries[entry_index].wired_count == 0) {
+		return false;
+	}
+
+	map->entries[entry_index].wired_count--;
+	return true;
+}
+
 bool plane_vm_map_free_pages(struct plane_vm_map *map,
 			     uint64_t vaddr,
 			     uint64_t page_count)
@@ -422,7 +469,8 @@ bool plane_vm_map_free_pages(struct plane_vm_map *map,
 	}
 
 	entry_index = find_exact_entry(map, vaddr, page_count);
-	if (entry_index < 0) {
+	if (entry_index < 0 ||
+	    map->entries[entry_index].wired_count != 0) {
 		return false;
 	}
 

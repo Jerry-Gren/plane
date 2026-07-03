@@ -39,6 +39,7 @@ struct plane_vm_map_entry {
 	uint64_t end;
 	uint64_t user_start;
 	uint64_t user_end;
+	uint64_t wired_count;
 	uint32_t prot;
 	uint32_t max_prot;
 	uint64_t prev;
@@ -62,6 +63,7 @@ struct plane_vm_map_allocation_info {
 	uint64_t reserved_pages;
 	uint64_t user_start;
 	uint64_t user_pages;
+	uint64_t wired_count;
 	uint32_t prot;
 	uint32_t max_prot;
 };
@@ -96,6 +98,12 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 				uint64_t vaddr,
 				uint64_t page_count,
 				uint32_t prot);
+bool plane_vm_map_wire_pages(struct plane_vm_map *map,
+			     uint64_t vaddr,
+			     uint64_t page_count);
+bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
+			       uint64_t vaddr,
+			       uint64_t page_count);
 bool plane_vm_map_free_pages(struct plane_vm_map *map,
 			     uint64_t vaddr,
 			     uint64_t page_count);

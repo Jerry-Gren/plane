@@ -113,18 +113,39 @@ static uint32_t kmem_prot_to_map_flags(uint32_t prot)
 	return map_flags;
 }
 
+static bool release_mapped_page(uint64_t vaddr)
+{
+	struct plane_page *page;
+	uint64_t phys_addr;
+	uint64_t wire_count;
+
+	if (!hal_mmu_translate_kernel_page(vaddr, &phys_addr)) {
+		return false;
+	}
+
+	page = plane_pmm_phys_to_page(phys_addr);
+	if (!plane_page_wire_count(page, &wire_count)) {
+		return false;
+	}
+	if (!hal_mmu_unmap_kernel_page(vaddr)) {
+		return false;
+	}
+	if (wire_count != 0 && !plane_pmm_unwire_page(page)) {
+		return false;
+	}
+
+	return plane_pmm_free_page_phys(phys_addr);
+}
+
 static bool rollback_mapped_pages(uint64_t vaddr, uint64_t page_count)
 {
 	for (uint64_t i = page_count; i > 0; i--) {
 		uint64_t page_vaddr;
-		uint64_t phys_addr;
 		uint64_t offset;
 
 		if (!checked_page_offset(i - 1, &offset) ||
 		    !checked_add_u64(vaddr, offset, &page_vaddr) ||
-		    !hal_mmu_translate_kernel_page(page_vaddr, &phys_addr) ||
-		    !hal_mmu_unmap_kernel_page(page_vaddr) ||
-		    !plane_pmm_free_page_phys(phys_addr)) {
+		    !release_mapped_page(page_vaddr)) {
 			return false;
 		}
 	}
@@ -172,6 +193,15 @@ static bool map_allocated_pages(uint64_t vaddr,
 			bool mappings_ok = rollback_mapped_pages(vaddr, mapped_pages);
 
 			BUG_ON_MSG(!page_ok, "failed to rollback kmem physical page");
+			BUG_ON_MSG(!mappings_ok, "failed to rollback kmem mappings");
+			return false;
+		}
+
+		if (!plane_pmm_wire_page(page)) {
+			bool page_ok = release_mapped_page(page_vaddr);
+			bool mappings_ok = rollback_mapped_pages(vaddr, mapped_pages);
+
+			BUG_ON_MSG(!page_ok, "failed to rollback kmem mapped page");
 			BUG_ON_MSG(!mappings_ok, "failed to rollback kmem mappings");
 			return false;
 		}
@@ -317,8 +347,12 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 
 	BUG_ON_MSG(!plane_vm_map_lookup_allocation(map, base, page_count, &info),
 		   "failed to find reserved kmem allocation");
+	BUG_ON_MSG(!plane_vm_map_wire_pages(map, base, page_count),
+		   "failed to wire kmem virtual reservation");
 
 	if (!map_allocated_pages(base, page_count, flags, info.prot)) {
+		BUG_ON_MSG(!plane_vm_map_unwire_pages(map, base, page_count),
+			   "failed to unwire kmem virtual reservation");
 		BUG_ON_MSG(!plane_vm_map_free_pages(map, base, page_count),
 			   "failed to release kmem virtual reservation");
 		return false;
@@ -395,6 +429,8 @@ bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 
 	BUG_ON_MSG(!rollback_mapped_pages(addr, page_count),
 		   "failed to release kmem backing pages");
+	BUG_ON_MSG(!plane_vm_map_unwire_pages(map, addr, page_count),
+		   "failed to unwire kmem virtual reservation");
 	BUG_ON_MSG(!plane_vm_map_free_pages(map, addr, page_count),
 		   "failed to release kmem virtual reservation");
 	return true;

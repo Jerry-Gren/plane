@@ -121,21 +121,22 @@ static void add_region(struct plane_mem_info *mem, uint64_t base,
 	mem->map[index].type = type;
 }
 
-static int check_stats(const char *prefix,
-			const struct plane_pmm_stats *stats,
-			uint64_t managed,
-			uint64_t free,
-			uint64_t usable,
-			uint64_t invalid,
-			uint64_t reserved,
-			uint64_t acpi_reclaimable,
-			uint64_t acpi_nvs,
-			uint64_t bootloader,
-			uint64_t exec_modules,
-			uint64_t framebuffer,
-			uint64_t bad,
-			uint64_t reserved_mapped,
-			uint64_t free_runs)
+static int check_stats_wired(const char *prefix,
+			     const struct plane_pmm_stats *stats,
+			     uint64_t managed,
+			     uint64_t free,
+			     uint64_t wired,
+			     uint64_t usable,
+			     uint64_t invalid,
+			     uint64_t reserved,
+			     uint64_t acpi_reclaimable,
+			     uint64_t acpi_nvs,
+			     uint64_t bootloader,
+			     uint64_t exec_modules,
+			     uint64_t framebuffer,
+			     uint64_t bad,
+			     uint64_t reserved_mapped,
+			     uint64_t free_runs)
 {
 	int failures = 0;
 	char name[96];
@@ -152,6 +153,7 @@ static int check_stats(const char *prefix,
 
 	EXPECT_ALLOCATOR_FIELD(managed_pages, managed);
 	EXPECT_ALLOCATOR_FIELD(free_pages, free);
+	EXPECT_ALLOCATOR_FIELD(wired_pages, wired);
 	EXPECT_ALLOCATOR_FIELD(free_run_count, free_runs);
 	EXPECT_MEMTYPE_FIELD(usable_pages, usable);
 	EXPECT_MEMTYPE_FIELD(invalid_pages, invalid);
@@ -168,6 +170,28 @@ static int check_stats(const char *prefix,
 #undef EXPECT_ALLOCATOR_FIELD
 #undef EXPECT_MEMTYPE_FIELD
 	return failures;
+}
+
+static int check_stats(const char *prefix,
+		       const struct plane_pmm_stats *stats,
+		       uint64_t managed,
+		       uint64_t free,
+		       uint64_t usable,
+		       uint64_t invalid,
+		       uint64_t reserved,
+		       uint64_t acpi_reclaimable,
+		       uint64_t acpi_nvs,
+		       uint64_t bootloader,
+		       uint64_t exec_modules,
+		       uint64_t framebuffer,
+		       uint64_t bad,
+		       uint64_t reserved_mapped,
+		       uint64_t free_runs)
+{
+	return check_stats_wired(prefix, stats, managed, free, 0, usable,
+				 invalid, reserved, acpi_reclaimable, acpi_nvs,
+				 bootloader, exec_modules, framebuffer, bad,
+				 reserved_mapped, free_runs);
 }
 
 static int test_phys_to_page_metadata(void)
@@ -278,6 +302,119 @@ static int test_page_api_allocates_and_frees_metadata(void)
 	failures += check_stats("page api freed", &stats,
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
+	return failures;
+}
+
+static int test_page_wire_count_tracks_allocated_pages(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	struct plane_page *page;
+	uint64_t phys;
+	uint64_t wire_count;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("wire init", plane_pmm_init(&mem), true);
+	failures += test_expect_bool("wire alloc",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("wire alloc phys", phys, 0x2000);
+	page = plane_pmm_phys_to_page(phys);
+	failures += test_expect_bool("wire initial count query",
+				     plane_page_wire_count(page, &wire_count),
+				     true);
+	failures += test_expect_u64("wire initial count", wire_count, 0);
+
+	failures += test_expect_bool("wire page",
+				     plane_pmm_wire_page(page), true);
+	failures += test_expect_bool("wire count one query",
+				     plane_page_wire_count(page, &wire_count),
+				     true);
+	failures += test_expect_u64("wire count one", wire_count, 1);
+	failures += test_expect_bool("wire page again",
+				     plane_pmm_wire_page(page), true);
+	failures += test_expect_bool("wire count two query",
+				     plane_page_wire_count(page, &wire_count),
+				     true);
+	failures += test_expect_u64("wire count two", wire_count, 2);
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats_wired("wire stats", &stats,
+				 3, 1, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+	failures += test_expect_bool("free wired rejected",
+				     plane_pmm_free_page_phys(phys), false);
+
+	failures += test_expect_bool("unwire page",
+				     plane_pmm_unwire_page(page), true);
+	failures += test_expect_bool("wire count one after unwire query",
+				     plane_page_wire_count(page, &wire_count),
+				     true);
+	failures += test_expect_u64("wire count one after unwire", wire_count, 1);
+	failures += test_expect_bool("unwire page again",
+				     plane_pmm_unwire_page(page), true);
+	failures += test_expect_bool("wire count zero query",
+				     plane_page_wire_count(page, &wire_count),
+				     true);
+	failures += test_expect_u64("wire count zero", wire_count, 0);
+	failures += test_expect_bool("unwire zero rejected",
+				     plane_pmm_unwire_page(page), false);
+	failures += test_expect_bool("free unwired page",
+				     plane_pmm_free_page_phys(phys), true);
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("wire freed stats", &stats,
+				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+	return failures;
+}
+
+static int test_wire_rejects_invalid_pages(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *free_page;
+	struct plane_page *metadata_page;
+	uint64_t phys;
+	uint64_t wire_count;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("wire invalid init",
+				     plane_pmm_init(&mem), true);
+	metadata_page = plane_pmm_phys_to_page(0x1000);
+	free_page = plane_pmm_phys_to_page(0x2000);
+	failures += test_expect_bool("wire rejects metadata",
+				     plane_pmm_wire_page(metadata_page), false);
+	failures += test_expect_bool("unwire rejects metadata",
+				     plane_pmm_unwire_page(metadata_page), false);
+	failures += test_expect_bool("wire rejects free page",
+				     plane_pmm_wire_page(free_page), false);
+	failures += test_expect_bool("unwire rejects free page",
+				     plane_pmm_unwire_page(free_page), false);
+	failures += test_expect_bool("wire rejects unmanaged",
+				     plane_pmm_wire_page(NULL), false);
+	failures += test_expect_bool("unwire rejects unmanaged",
+				     plane_pmm_unwire_page(NULL), false);
+	failures += test_expect_bool("wire count rejects null page",
+				     plane_page_wire_count(NULL, &wire_count),
+				     false);
+	failures += test_expect_bool("wire count rejects null out",
+				     plane_page_wire_count(free_page, NULL),
+				     false);
+	failures += test_expect_bool("wire count accepts metadata page",
+				     plane_page_wire_count(metadata_page,
+							   &wire_count),
+				     true);
+	failures += test_expect_u64("metadata wire count", wire_count, 0);
+	failures += test_expect_bool("wire count accepts free page",
+				     plane_page_wire_count(free_page,
+							   &wire_count),
+				     true);
+	failures += test_expect_u64("free page wire count", wire_count, 0);
+
+	failures += test_expect_bool("wire invalid alloc",
+				     plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("wire invalid phys", phys, 0x2000);
+	failures += test_expect_bool("wire invalid free unwired",
+				     plane_pmm_free_page_phys(phys), true);
 	return failures;
 }
 
@@ -756,6 +893,8 @@ int main(void)
 		TEST_CASE(test_init_accounts_all_memmap_types),
 		TEST_CASE(test_phys_to_page_metadata),
 		TEST_CASE(test_page_api_allocates_and_frees_metadata),
+		TEST_CASE(test_page_wire_count_tracks_allocated_pages),
+		TEST_CASE(test_wire_rejects_invalid_pages),
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),
 		TEST_CASE(test_single_page_allocation_order_and_exhaustion),
