@@ -34,6 +34,20 @@ static bool checked_page_offset(uint64_t page_index, uint64_t *offset)
 	return checked_mul_u64(page_index, PAGE_SIZE, offset);
 }
 
+static bool kmem_size_to_pages(uint64_t size, uint64_t *page_count)
+{
+	uint64_t rounded;
+
+	if (page_count == NULL ||
+	    size == 0 ||
+	    !checked_add_u64(size, PAGE_SIZE - 1, &rounded)) {
+		return false;
+	}
+
+	*page_count = rounded / PAGE_SIZE;
+	return true;
+}
+
 static bool is_page_aligned(uint64_t value)
 {
 	return (value & (PAGE_SIZE - 1)) == 0;
@@ -138,6 +152,28 @@ bool plane_kmem_init(void)
 
 	kmem_initialized = true;
 	return true;
+}
+
+bool plane_kmem_alloc(uint64_t size, uint32_t flags, void **addr)
+{
+	uint64_t page_count;
+
+	if (!kmem_size_to_pages(size, &page_count)) {
+		return false;
+	}
+
+	return plane_kmem_alloc_pages(page_count, flags, addr);
+}
+
+bool plane_kmem_free(void *addr, uint64_t size)
+{
+	uint64_t page_count;
+
+	if (!kmem_size_to_pages(size, &page_count)) {
+		return false;
+	}
+
+	return plane_kmem_free_pages(addr, page_count);
 }
 
 bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)

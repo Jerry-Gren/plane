@@ -86,6 +86,20 @@ static uint64_t mapping_count(void)
 	return count;
 }
 
+static uint64_t allocated_page_count_with_flags(uint32_t flags)
+{
+	uint64_t count = 0;
+
+	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
+		if (test_pages[i].allocated &&
+		    test_pages[i].flags == flags) {
+			count++;
+		}
+	}
+
+	return count;
+}
+
 static struct test_mapping *find_mapping(uint64_t vaddr)
 {
 	for (uint64_t i = 0; i < TEST_MAP_COUNT; i++) {
@@ -234,6 +248,44 @@ static int test_alloc_and_free_pages(void)
 	return failures;
 }
 
+static int test_alloc_and_free_bytes(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("byte init", plane_kmem_init(), true);
+	failures += test_expect_bool("byte alloc",
+				     plane_kmem_alloc(1, 0, &addr), true);
+	failures += test_expect_ptr("byte addr", addr, (void *)TEST_KMEM_BASE);
+	failures += test_expect_u64("byte pmm pages", allocated_page_count(), 1);
+	failures += test_expect_u64("byte mappings", mapping_count(), 1);
+	failures += test_expect_bool("byte free", plane_kmem_free(addr, 1), true);
+	failures += test_expect_u64("byte free pmm pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("byte free mappings", mapping_count(), 0);
+	return failures;
+}
+
+static int test_byte_alloc_rounds_up_to_pages(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("round init", plane_kmem_init(), true);
+	failures += test_expect_bool("round alloc",
+				     plane_kmem_alloc(PAGE_SIZE + 1, 0, &addr),
+				     true);
+	failures += test_expect_u64("round pmm pages", allocated_page_count(), 2);
+	failures += test_expect_u64("round mappings", mapping_count(), 2);
+	failures += test_expect_bool("round free",
+				     plane_kmem_free(addr, PAGE_SIZE + 1),
+				     true);
+	failures += test_expect_u64("round free pmm pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("round free mappings", mapping_count(), 0);
+	return failures;
+}
+
 static int test_zero_flag_reaches_pmm(void)
 {
 	void *addr = NULL;
@@ -246,6 +298,26 @@ static int test_zero_flag_reaches_pmm(void)
 				     true);
 	failures += test_expect_u32("zero pmm flag",
 				    last_pmm_flags, PLANE_PMM_ALLOC_ZERO);
+	return failures;
+}
+
+static int test_byte_zero_flag_reaches_all_pages(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("byte zero init", plane_kmem_init(), true);
+	failures += test_expect_bool("byte zero alloc",
+				     plane_kmem_alloc(PAGE_SIZE + 1,
+						      PLANE_KMEM_ALLOC_ZERO,
+						      &addr),
+				     true);
+	failures += test_expect_u64("byte zero pmm pages",
+				    allocated_page_count(), 2);
+	failures += test_expect_u64("byte zero flagged pages",
+				    allocated_page_count_with_flags(
+					    PLANE_PMM_ALLOC_ZERO),
+				    2);
 	return failures;
 }
 
@@ -318,6 +390,24 @@ static int test_rejects_invalid_inputs(void)
 				     plane_kmem_free_pages(
 					     (void *)(TEST_KMEM_BASE + 1), 1),
 				     false);
+	failures += test_expect_bool("byte alloc zero",
+				     plane_kmem_alloc(0, 0, &addr), false);
+	failures += test_expect_bool("byte alloc unknown flag",
+				     plane_kmem_alloc(1, BIT(8), &addr), false);
+	failures += test_expect_bool("byte alloc null out",
+				     plane_kmem_alloc(1, 0, NULL), false);
+	failures += test_expect_bool("byte alloc size overflow",
+				     plane_kmem_alloc(UINT64_MAX, 0, &addr),
+				     false);
+	failures += test_expect_bool("byte free null",
+				     plane_kmem_free(NULL, 1), false);
+	failures += test_expect_bool("byte free zero",
+				     plane_kmem_free((void *)TEST_KMEM_BASE, 0),
+				     false);
+	failures += test_expect_bool("byte free size overflow",
+				     plane_kmem_free((void *)TEST_KMEM_BASE,
+						     UINT64_MAX),
+				     false);
 
 	failures += test_expect_bool("alloc valid",
 				     plane_kmem_alloc_pages(2, 0, &addr),
@@ -328,6 +418,29 @@ static int test_rejects_invalid_inputs(void)
 				     plane_kmem_free_pages(addr, 2), true);
 	failures += test_expect_bool("double free rejected",
 				     plane_kmem_free_pages(addr, 2), false);
+	return failures;
+}
+
+static int test_byte_free_size_mismatch_does_not_unmap(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("mismatch init", plane_kmem_init(), true);
+	failures += test_expect_bool("mismatch alloc",
+				     plane_kmem_alloc(PAGE_SIZE + 1, 0, &addr),
+				     true);
+	failures += test_expect_bool("mismatch free",
+				     plane_kmem_free(addr, 1), false);
+	failures += test_expect_u64("mismatch pmm pages",
+				    allocated_page_count(), 2);
+	failures += test_expect_u64("mismatch mappings", mapping_count(), 2);
+	failures += test_expect_bool("mismatch exact free",
+				     plane_kmem_free(addr, PAGE_SIZE + 1),
+				     true);
+	failures += test_expect_u64("mismatch free pmm pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("mismatch free mappings", mapping_count(), 0);
 	return failures;
 }
 
@@ -352,10 +465,14 @@ int main(void)
 {
 	static const struct test_case cases[] = {
 		TEST_CASE(test_alloc_and_free_pages),
+		TEST_CASE(test_alloc_and_free_bytes),
+		TEST_CASE(test_byte_alloc_rounds_up_to_pages),
 		TEST_CASE(test_zero_flag_reaches_pmm),
+		TEST_CASE(test_byte_zero_flag_reaches_all_pages),
 		TEST_CASE(test_pmm_failure_rolls_back_vaddr),
 		TEST_CASE(test_map_failure_rolls_back_pages),
 		TEST_CASE(test_rejects_invalid_inputs),
+		TEST_CASE(test_byte_free_size_mismatch_does_not_unmap),
 		TEST_CASE(test_rejects_exhausted_records),
 	};
 
