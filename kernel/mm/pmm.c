@@ -5,7 +5,10 @@
 #include <klib/string.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/printk.h>
 #include <plane/util.h>
+
+#include "vm_page_internal.h"
 
 struct pmm_managed_range {
 	uint64_t base;
@@ -428,7 +431,7 @@ bool plane_page_vm_object_offset(const struct plane_page *page,
 	return true;
 }
 
-bool plane_page_attach_vm_object(struct plane_page *page,
+bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
@@ -446,7 +449,7 @@ bool plane_page_attach_vm_object(struct plane_page *page,
 	return true;
 }
 
-bool plane_page_detach_vm_object(struct plane_page *page,
+bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
@@ -966,11 +969,10 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 		return false;
 	}
 
-	if (!set_page_state_range(phys_addr, page_count,
-				  PLANE_PAGE_ALLOCATED,
-				  PLANE_PAGE_FREE)) {
-		return false;
-	}
+	BUG_ON_MSG(!set_page_state_range(phys_addr, page_count,
+					 PLANE_PAGE_ALLOCATED,
+					 PLANE_PAGE_FREE),
+		   "failed to mark PMM pages free");
 
 	for (uint64_t i = 0; i < page_count; i++) {
 		struct plane_page *page;
@@ -985,9 +987,8 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 		page = plane_pmm_phys_to_page(page_phys);
 		page->vm_object = NULL;
 		page->vm_object_offset = 0;
-		if (!free_queue_insert_ordered(page)) {
-			return false;
-		}
+		BUG_ON_MSG(!free_queue_insert_ordered(page),
+			   "failed to insert PMM free page");
 	}
 
 	return true;

@@ -84,16 +84,10 @@ struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr);
 uint64_t plane_page_phys(const struct plane_page *page);
 enum plane_page_state plane_page_state(const struct plane_page *page);
 bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count);
+/* Resident VM object metadata query; mutation belongs to VM object insert/remove. */
 struct plane_vm_object *plane_page_vm_object(const struct plane_page *page);
 bool plane_page_vm_object_offset(const struct plane_page *page,
 				 uint64_t *offset);
-/* VM object resident helpers; prefer vm_object insert/remove callers. */
-bool plane_page_attach_vm_object(struct plane_page *page,
-				 struct plane_vm_object *object,
-				 uint64_t offset);
-bool plane_page_detach_vm_object(struct plane_page *page,
-				 struct plane_vm_object *object,
-				 uint64_t offset);
 struct plane_pmm_stats plane_pmm_get_stats(void);
 void plane_pmm_log_stats(void);
 

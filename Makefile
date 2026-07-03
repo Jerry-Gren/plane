@@ -64,6 +64,7 @@ TEST_BINS := $(patsubst tests/%.c,build/tests/%,$(TEST_SRCS))
 PUBLIC_HEADERS := include/plane/*.h include/hal/*.h
 ARCH_TEST_HEADERS := include/hal/x86_64/*.h
 TEST_SUPPORT_HEADERS := tests/support/*.h
+INTERNAL_TEST_HEADERS := kernel/mm/vm_page_internal.h
 
 -include $(TEST_MKS)
 -include $(DEPS)
@@ -108,7 +109,7 @@ unit-check: $(TEST_BINS)
 		$$test || exit $$?; \
 	done
 
-build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(ARCH_TEST_HEADERS) $(TEST_SUPPORT_HEADERS) $$($$*_test_DEPS)
+build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(ARCH_TEST_HEADERS) $(TEST_SUPPORT_HEADERS) $(INTERNAL_TEST_HEADERS) $$($$*_test_DEPS)
 	@echo "  HOSTCC  $@"
 	@mkdir -p $(dir $@)
 	@$(HOSTCC) $(HOSTCFLAGS) $< $($*_test_DEPS) -o $@

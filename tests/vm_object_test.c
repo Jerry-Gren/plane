@@ -4,6 +4,7 @@
 #include <plane/vm_object.h>
 
 #include "support/test.h"
+#include "../kernel/mm/vm_page_internal.h"
 
 #define TEST_OBJECT_PAGES 8
 #define TEST_OBJECT_SIZE (TEST_OBJECT_PAGES * PAGE_SIZE)
@@ -51,7 +52,7 @@ bool plane_page_vm_object_offset(const struct plane_page *page, uint64_t *offset
 	return true;
 }
 
-bool plane_page_attach_vm_object(struct plane_page *page,
+bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
@@ -67,7 +68,7 @@ bool plane_page_attach_vm_object(struct plane_page *page,
 	return true;
 }
 
-bool plane_page_detach_vm_object(struct plane_page *page,
+bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {

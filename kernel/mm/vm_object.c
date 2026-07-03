@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#include "vm_page_internal.h"
+
 static bool is_page_aligned(uint64_t value)
 {
 	return (value & (PAGE_SIZE - 1)) == 0;
@@ -84,7 +86,7 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	if (index < 0) {
 		return false;
 	}
-	if (!plane_page_attach_vm_object(page, object, offset)) {
+	if (!plane_vm_page_attach_object(page, object, offset)) {
 		return false;
 	}
 
@@ -127,7 +129,7 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	}
 
 	page = object->pages[index].page;
-	if (!plane_page_detach_vm_object(page, object, offset)) {
+	if (!plane_vm_page_detach_object(page, object, offset)) {
 		return NULL;
 	}
 	object->pages[index] = (struct plane_vm_object_page){0};
