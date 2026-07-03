@@ -6,7 +6,8 @@
 #include <plane/mm.h>
 #include <plane/pmm.h>
 
-static uint64_t read_cr3_phys(void)
+/* Weak host-test seam; production reads the active CR3 register. */
+__attribute__((weak)) uint64_t x86_64_pmap_current_root_phys(void)
 {
 	uint64_t cr3;
 
@@ -150,6 +151,12 @@ struct pmap_allocated_table {
 	uint64_t phys_addr;
 };
 
+struct pmap_walk_entry {
+	uint64_t *table;
+	uint64_t index;
+	uint64_t phys_addr;
+};
+
 static bool pmap_vaddr_aligned(uint64_t vaddr)
 {
 	return (vaddr & (PAGE_SIZE - 1)) == 0;
@@ -225,6 +232,17 @@ static bool pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 	return true;
 }
 
+static bool pmap_table_empty(uint64_t *table)
+{
+	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
+		if (page_table_entry_present(table[i])) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 static bool pmap_alloc_child_table(uint64_t *parent,
 				   uint64_t index,
 				   struct pmap_allocated_table *allocated,
@@ -255,10 +273,10 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 	return true;
 }
 
-bool x86_64_pmap_map_page(uint64_t root_pml4_phys,
-			  uint64_t vaddr,
-			  uint64_t phys_addr,
-			  uint32_t flags)
+bool x86_64_pmap_map_page_in_owned_root(uint64_t root_pml4_phys,
+					uint64_t vaddr,
+					uint64_t phys_addr,
+					uint32_t flags)
 {
 	struct pmap_allocated_table allocated[3];
 	uint64_t allocated_count = 0;
@@ -328,13 +346,15 @@ bool x86_64_pmap_map_page(uint64_t root_pml4_phys,
 
 	table[PT_INDEX(vaddr)] =
 		page_table_entry_make(phys_addr, pmap_flags_to_entry_flags(flags));
-	hal_mmu_invalidate_tlb((uintptr_t)vaddr);
 	return true;
 }
 
-bool x86_64_pmap_unmap_page(uint64_t root_pml4_phys, uint64_t vaddr)
+bool x86_64_pmap_unmap_page_in_owned_root(uint64_t root_pml4_phys,
+					  uint64_t vaddr)
 {
 	uint64_t current_phys = root_pml4_phys;
+	struct pmap_walk_entry path[4];
+	uint64_t depth = 0;
 
 	if (!pmap_vaddr_aligned(vaddr) || !pmap_phys_aligned(root_pml4_phys)) {
 		return false;
@@ -342,13 +362,20 @@ bool x86_64_pmap_unmap_page(uint64_t root_pml4_phys, uint64_t vaddr)
 
 	for (uint8_t level = 4; level > 1; level--) {
 		uint64_t *table = direct_map_page_table(current_phys);
+		uint64_t index;
 		uint64_t entry;
 
 		if (table == NULL) {
 			return false;
 		}
 
-		entry = table[pmap_level_index(vaddr, level)];
+		index = pmap_level_index(vaddr, level);
+		path[depth].table = table;
+		path[depth].index = index;
+		path[depth].phys_addr = current_phys;
+		depth++;
+
+		entry = table[index];
 		if (!page_table_entry_present(entry) ||
 		    page_table_entry_is_leaf(entry, level)) {
 			return false;
@@ -363,14 +390,33 @@ bool x86_64_pmap_unmap_page(uint64_t root_pml4_phys, uint64_t vaddr)
 		return false;
 	}
 
+	path[depth].table = table;
+	path[depth].index = PT_INDEX(vaddr);
+	path[depth].phys_addr = current_phys;
+	depth++;
+
 	table[PT_INDEX(vaddr)] = 0;
-	hal_mmu_invalidate_tlb((uintptr_t)vaddr);
+
+	for (uint64_t i = depth - 1; i > 0; i--) {
+		struct pmap_walk_entry *child = &path[i];
+		struct pmap_walk_entry *parent = &path[i - 1];
+
+		if (!pmap_table_empty(child->table)) {
+			break;
+		}
+
+		if (!plane_pmm_free_page_phys(child->phys_addr)) {
+			return false;
+		}
+		parent->table[parent->index] = 0;
+	}
+
 	return true;
 }
 
-bool x86_64_pmap_translate(uint64_t root_pml4_phys,
-			   uint64_t vaddr,
-			   uint64_t *phys_addr)
+bool x86_64_pmap_translate_in_root(uint64_t root_pml4_phys,
+				   uint64_t vaddr,
+				   uint64_t *phys_addr)
 {
 	uint64_t current_phys = root_pml4_phys;
 
@@ -405,11 +451,41 @@ bool x86_64_pmap_translate(uint64_t root_pml4_phys,
 	return false;
 }
 
+bool x86_64_pmap_map_kernel_page(uint64_t vaddr,
+				 uint64_t phys_addr,
+				 uint32_t flags)
+{
+	if (!x86_64_pmap_map_page_in_owned_root(x86_64_pmap_current_root_phys(),
+						vaddr, phys_addr, flags)) {
+		return false;
+	}
+
+	hal_mmu_invalidate_tlb((uintptr_t)vaddr);
+	return true;
+}
+
+bool x86_64_pmap_unmap_kernel_page(uint64_t vaddr)
+{
+	if (!x86_64_pmap_unmap_page_in_owned_root(x86_64_pmap_current_root_phys(),
+						  vaddr)) {
+		return false;
+	}
+
+	hal_mmu_invalidate_tlb((uintptr_t)vaddr);
+	return true;
+}
+
+bool x86_64_pmap_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
+{
+	return x86_64_pmap_translate_in_root(x86_64_pmap_current_root_phys(),
+					     vaddr, phys_addr);
+}
+
 bool hal_mmu_take_kernel_page_table_ownership(void)
 {
 	uint64_t new_pml4_phys;
 
-	if (!x86_64_pmap_clone_kernel_page_tables(read_cr3_phys(),
+	if (!x86_64_pmap_clone_kernel_page_tables(x86_64_pmap_current_root_phys(),
 						  &new_pml4_phys)) {
 		return false;
 	}

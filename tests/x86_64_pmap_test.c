@@ -17,6 +17,7 @@ static uint8_t phys_storage[TEST_PHYS_SIZE] __attribute__((aligned(PAGE_SIZE)));
 static bool page_allocated[TEST_PAGE_COUNT];
 static uint64_t alloc_attempts;
 static uint64_t alloc_fail_after;
+static uint64_t free_fail_phys;
 static uint64_t direct_map_blocked_phys;
 static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
@@ -25,6 +26,11 @@ static uint64_t flush_count;
 static uint64_t test_page_phys(uint64_t page)
 {
 	return page * PAGE_SIZE;
+}
+
+uint64_t x86_64_pmap_current_root_phys(void)
+{
+	return test_page_phys(0);
 }
 
 static uint64_t *test_table(uint64_t page)
@@ -61,6 +67,7 @@ static void reset_pmap_test(void)
 	memset(page_allocated, 0, sizeof(page_allocated));
 	alloc_attempts = 0;
 	alloc_fail_after = UINT64_MAX;
+	free_fail_phys = UINT64_MAX;
 	direct_map_blocked_phys = UINT64_MAX;
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
@@ -142,6 +149,10 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 		return false;
 	}
 
+	if (phys_addr == free_fail_phys) {
+		return false;
+	}
+
 	page_allocated[page] = false;
 	return true;
 }
@@ -158,16 +169,16 @@ static int test_map_page_allocates_missing_path(void)
 	int failures = 0;
 
 	failures += test_expect_bool("map missing path",
-				     x86_64_pmap_map_page(
+				     x86_64_pmap_map_page_in_owned_root(
 					     test_page_phys(0), vaddr, phys,
 					     X86_64_PMAP_WRITE),
 				     true);
 	failures += test_expect_u64("map allocated intermediate tables",
 				    allocated_page_count(), 3);
-	failures += test_expect_u64("map invalidates one page",
-				    invalidate_count, 1);
-	failures += test_expect_u64("map invalidated vaddr",
-				    invalidated_vaddr, vaddr);
+	failures += test_expect_u64("root map does not invalidate",
+				    invalidate_count, 0);
+	failures += test_expect_u64("root map leaves invalidated vaddr",
+				    invalidated_vaddr, UINTPTR_MAX);
 
 	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[PML4_INDEX(vaddr)]));
 	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[PDPT_INDEX(vaddr)]));
@@ -185,7 +196,7 @@ static int test_map_page_allocates_missing_path(void)
 				    pt[PT_INDEX(vaddr)],
 				    phys | PAGE_PRESENT | PAGE_RW);
 	failures += test_expect_bool("map translate",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr, &out),
 				     true);
 	failures += test_expect_u64("map translate phys", out, phys);
@@ -202,18 +213,36 @@ static int test_map_page_reuses_existing_tables(void)
 	int failures = 0;
 
 	failures += test_expect_bool("map first page",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr, phys, 0),
 				     true);
 	failures += test_expect_bool("map adjacent page",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  next_vaddr,
 							  next_phys, 0),
 				     true);
 	failures += test_expect_u64("map reuse allocation count",
 				    allocated_page_count(), 3);
-	failures += test_expect_u64("map reuse invalidate count",
-				    invalidate_count, 2);
+	failures += test_expect_u64("root map reuse invalidate count",
+				    invalidate_count, 0);
+
+	return failures;
+}
+
+static int test_active_kernel_map_invalidates(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	failures += test_expect_bool("active map",
+				     x86_64_pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     X86_64_PMAP_WRITE),
+				     true);
+	failures += test_expect_u64("active map invalidates",
+				    invalidate_count, 1);
+	failures += test_expect_u64("active map invalidated vaddr",
+				    invalidated_vaddr, vaddr);
 
 	return failures;
 }
@@ -224,23 +253,23 @@ static int test_map_page_rejects_invalid_inputs(void)
 	int failures = 0;
 
 	failures += test_expect_bool("map reject unaligned vaddr",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr + 1,
 							  0x12345000ull, 0),
 				     false);
 	failures += test_expect_bool("map reject unaligned phys",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345001ull, 0),
 				     false);
 	failures += test_expect_bool("map reject bad flags",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull,
 							  BIT(31)),
 				     false);
 	failures += test_expect_bool("map reject unaligned root",
-				     x86_64_pmap_map_page(test_page_phys(0) + 1,
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0) + 1,
 							  vaddr,
 							  0x12345000ull, 0),
 				     false);
@@ -256,12 +285,12 @@ static int test_map_page_rejects_existing_leaf(void)
 	int failures = 0;
 
 	failures += test_expect_bool("map original leaf",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull, 0),
 				     true);
 	failures += test_expect_bool("map reject duplicate leaf",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12346000ull, 0),
 				     false);
@@ -283,7 +312,7 @@ static int test_map_page_rejects_huge_intermediate(void)
 				  PAGE_PS;
 
 	failures += test_expect_bool("map reject huge intermediate",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull, 0),
 				     false);
@@ -300,7 +329,7 @@ static int test_map_page_rolls_back_on_allocation_failure(void)
 
 	alloc_fail_after = 2;
 	failures += test_expect_bool("map allocation failure",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull, 0),
 				     false);
@@ -317,7 +346,7 @@ static int test_map_page_rolls_back_on_direct_map_failure(void)
 
 	direct_map_blocked_phys = test_page_phys(TEST_ALLOC_START_PAGE + 1);
 	failures += test_expect_bool("map direct-map failure",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull, 0),
 				     false);
@@ -350,31 +379,31 @@ static int test_translate_handles_leaf_sizes(void)
 		PAGE_PS;
 
 	failures += test_expect_bool("translate 4k leaf",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr_4k, &out),
 				     true);
 	failures += test_expect_u64("translate 4k phys",
 				    out, 0x12345000ull + 0x123);
 	failures += test_expect_bool("translate 2m leaf",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr_2m, &out),
 				     true);
 	failures += test_expect_u64("translate 2m phys",
 				    out, 0x200000ull + (vaddr_2m &
 							(ARCH_LARGE_PAGE_SIZE - 1)));
 	failures += test_expect_bool("translate 1g leaf",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr_1g, &out),
 				     true);
 	failures += test_expect_u64("translate 1g phys",
 				    out, 0x40000000ull + (vaddr_1g &
 							  (ARCH_HUGE_PAGE_SIZE - 1)));
 	failures += test_expect_bool("translate absent",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    0x1000, &out),
 				     false);
 	failures += test_expect_bool("translate reject null out",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr_4k, NULL),
 				     false);
 
@@ -388,7 +417,7 @@ static int test_unmap_page_clears_leaf(void)
 	int failures = 0;
 
 	failures += test_expect_bool("unmap setup map",
-				     x86_64_pmap_map_page(test_page_phys(0),
+				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull, 0),
 				     true);
@@ -396,21 +425,123 @@ static int test_unmap_page_clears_leaf(void)
 	invalidated_vaddr = UINTPTR_MAX;
 
 	failures += test_expect_bool("unmap leaf",
-				     x86_64_pmap_unmap_page(test_page_phys(0),
+				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr),
 				     true);
-	failures += test_expect_u64("unmap invalidate count",
-				    invalidate_count, 1);
-	failures += test_expect_u64("unmap invalidated vaddr",
-				    invalidated_vaddr, vaddr);
+	failures += test_expect_u64("root unmap does not invalidate",
+				    invalidate_count, 0);
+	failures += test_expect_u64("root unmap leaves invalidated vaddr",
+				    invalidated_vaddr, UINTPTR_MAX);
+	failures += test_expect_u64("root unmap frees empty tables",
+				    allocated_page_count(), 0);
 	failures += test_expect_bool("unmap translate missing",
-				     x86_64_pmap_translate(test_page_phys(0),
+				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr, &out),
 				     false);
 	failures += test_expect_bool("unmap reject double unmap",
-				     x86_64_pmap_unmap_page(test_page_phys(0),
+				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr),
 				     false);
+
+	return failures;
+}
+
+static int test_unmap_preserves_parent_on_free_failure(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t pdpt_phys;
+	uint64_t pd_phys;
+	uint64_t pt_phys;
+	uint64_t *pdpt;
+	uint64_t *pd;
+	uint64_t *pt;
+	uint64_t parent_entry;
+	int failures = 0;
+
+	failures += test_expect_bool("free failure setup map",
+				     x86_64_pmap_map_page_in_owned_root(
+					     test_page_phys(0), vaddr,
+					     0x12345000ull, 0),
+				     true);
+
+	pdpt_phys = pte_phys(pml4[PML4_INDEX(vaddr)]);
+	pdpt = hal_mmu_direct_phys_to_virt(pdpt_phys);
+	pd_phys = pte_phys(pdpt[PDPT_INDEX(vaddr)]);
+	pd = hal_mmu_direct_phys_to_virt(pd_phys);
+	pt_phys = pte_phys(pd[PD_INDEX(vaddr)]);
+	pt = hal_mmu_direct_phys_to_virt(pt_phys);
+	parent_entry = pd[PD_INDEX(vaddr)];
+
+	free_fail_phys = pt_phys;
+	failures += test_expect_bool("unmap reports free failure",
+				     x86_64_pmap_unmap_page_in_owned_root(
+					     test_page_phys(0), vaddr),
+				     false);
+	failures += test_expect_u64("unmap preserves parent entry",
+				    pd[PD_INDEX(vaddr)], parent_entry);
+	failures += test_expect_u64("unmap keeps failed table allocated",
+				    allocated_page_count(), 3);
+	failures += test_expect_u64("unmap clears requested leaf",
+				    pt[PT_INDEX(vaddr)], 0);
+
+	return failures;
+}
+
+static int test_active_kernel_unmap_invalidates(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	failures += test_expect_bool("active unmap setup",
+				     x86_64_pmap_map_page_in_owned_root(
+					     test_page_phys(0), vaddr,
+					     0x12345000ull, 0),
+				     true);
+	invalidate_count = 0;
+	invalidated_vaddr = UINTPTR_MAX;
+
+	failures += test_expect_bool("active unmap",
+				     x86_64_pmap_unmap_kernel_page(vaddr),
+				     true);
+	failures += test_expect_u64("active unmap invalidates",
+				    invalidate_count, 1);
+	failures += test_expect_u64("active unmap invalidated vaddr",
+				    invalidated_vaddr, vaddr);
+
+	return failures;
+}
+
+static int test_unmap_keeps_shared_tables_until_empty(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t next_vaddr = vaddr + PAGE_SIZE;
+	int failures = 0;
+
+	failures += test_expect_bool("shared setup first",
+				     x86_64_pmap_map_page_in_owned_root(
+					     test_page_phys(0), vaddr,
+					     0x12345000ull, 0),
+				     true);
+	failures += test_expect_bool("shared setup second",
+				     x86_64_pmap_map_page_in_owned_root(
+					     test_page_phys(0), next_vaddr,
+					     0x12346000ull, 0),
+				     true);
+	failures += test_expect_u64("shared setup tables",
+				    allocated_page_count(), 3);
+	failures += test_expect_bool("shared unmap first",
+				     x86_64_pmap_unmap_page_in_owned_root(
+					     test_page_phys(0), vaddr),
+				     true);
+	failures += test_expect_u64("shared tables remain",
+				    allocated_page_count(), 3);
+	failures += test_expect_bool("shared unmap second",
+				     x86_64_pmap_unmap_page_in_owned_root(
+					     test_page_phys(0), next_vaddr),
+				     true);
+	failures += test_expect_u64("shared tables freed",
+				    allocated_page_count(), 0);
 
 	return failures;
 }
@@ -423,11 +554,11 @@ static int test_unmap_page_rejects_invalid_paths(void)
 	int failures = 0;
 
 	failures += test_expect_bool("unmap reject unaligned",
-				     x86_64_pmap_unmap_page(test_page_phys(0),
+				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr + 1),
 				     false);
 	failures += test_expect_bool("unmap reject absent",
-				     x86_64_pmap_unmap_page(test_page_phys(0),
+				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr),
 				     false);
 
@@ -435,7 +566,7 @@ static int test_unmap_page_rejects_invalid_paths(void)
 	pdpt[PDPT_INDEX(vaddr)] = 0x40000000ull | PAGE_PRESENT | PAGE_RW |
 				  PAGE_PS;
 	failures += test_expect_bool("unmap reject huge leaf",
-				     x86_64_pmap_unmap_page(test_page_phys(0),
+				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr),
 				     false);
 
@@ -578,6 +709,7 @@ int main(void)
 	static const struct test_case cases[] = {
 		TEST_CASE(test_map_page_allocates_missing_path),
 		TEST_CASE(test_map_page_reuses_existing_tables),
+		TEST_CASE(test_active_kernel_map_invalidates),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),
 		TEST_CASE(test_map_page_rejects_existing_leaf),
 		TEST_CASE(test_map_page_rejects_huge_intermediate),
@@ -585,6 +717,9 @@ int main(void)
 		TEST_CASE(test_map_page_rolls_back_on_direct_map_failure),
 		TEST_CASE(test_translate_handles_leaf_sizes),
 		TEST_CASE(test_unmap_page_clears_leaf),
+		TEST_CASE(test_unmap_preserves_parent_on_free_failure),
+		TEST_CASE(test_active_kernel_unmap_invalidates),
+		TEST_CASE(test_unmap_keeps_shared_tables_until_empty),
 		TEST_CASE(test_unmap_page_rejects_invalid_paths),
 		TEST_CASE(test_clone_copies_4k_leaf_path),
 		TEST_CASE(test_clone_preserves_huge_leaf_entries),
