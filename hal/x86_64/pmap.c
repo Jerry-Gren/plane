@@ -106,6 +106,9 @@ static bool clone_page_table(uint64_t source_phys,
 	if (clone == NULL) {
 		BUG_ON_MSG(!plane_pmm_free_page_phys(new_phys),
 			   "failed to free unreachable page table");
+		BUG_ON_MSG(true,
+			   "allocated page table is not direct-map reachable: phys=0x%016llx",
+			   (unsigned long long)new_phys);
 		return false;
 	}
 
@@ -219,7 +222,7 @@ static bool pmap_flags_valid(uint32_t flags)
 	return (flags & ~X86_64_PMAP_WRITE) == 0;
 }
 
-static bool pmap_free_allocated_tables(struct pmap_allocated_table *tables,
+static void pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 				       uint64_t count)
 {
 	while (count > 0) {
@@ -230,8 +233,6 @@ static bool pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 		table->parent[table->index] = 0;
 		count--;
 	}
-
-	return true;
 }
 
 static bool pmap_table_empty(uint64_t *table)
@@ -261,6 +262,9 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 	if (direct_map_page_table(phys_addr) == NULL) {
 		BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),
 			   "failed to free unreachable child page table");
+		BUG_ON_MSG(true,
+			   "allocated child page table is not direct-map reachable: phys=0x%016llx",
+			   (unsigned long long)phys_addr);
 		return false;
 	}
 
@@ -298,10 +302,7 @@ bool x86_64_pmap_map_page_in_owned_root(uint64_t root_pml4_phys,
 
 		table = direct_map_page_table(current_phys);
 		if (table == NULL) {
-			if (!pmap_free_allocated_tables(allocated,
-							allocated_count)) {
-				return false;
-			}
+			pmap_free_allocated_tables(allocated, allocated_count);
 			return false;
 		}
 
@@ -309,10 +310,8 @@ bool x86_64_pmap_map_page_in_owned_root(uint64_t root_pml4_phys,
 		entry = table[index];
 		if (page_table_entry_present(entry)) {
 			if (page_table_entry_is_leaf(entry, level)) {
-				if (!pmap_free_allocated_tables(allocated,
-								allocated_count)) {
-					return false;
-				}
+				pmap_free_allocated_tables(allocated,
+							   allocated_count);
 				return false;
 			}
 			current_phys = page_table_entry_phys(entry);
@@ -321,10 +320,7 @@ bool x86_64_pmap_map_page_in_owned_root(uint64_t root_pml4_phys,
 
 		if (!pmap_alloc_child_table(table, index, allocated,
 					    &allocated_count, &child_phys)) {
-			if (!pmap_free_allocated_tables(allocated,
-							allocated_count)) {
-				return false;
-			}
+			pmap_free_allocated_tables(allocated, allocated_count);
 			return false;
 		}
 		current_phys = child_phys;
@@ -332,16 +328,12 @@ bool x86_64_pmap_map_page_in_owned_root(uint64_t root_pml4_phys,
 
 	table = direct_map_page_table(current_phys);
 	if (table == NULL) {
-		if (!pmap_free_allocated_tables(allocated, allocated_count)) {
-			return false;
-		}
+		pmap_free_allocated_tables(allocated, allocated_count);
 		return false;
 	}
 
 	if (page_table_entry_present(table[PT_INDEX(vaddr)])) {
-		if (!pmap_free_allocated_tables(allocated, allocated_count)) {
-			return false;
-		}
+		pmap_free_allocated_tables(allocated, allocated_count);
 		return false;
 	}
 

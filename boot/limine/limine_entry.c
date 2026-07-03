@@ -174,11 +174,11 @@ void _start(void)
 		   "limine base revision is not supported");
 
 	struct boot_info b_info = {0};
-	
+
 	boot_limine_collect_hhdm();
 	boot_limine_collect_framebuffer(&b_info.video);
 	boot_limine_collect_memmap(&b_info.mem);
-	
+
 	kmain(&b_info);
 
 	hal_cpu_hang();

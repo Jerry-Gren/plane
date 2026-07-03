@@ -366,23 +366,6 @@ static int test_map_page_rolls_back_on_allocation_failure(void)
 	return failures;
 }
 
-static int test_map_page_rolls_back_on_direct_map_failure(void)
-{
-	uint64_t vaddr = 0xffff800000402000ull;
-	int failures = 0;
-
-	direct_map_blocked_phys = test_page_phys(TEST_ALLOC_START_PAGE + 1);
-	failures += test_expect_bool("map direct-map failure",
-				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
-							  vaddr,
-							  0x12345000ull, 0),
-				     false);
-	failures += test_expect_u64("map direct-map rollback",
-				    allocated_page_count(), 0);
-
-	return failures;
-}
-
 static int test_translate_handles_leaf_sizes(void)
 {
 	uint64_t *pml4 = test_table(0);
@@ -700,7 +683,6 @@ int main(void)
 		TEST_CASE(test_map_page_rejects_existing_leaf),
 		TEST_CASE(test_map_page_rejects_huge_intermediate),
 		TEST_CASE(test_map_page_rolls_back_on_allocation_failure),
-		TEST_CASE(test_map_page_rolls_back_on_direct_map_failure),
 		TEST_CASE(test_translate_handles_leaf_sizes),
 		TEST_CASE(test_unmap_page_clears_leaf),
 		TEST_CASE(test_active_kernel_unmap_invalidates),

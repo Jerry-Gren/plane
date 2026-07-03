@@ -32,13 +32,13 @@ static bool checked_u64_mul(uint64_t lhs, uint64_t rhs, uint64_t *out)
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
 					 uint64_t *framebuffer_phys_addr,
-					 uint64_t *framebuffer_size) {
-	
+					 uint64_t *framebuffer_size)
+{
 	/* struct multiboot_tag_framebuffer_common
 	 * {
 	 *     multiboot_uint32_t type;
 	 *     multiboot_uint32_t size;
-	 * 
+	 *
 	 *     multiboot_uint64_t framebuffer_addr;
 	 *     multiboot_uint32_t framebuffer_pitch;
 	 *     multiboot_uint32_t framebuffer_width;
@@ -47,7 +47,7 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	 *     multiboot_uint8_t framebuffer_type;
 	 *     multiboot_uint16_t reserved;
 	 * }
-	 * 
+	 *
 	 * struct multiboot_tag_framebuffer
 	 * {
 	 *     struct multiboot_tag_framebuffer_common common;
@@ -92,6 +92,7 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 
 	uint64_t phys_addr = fb_common->framebuffer_addr;
 	uint64_t fb_size;
+
 	BUG_ON_MSG(!checked_u64_mul(video->pitch, video->height, &fb_size),
 		   "multiboot2 framebuffer size overflow: pitch=%u height=%u",
 		   video->pitch, video->height);
@@ -109,9 +110,11 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 {
 	multiboot_memory_map_t *entry = mmap_tag->entries;
 	uint32_t entry_size = mmap_tag->entry_size;
+
 	BUG_ON_MSG(mmap_tag->size < sizeof(struct multiboot_tag_mmap),
 		   "multiboot2 mmap tag too small: size=%u min=%zu",
 		   mmap_tag->size, sizeof(struct multiboot_tag_mmap));
+
 	BUG_ON_MSG(entry_size < sizeof(multiboot_memory_map_t),
 		   "multiboot2 mmap entry too small: entry_size=%u min=%zu",
 		   entry_size, sizeof(multiboot_memory_map_t));
@@ -168,7 +171,8 @@ static void boot_mb2_add_reservations(struct boot_info *info,
 				      uint64_t mb2_info_addr,
 				      uint64_t mb2_info_size,
 				      uint64_t framebuffer_phys_addr,
-				      uint64_t framebuffer_size) {
+				      uint64_t framebuffer_size)
+{
 	BUG_ON_MSG(!plane_memmap_reserve(&info->mem, mb2_info_addr,
 					 mb2_info_size,
 					 PLANE_MEM_BOOTLOADER_RECLAIMABLE),
@@ -187,7 +191,7 @@ static void boot_mb2_add_reservations(struct boot_info *info,
 void mb2_entry(uint64_t magic, uint64_t info_addr)
 {
 	hal_serial_init();
-	
+
 	/* check magic number passed by multiboot2 */
 	BUG_ON_MSG(magic != MULTIBOOT2_BOOTLOADER_MAGIC,
 		   "bad multiboot2 magic: 0x%016llx",
@@ -199,6 +203,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 
 	void *info_vaddr = boot_mb2_arch_phys_to_virt(info_addr);
 	struct multiboot_info_base *info_base = info_vaddr;
+
 	BUG_ON_MSG(info_base->total_size < sizeof(struct multiboot_info_base) +
 		   sizeof(struct multiboot_tag),
 		   "multiboot2 info too small: total_size=%u",

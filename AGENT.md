@@ -65,6 +65,11 @@ to rewrite whole files unless explicitly asked; prefer small, manual patches.
   capabilities, or initialization failures where continuing would be unsafe.
 - Use `WARN_ON*()` only when the kernel can continue running and the condition
   is still worth recording.
+- `BUG_ON*()` and `WARN_ON*()` conditions are evaluated, following Linux
+  kernel-style semantics rather than C `assert()`/`NDEBUG` semantics.
+- Simple must-succeed boolean calls are acceptable in `BUG_ON_MSG(!fn(...))`.
+  Split complex rollback, multi-step actions, multiple results, or unclear
+  `WARN_ON*()` side effects into named local variables.
 - Library-style helpers should usually return `false` or an error sentinel and
   let the caller decide whether to `BUG_ON_MSG()`.
 - Do not use silent `hal_cpu_hang()` from C paths when printk/serial

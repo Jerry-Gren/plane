@@ -124,10 +124,11 @@ static bool map_allocated_pages(uint64_t vaddr,
 		if (phys_addr == UINT64_MAX ||
 		    !hal_mmu_map_kernel_page(page_vaddr, phys_addr,
 					     HAL_MMU_MAP_WRITE)) {
-			BUG_ON_MSG(!rollback_allocated_page(phys_addr),
-				   "failed to rollback kmem physical page");
-			BUG_ON_MSG(!rollback_mapped_pages(vaddr, mapped_pages),
-				   "failed to rollback kmem mappings");
+			bool page_ok = rollback_allocated_page(phys_addr);
+			bool mappings_ok = rollback_mapped_pages(vaddr, mapped_pages);
+
+			BUG_ON_MSG(!page_ok, "failed to rollback kmem physical page");
+			BUG_ON_MSG(!mappings_ok, "failed to rollback kmem mappings");
 			return false;
 		}
 
@@ -217,7 +218,6 @@ bool plane_kmem_free_pages(void *vaddr, uint64_t page_count)
 
 	BUG_ON_MSG(!rollback_mapped_pages(addr, page_count),
 		   "failed to release kmem backing pages");
-
 	BUG_ON_MSG(!plane_kernel_map_free_pages(addr, page_count),
 		   "failed to release kmem virtual reservation");
 	return true;
