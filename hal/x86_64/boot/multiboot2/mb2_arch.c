@@ -15,7 +15,8 @@ void *boot_mb2_arch_phys_to_virt(uint64_t phys_addr)
 }
 
 bool boot_mb2_arch_map_framebuffer(uint64_t phys_addr, uint64_t size,
-				   void **vaddr) {
+				   void **vaddr)
+{
 	return x86_64_mb2_early_map_framebuffer(phys_addr, size, vaddr);
 }
 

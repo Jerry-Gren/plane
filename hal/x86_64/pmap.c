@@ -222,10 +222,10 @@ static bool pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 	while (count > 0) {
 		struct pmap_allocated_table *table = &tables[count - 1];
 
-		table->parent[table->index] = 0;
 		if (!plane_pmm_free_page_phys(table->phys_addr)) {
 			return false;
 		}
+		table->parent[table->index] = 0;
 		count--;
 	}
 

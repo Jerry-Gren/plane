@@ -224,15 +224,13 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 		if (tag->type == MULTIBOOT_TAG_TYPE_END) {
 			break;
 		}
-		
+
 		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
 			struct multiboot_tag_framebuffer *fb_tag = (struct multiboot_tag_framebuffer *)tag;
 			boot_mb2_collect_framebuffer(&b_info.video, fb_tag,
 						     &framebuffer_phys_addr,
 						     &framebuffer_size);
-		}
-
-		else if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
+		} else if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
 			struct multiboot_tag_mmap *mmap_tag = (struct multiboot_tag_mmap *)tag;
 			boot_mb2_collect_mmap(&b_info.mem, mmap_tag);
 		}
