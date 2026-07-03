@@ -4,6 +4,7 @@
 
 #include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/pmap.h>
+#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
 
@@ -13,7 +14,7 @@
 #define TEST_ALLOC_START_PAGE 16
 #define TEST_PHYS_SIZE (TEST_PAGE_COUNT * PAGE_SIZE)
 
-static uint8_t phys_storage[TEST_PHYS_SIZE] __attribute__((aligned(PAGE_SIZE)));
+static uint8_t phys_storage[TEST_PHYS_SIZE] __aligned(PAGE_SIZE);
 static bool page_allocated[TEST_PAGE_COUNT];
 static uint64_t alloc_attempts;
 static uint64_t alloc_fail_after;

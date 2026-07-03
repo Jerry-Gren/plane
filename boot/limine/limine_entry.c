@@ -8,46 +8,47 @@
 #include <hal/serial.h>
 
 #include <plane/boot_info.h>
+#include <plane/compiler.h>
 #include <plane/entry.h>
 #include <plane/printk.h>
 
-// Set the base revision to 6, this is recommended as this is the latest
-// base revision described by the Limine boot protocol specification.
-// See specification for further info.
+/*
+ * Set the recommended Limine base revision.
+ * See the Limine boot protocol specification for details.
+ */
 
-__attribute__((used, section(".limine_requests")))
+__used __section(".limine_requests")
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
 
-// The Limine requests can be placed anywhere, but it is important that
-// the compiler does not optimise them away, so, usually, they should
-// be made volatile or equivalent, _and_ they should be accessed at least
-// once or marked as used with the "used" attribute as done here.
+/*
+ * Limine requests must not be optimized away, so keep them volatile and
+ * explicitly marked as used.
+ */
 
-__attribute__((used, section(".limine_requests")))
+__used __section(".limine_requests")
 static volatile struct limine_framebuffer_request framebuffer_request = {
 	.id = LIMINE_FRAMEBUFFER_REQUEST_ID,
 	.revision = 0
 };
 
-__attribute__((used, section(".limine_requests")))
+__used __section(".limine_requests")
 static volatile struct limine_memmap_request memmap_request = {
 	.id = LIMINE_MEMMAP_REQUEST_ID,
 	.revision = 0
 };
 
-__attribute__((used, section(".limine_requests")))
+__used __section(".limine_requests")
 static volatile struct limine_hhdm_request hhdm_request = {
 	.id = LIMINE_HHDM_REQUEST_ID,
 	.revision = 0
 };
 
-// Finally, define the start and end markers for the Limine requests.
-// These can also be moved anywhere, to any .c file, as seen fit.
+/* Mark the start and end of the Limine request list. */
 
-__attribute__((used, section(".limine_requests_start")))
+__used __section(".limine_requests_start")
 static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
 
-__attribute__((used, section(".limine_requests_end")))
+__used __section(".limine_requests_end")
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
 static void boot_limine_collect_framebuffer(struct plane_video_info *video)
@@ -72,7 +73,7 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video)
 	 *     uint8_t unused[7];
 	 *     uint64_t edid_size;
 	 *     LIMINE_PTR(void *) edid;
-	 *     // Response revision 1
+	 *     Response revision 1
 	 *     uint64_t mode_count;
 	 *     LIMINE_PTR(struct limine_video_mode **) modes;
 	 * };

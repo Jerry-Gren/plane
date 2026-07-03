@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <plane/compiler.h>
 #include <plane/memmap.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
@@ -12,7 +13,7 @@ static bool direct_map_available = true;
 #define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
 static uint64_t direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
 static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
-	__attribute__((aligned(PAGE_SIZE)));
+	__aligned(PAGE_SIZE);
 
 void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
 {

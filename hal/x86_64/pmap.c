@@ -3,11 +3,12 @@
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/pmap.h>
+#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
 
 /* Weak host-test seam; production reads the active CR3 register. */
-__attribute__((weak)) uint64_t x86_64_pmap_current_root_phys(void)
+__weak uint64_t x86_64_pmap_current_root_phys(void)
 {
 	uint64_t cr3;
 

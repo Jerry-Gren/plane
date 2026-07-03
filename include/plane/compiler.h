@@ -10,6 +10,11 @@
 #define __noinline      __attribute__((noinline))
 #define __noreturn      __attribute__((noreturn))
 #define __maybe_unused  __attribute__((unused))
+#define __packed        __attribute__((packed))
+#define __used          __attribute__((used))
+#define __weak          __attribute__((weak))
+#define __aligned(x)    __attribute__((aligned(x)))
+#define __section(name) __attribute__((section(name)))
 
 /* GCC only */
 #define __same_type(a, b) __builtin_types_compatible_p(typeof(a), typeof(b))

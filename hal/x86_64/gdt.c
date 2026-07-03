@@ -44,7 +44,7 @@ void x86_64_gdt_init(void)
 
 	/* build gdt */
 	/* 64 bit flat, base=0, limit=0xfffff */
-	// [0] null descriptor
+	/* [0] null descriptor */
 	set_gdt_descriptor(0, 0, 0, 0, 0);
 
 	/* [1] kernel code (cs): dpl 0, code, 64 bit (l=1) */
@@ -63,7 +63,7 @@ void x86_64_gdt_init(void)
 			GDT_ACCESS(1, DPL_USER, 1, TYPE_DATA_RW), 
 			GDT_FLAGS(1, 1, 0, 0));
 
-	// [4] user code (cs): dpl 3, code, 64 bit (l=1)
+	/* [4] user code (cs): dpl 3, code, 64 bit (l=1) */
 	set_gdt_descriptor(4, 0, 0xfffff, 
 			GDT_ACCESS(1, DPL_USER, 1, TYPE_CODE_XR), 
 			GDT_FLAGS(1, 0, 1, 0));

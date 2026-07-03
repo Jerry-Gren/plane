@@ -73,14 +73,14 @@ mb2_info:  .long 0
 .global x86_64_mb2_early_pml4
 .global x86_64_mb2_early_pd_kernel
 .global x86_64_mb2_early_pd_fb
-.align 4096
-x86_64_mb2_early_pml4:      .skip 4096
-early_pdpt_ident:           .skip 4096
-early_pdpt_high:            .skip 4096
-early_pdpt_direct:          .skip 4096
-early_pd_ident:             .skip 4096
-x86_64_mb2_early_pd_kernel: .skip 4096
-x86_64_mb2_early_pd_fb:     .skip 4096
+.align ARCH_PAGE_SIZE
+x86_64_mb2_early_pml4:      .skip ARCH_PAGE_SIZE
+early_pdpt_ident:           .skip ARCH_PAGE_SIZE
+early_pdpt_high:            .skip ARCH_PAGE_SIZE
+early_pdpt_direct:          .skip ARCH_PAGE_SIZE
+early_pd_ident:             .skip ARCH_PAGE_SIZE
+x86_64_mb2_early_pd_kernel: .skip ARCH_PAGE_SIZE
+x86_64_mb2_early_pd_fb:     .skip ARCH_PAGE_SIZE
 early_pd_direct:            .skip (X86_64_DIRECT_MAP_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
 
 .align 16
