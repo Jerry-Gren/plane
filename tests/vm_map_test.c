@@ -11,6 +11,7 @@
 #define TEST_ALLOCATION_RECORDS 128
 #define TEST_LAST_ALLOCATION (TEST_ALLOCATION_RECORDS - 1)
 #define TEST_LAST_FRAGMENTED_ALLOCATION (TEST_ALLOCATION_RECORDS - 4)
+#define TEST_UNMERGEABLE_ALLOCATION (TEST_ALLOCATION_RECORDS - 2)
 
 static int check_stats(const char *name,
 		       uint64_t free_pages,
@@ -232,6 +233,48 @@ static int test_free_merges_when_free_range_list_is_full(void)
 	return failures;
 }
 
+static int test_failed_free_keeps_allocation_record(void)
+{
+	uint64_t addrs[TEST_ALLOCATION_RECORDS];
+	int failures = 0;
+
+	failures += test_expect_bool("failed free init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
+		failures += test_expect_bool("failed free alloc",
+					     plane_kernel_map_alloc_pages(1,
+									  &addrs[i]),
+					     true);
+	}
+
+	for (uint64_t i = 0; i <= TEST_LAST_FRAGMENTED_ALLOCATION; i += 2) {
+		failures += test_expect_bool("failed free fragment",
+					     plane_kernel_map_free_pages(addrs[i],
+									 1),
+					     true);
+	}
+	failures += check_stats("failed free fragmented",
+				TEST_KERNEL_MAP_PAGES - 65, 65, 64, 65);
+
+	failures += test_expect_bool("failed free non-merge",
+				     plane_kernel_map_free_pages(
+					     addrs[TEST_UNMERGEABLE_ALLOCATION], 1),
+				     false);
+	failures += test_expect_bool("failed free record remains",
+				     plane_kernel_map_has_allocation(
+					     addrs[TEST_UNMERGEABLE_ALLOCATION], 1),
+				     true);
+	failures += check_stats("failed free stats unchanged",
+				TEST_KERNEL_MAP_PAGES - 65, 65, 64, 65);
+	failures += test_expect_bool("failed free later merge",
+				     plane_kernel_map_free_pages(
+					     addrs[TEST_LAST_ALLOCATION], 1),
+				     true);
+	return failures;
+}
+
 int main(void)
 {
 	static const struct test_case cases[] = {
@@ -242,6 +285,7 @@ int main(void)
 		TEST_CASE(test_rejects_exhausted_vaddr_space),
 		TEST_CASE(test_rejects_exhausted_records),
 		TEST_CASE(test_free_merges_when_free_range_list_is_full),
+		TEST_CASE(test_failed_free_keeps_allocation_record),
 	};
 
 	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));

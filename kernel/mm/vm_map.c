@@ -313,8 +313,12 @@ bool plane_kernel_map_free_pages(uint64_t vaddr, uint64_t page_count)
 		return false;
 	}
 
+	if (!release_vaddr_range(vaddr, page_count)) {
+		return false;
+	}
+
 	remove_allocation_record((uint64_t)record_index);
-	return release_vaddr_range(vaddr, page_count);
+	return true;
 }
 
 struct plane_vm_map_stats plane_kernel_map_get_stats(void)
