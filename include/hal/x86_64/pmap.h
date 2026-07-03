@@ -10,6 +10,8 @@ enum x86_64_pmap_flags {
 	X86_64_PMAP_WRITE = BIT(0),
 };
 
+uint64_t x86_64_pmap_active_root_phys(void);
+
 /*
  * Testable root helpers. Mutating helpers require a PMM-owned page-table
  * root because they may allocate or free page-table pages. They do not

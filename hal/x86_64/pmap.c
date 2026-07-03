@@ -3,36 +3,14 @@
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/pmap.h>
-#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
 
-static uint64_t read_cr3_root_phys(void)
-{
-	uint64_t cr3;
-
-	__asm__ volatile ("mov %%cr3, %0" : "=r" (cr3));
-	return cr3 & X86_64_PAGE_ENTRY_ADDR_MASK;
-}
-
-#ifdef PLANE_HOST_TEST
-/* Weak host-test seam; production reads CR3 directly. */
-__weak uint64_t x86_64_pmap_test_current_root_phys(void)
-{
-	return read_cr3_root_phys();
-}
-
 static uint64_t pmap_current_root_phys(void)
 {
-	return x86_64_pmap_test_current_root_phys();
+	return x86_64_pmap_active_root_phys();
 }
-#else
-static uint64_t pmap_current_root_phys(void)
-{
-	return read_cr3_root_phys();
-}
-#endif
 
 static void write_cr3_phys(uint64_t phys_addr)
 {
