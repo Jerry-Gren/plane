@@ -6,6 +6,7 @@
 
 #include <plane/vm_prot.h>
 
+/* Use the returned user virtual address as the object offset. */
 #define PLANE_VM_MAP_OBJECT_OFFSET_AUTO UINT64_MAX
 
 struct plane_vm_object;

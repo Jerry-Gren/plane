@@ -418,6 +418,53 @@ static int test_wire_rejects_invalid_pages(void)
 	return failures;
 }
 
+static int test_page_object_identity_blocks_free(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_vm_object *object =
+		(struct plane_vm_object *)(uintptr_t)&mem;
+	struct plane_page *page;
+	uint64_t offset = 0;
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("object identity init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("object identity alloc",
+				     plane_pmm_alloc_page_phys(&phys), true);
+	page = plane_pmm_phys_to_page(phys);
+	failures += test_expect_null("object identity initial object",
+				     plane_page_vm_object(page));
+	failures += test_expect_bool("object identity initial offset",
+				     plane_page_vm_object_offset(page, &offset),
+				     false);
+	failures += test_expect_bool("object identity attach",
+				     plane_page_attach_vm_object(page, object,
+								 0x4000),
+				     true);
+	failures += test_expect_ptr("object identity object",
+				    plane_page_vm_object(page), object);
+	failures += test_expect_bool("object identity offset query",
+				     plane_page_vm_object_offset(page, &offset),
+				     true);
+	failures += test_expect_u64("object identity offset", offset, 0x4000);
+	failures += test_expect_bool("object identity free rejected",
+				     plane_pmm_free_page_phys(phys), false);
+	failures += test_expect_bool("object identity detach",
+				     plane_page_detach_vm_object(page, object,
+								 0x4000),
+				     true);
+	failures += test_expect_null("object identity cleared object",
+				     plane_page_vm_object(page));
+	failures += test_expect_bool("object identity cleared offset",
+				     plane_page_vm_object_offset(page, &offset),
+				     false);
+	failures += test_expect_bool("object identity free",
+				     plane_pmm_free_page_phys(phys), true);
+	return failures;
+}
+
 static int test_grub_like_reservations_are_counted(void)
 {
 	struct plane_mem_info mem = {0};
@@ -895,6 +942,7 @@ int main(void)
 		TEST_CASE(test_page_api_allocates_and_frees_metadata),
 		TEST_CASE(test_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_wire_rejects_invalid_pages),
+		TEST_CASE(test_page_object_identity_blocks_free),
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),
 		TEST_CASE(test_single_page_allocation_order_and_exhaustion),

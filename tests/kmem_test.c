@@ -15,6 +15,7 @@
 #define TEST_PAGE_COUNT 256
 #define TEST_MAP_COUNT 256
 #define TEST_KMEM_SIZE (TEST_KMEM_PAGES * PAGE_SIZE)
+#define TEST_KMEM_OBJECT_SIZE (TEST_KMEM_BASE + TEST_KMEM_SIZE)
 #define TEST_ALLOCATION_RECORDS 128
 
 static struct plane_vm_map_entry test_map_entries[TEST_ALLOCATION_RECORDS];
@@ -25,6 +26,8 @@ static struct plane_vm_object test_object;
 struct plane_page {
 	uint64_t phys_addr;
 	uint64_t wire_count;
+	struct plane_vm_object *object;
+	uint64_t object_offset;
 	bool allocated;
 	uint32_t flags;
 };
@@ -60,6 +63,8 @@ static void reset_kmem_test(void)
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		test_pages[i].phys_addr = i * PAGE_SIZE;
 		test_pages[i].wire_count = 0;
+		test_pages[i].object = NULL;
+		test_pages[i].object_offset = 0;
 		test_pages[i].allocated = false;
 		test_pages[i].flags = 0;
 	}
@@ -84,7 +89,7 @@ static void reset_kmem_test(void)
 		test_fail("failed to init kmem test map");
 	}
 	if (!plane_vm_object_init(&test_object, test_object_pages,
-				  TEST_PAGE_COUNT, TEST_KMEM_SIZE)) {
+				  TEST_PAGE_COUNT, TEST_KMEM_OBJECT_SIZE)) {
 		test_fail("failed to init kmem test object");
 	}
 }
@@ -279,12 +284,15 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
 	    page >= TEST_PAGE_COUNT ||
 	    !test_pages[page].allocated ||
-	    test_pages[page].wire_count != 0) {
+	    test_pages[page].wire_count != 0 ||
+	    test_pages[page].object != NULL) {
 		return false;
 	}
 
 	test_pages[page].allocated = false;
 	test_pages[page].flags = 0;
+	test_pages[page].object = NULL;
+	test_pages[page].object_offset = 0;
 	return true;
 }
 
@@ -350,6 +358,69 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
 }
 
+struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return NULL;
+	}
+
+	return page->object;
+}
+
+bool plane_page_vm_object_offset(const struct plane_page *page,
+				 uint64_t *offset)
+{
+	if (offset == NULL ||
+	    page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    page->object == NULL) {
+		return false;
+	}
+
+	*offset = page->object_offset;
+	return true;
+}
+
+bool plane_page_attach_vm_object(struct plane_page *page,
+				 struct plane_vm_object *object,
+				 uint64_t offset)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    object == NULL ||
+	    !page->allocated ||
+	    page->object != NULL) {
+		return false;
+	}
+
+	page->object = object;
+	page->object_offset = offset;
+	return true;
+}
+
+bool plane_page_detach_vm_object(struct plane_page *page,
+				 struct plane_vm_object *object,
+				 uint64_t offset)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    object == NULL ||
+	    !page->allocated ||
+	    page->object != object ||
+	    page->object_offset != offset) {
+		return false;
+	}
+
+	page->object = NULL;
+	page->object_offset = 0;
+	return true;
+}
+
 bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
@@ -385,12 +456,20 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("alloc map wired count",
 				    info.wired_count, 1);
 	failures += test_expect_ptr("alloc object first page",
-				    plane_vm_object_lookup_page(&test_object, 0),
+				    plane_vm_object_lookup_page(&test_object,
+								TEST_KMEM_BASE),
 				    &test_pages[0]);
 	failures += test_expect_ptr("alloc object second page",
 				    plane_vm_object_lookup_page(&test_object,
+								TEST_KMEM_BASE +
 								PAGE_SIZE),
 				    &test_pages[1]);
+	failures += test_expect_ptr("alloc page object",
+				    plane_page_vm_object(&test_pages[0]),
+				    &test_object);
+	failures += test_expect_u64("alloc page object offset",
+				    test_pages[0].object_offset,
+				    TEST_KMEM_BASE);
 
 	first = find_mapping(TEST_KMEM_BASE);
 	failures += test_expect_not_null("first mapping", first);
@@ -406,6 +485,8 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("free pmm pages", allocated_page_count(), 0);
 	failures += test_expect_u64("free wired pages", wired_page_count(), 0);
 	failures += test_expect_u64("free object pages", object_page_count(), 0);
+	failures += test_expect_null("free page object cleared",
+				     plane_page_vm_object(&test_pages[0]));
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
 	return failures;
 }
@@ -648,15 +729,21 @@ static int test_guard_alloc_and_free_pages(void)
 	failures += test_expect_u64("guard mappings", mapping_count(), 2);
 	failures += test_expect_null("guard object left absent",
 				     plane_vm_object_lookup_page(&test_object,
-								 0));
+								 TEST_KMEM_BASE));
 	failures += test_expect_ptr("guard object first user",
 				    plane_vm_object_lookup_page(&test_object,
-								PAGE_SIZE),
+								kmem_page_vaddr(1)),
 				    &test_pages[0]);
 	failures += test_expect_ptr("guard object second user",
 				    plane_vm_object_lookup_page(&test_object,
-								2 * PAGE_SIZE),
+								kmem_page_vaddr(2)),
 				    &test_pages[1]);
+	failures += test_expect_ptr("guard page object",
+				    plane_page_vm_object(&test_pages[0]),
+				    &test_object);
+	failures += test_expect_u64("guard page object offset",
+				    test_pages[0].object_offset,
+				    kmem_page_vaddr(1));
 	failures += test_expect_null("guard left unmapped",
 				     find_mapping(kmem_page_vaddr(0)));
 	failures += test_expect_not_null("guard first user mapped",

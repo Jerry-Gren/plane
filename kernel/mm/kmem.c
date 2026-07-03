@@ -140,13 +140,16 @@ static bool release_mapped_page(struct plane_vm_object *object,
 	if (object_page != page) {
 		return false;
 	}
+	if (wire_count == 0) {
+		return false;
+	}
 	if (!hal_mmu_unmap_kernel_page(vaddr)) {
 		return false;
 	}
 	if (plane_vm_object_remove_page(object, object_offset) != page) {
 		return false;
 	}
-	if (wire_count != 0 && !plane_pmm_unwire_page(page)) {
+	if (!plane_pmm_unwire_page(page)) {
 		return false;
 	}
 
@@ -307,6 +310,7 @@ static bool protect_mapped_pages(uint64_t vaddr,
 bool plane_kmem_init(void)
 {
 	uint64_t base;
+	uint64_t object_size;
 	uint64_t size;
 
 	if (kmem_initialized) {
@@ -314,12 +318,24 @@ bool plane_kmem_init(void)
 	}
 
 	if (!hal_mmu_kernel_vma_range(&base, &size) ||
-	    !plane_vm_map_init(&kernel_map, kernel_map_entries,
-			       ARRAY_SIZE(kernel_map_entries), base, size) ||
-	    !plane_vm_object_init(&kernel_object, kernel_object_pages,
-				  ARRAY_SIZE(kernel_object_pages), size)) {
+	    size == 0 ||
+	    !is_page_aligned(base) ||
+	    !is_page_aligned(size) ||
+	    !checked_add_u64(base, size, &object_size) ||
+	    ARRAY_SIZE(kernel_map_entries) == 0 ||
+	    ARRAY_SIZE(kernel_object_pages) == 0) {
 		return false;
 	}
+
+	if (!plane_vm_map_init(&kernel_map, kernel_map_entries,
+			       ARRAY_SIZE(kernel_map_entries), base, size)) {
+		return false;
+	}
+
+	BUG_ON_MSG(!plane_vm_object_init(&kernel_object, kernel_object_pages,
+					 ARRAY_SIZE(kernel_object_pages),
+					 object_size),
+		   "failed to initialize kernel object");
 
 	kmem_initialized = true;
 	return true;

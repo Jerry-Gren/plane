@@ -768,9 +768,71 @@ static int test_object_auto_offset_uses_user_range(void)
 	failures += test_expect_ptr("object auto object",
 				    info.object, &test_object);
 	failures += test_expect_u64("object auto offset",
-				    info.object_offset, PAGE_SIZE);
+				    info.object_offset, page_vaddr(1));
 	failures += test_expect_u64("object auto reserved",
 				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+	return failures;
+}
+
+static int test_object_auto_offset_uses_user_va_across_maps(void)
+{
+	struct plane_vm_map_entry other_entries[TEST_MAP_ENTRIES];
+	struct plane_vm_map other_map = {0};
+	struct plane_vm_map_allocation_info first_info = {0};
+	struct plane_vm_map_allocation_info second_info = {0};
+	uint64_t first_vaddr = 0;
+	uint64_t second_vaddr = 0;
+	uint64_t other_base = TEST_KERNEL_MAP_BASE + TEST_KERNEL_MAP_SIZE;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
+		other_entries[i] = (struct plane_vm_map_entry){0};
+	}
+
+	failures += test_expect_bool("object first map init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object second map init",
+				     plane_vm_map_init(&other_map, other_entries,
+						       TEST_MAP_ENTRIES,
+						       other_base,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object first map alloc",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 1, 0, &test_object,
+					     PLANE_VM_MAP_OBJECT_OFFSET_AUTO,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &first_vaddr),
+				     true);
+	failures += test_expect_bool("object second map alloc",
+				     plane_vm_map_alloc_pages_object(
+					     &other_map, 1, 0, &test_object,
+					     PLANE_VM_MAP_OBJECT_OFFSET_AUTO,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &second_vaddr),
+				     true);
+	failures += test_expect_bool("object first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first_vaddr, 1,
+					     &first_info),
+				     true);
+	failures += test_expect_bool("object second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &other_map, second_vaddr, 1,
+					     &second_info),
+				     true);
+	failures += test_expect_u64("object first offset",
+				    first_info.object_offset, first_vaddr);
+	failures += test_expect_u64("object second offset",
+				    second_info.object_offset, second_vaddr);
+	failures += test_expect_bool("object offsets differ",
+				     first_info.object_offset !=
+				     second_info.object_offset,
+				     true);
 	return failures;
 }
 
@@ -917,6 +979,7 @@ int main(void)
 		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
 		TEST_CASE(test_object_allocation_records_object_and_offset),
 		TEST_CASE(test_object_auto_offset_uses_user_range),
+		TEST_CASE(test_object_auto_offset_uses_user_va_across_maps),
 		TEST_CASE(test_object_allocation_rejects_invalid_offset),
 		TEST_CASE(test_protected_max_allocation_records_explicit_max),
 		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),

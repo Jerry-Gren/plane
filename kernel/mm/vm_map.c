@@ -365,7 +365,7 @@ bool plane_vm_map_alloc_pages_object(struct plane_vm_map *map,
 
 	if (object != NULL &&
 	    object_offset == PLANE_VM_MAP_OBJECT_OFFSET_AUTO) {
-		entry_object_offset = user_start - map->base;
+		entry_object_offset = user_start;
 	}
 
 	insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,

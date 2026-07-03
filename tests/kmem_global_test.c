@@ -5,6 +5,7 @@
 #include <plane/kmem.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/vm_object.h>
 
 #include "support/test.h"
 
@@ -17,6 +18,8 @@
 struct plane_page {
 	uint64_t phys_addr;
 	uint64_t wire_count;
+	struct plane_vm_object *object;
+	uint64_t object_offset;
 	bool allocated;
 };
 
@@ -167,11 +170,14 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
 	    page >= TEST_PAGE_COUNT ||
 	    !test_pages[page].allocated ||
-	    test_pages[page].wire_count != 0) {
+	    test_pages[page].wire_count != 0 ||
+	    test_pages[page].object != NULL) {
 		return false;
 	}
 
 	test_pages[page].allocated = false;
+	test_pages[page].object = NULL;
+	test_pages[page].object_offset = 0;
 	return true;
 }
 
@@ -235,6 +241,69 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	}
 
 	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
+}
+
+struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return NULL;
+	}
+
+	return page->object;
+}
+
+bool plane_page_vm_object_offset(const struct plane_page *page,
+				 uint64_t *offset)
+{
+	if (offset == NULL ||
+	    page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    page->object == NULL) {
+		return false;
+	}
+
+	*offset = page->object_offset;
+	return true;
+}
+
+bool plane_page_attach_vm_object(struct plane_page *page,
+				 struct plane_vm_object *object,
+				 uint64_t offset)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    object == NULL ||
+	    !page->allocated ||
+	    page->object != NULL) {
+		return false;
+	}
+
+	page->object = object;
+	page->object_offset = offset;
+	return true;
+}
+
+bool plane_page_detach_vm_object(struct plane_page *page,
+				 struct plane_vm_object *object,
+				 uint64_t offset)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    object == NULL ||
+	    !page->allocated ||
+	    page->object != object ||
+	    page->object_offset != offset) {
+		return false;
+	}
+
+	page->object = NULL;
+	page->object_offset = 0;
+	return true;
 }
 
 bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)

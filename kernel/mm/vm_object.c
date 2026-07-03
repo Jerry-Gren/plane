@@ -13,7 +13,7 @@ static bool offset_valid(const struct plane_vm_object *object, uint64_t offset)
 	return object != NULL &&
 	       object->initialized &&
 	       is_page_aligned(offset) &&
-	       offset < object->size;
+	       offset < object->offset_limit;
 }
 
 static int64_t find_page_index(struct plane_vm_object *object, uint64_t offset)
@@ -26,19 +26,6 @@ static int64_t find_page_index(struct plane_vm_object *object, uint64_t offset)
 	}
 
 	return -1;
-}
-
-static bool page_is_resident(struct plane_vm_object *object,
-			     const struct plane_page *page)
-{
-	for (uint64_t i = 0; i < object->page_capacity; i++) {
-		if (object->pages[i].used &&
-		    object->pages[i].page == page) {
-			return true;
-		}
-	}
-
-	return false;
 }
 
 static int64_t find_free_page_index(struct plane_vm_object *object)
@@ -55,14 +42,14 @@ static int64_t find_free_page_index(struct plane_vm_object *object)
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  struct plane_vm_object_page *pages,
 			  uint64_t page_capacity,
-			  uint64_t size)
+			  uint64_t offset_limit)
 {
 	if (object == NULL ||
 	    pages == NULL ||
 	    page_capacity == 0 ||
 	    object->initialized ||
-	    size == 0 ||
-	    !is_page_aligned(size)) {
+	    offset_limit == 0 ||
+	    !is_page_aligned(offset_limit)) {
 		return false;
 	}
 
@@ -71,7 +58,7 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 	}
 
 	*object = (struct plane_vm_object){
-		.size = size,
+		.offset_limit = offset_limit,
 		.page_capacity = page_capacity,
 		.pages = pages,
 		.initialized = true,
@@ -88,13 +75,16 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	if (!offset_valid(object, offset) ||
 	    page == NULL ||
 	    plane_page_state(page) != PLANE_PAGE_ALLOCATED ||
-	    page_is_resident(object, page) ||
+	    plane_page_vm_object(page) != NULL ||
 	    find_page_index(object, offset) >= 0) {
 		return false;
 	}
 
 	index = find_free_page_index(object);
 	if (index < 0) {
+		return false;
+	}
+	if (!plane_page_attach_vm_object(page, object, offset)) {
 		return false;
 	}
 
@@ -137,6 +127,9 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	}
 
 	page = object->pages[index].page;
+	if (!plane_page_detach_vm_object(page, object, offset)) {
+		return NULL;
+	}
 	object->pages[index] = (struct plane_vm_object_page){0};
 	return page;
 }
