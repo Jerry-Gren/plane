@@ -8,15 +8,24 @@
 #define TEST_KERNEL_MAP_BASE 0xffff900000000000ull
 #define TEST_KERNEL_MAP_PAGES 256
 #define TEST_KERNEL_MAP_SIZE (TEST_KERNEL_MAP_PAGES * PAGE_SIZE)
-#define TEST_ALLOCATION_RECORDS 128
-#define TEST_LAST_ALLOCATION (TEST_ALLOCATION_RECORDS - 1)
-#define TEST_LAST_FRAGMENTED_ALLOCATION (TEST_ALLOCATION_RECORDS - 4)
-#define TEST_UNMERGEABLE_ALLOCATION (TEST_ALLOCATION_RECORDS - 2)
+#define TEST_MAP_ENTRIES 128
+
+static bool test_reset_enabled = true;
+
+bool plane_vm_map_test_reset_enabled(void)
+{
+	return test_reset_enabled;
+}
+
+static uint64_t page_vaddr(uint64_t page)
+{
+	return TEST_KERNEL_MAP_BASE + page * PAGE_SIZE;
+}
 
 static int check_stats(const char *name,
 		       uint64_t free_pages,
 		       uint64_t allocated_pages,
-		       uint64_t free_ranges,
+		       uint64_t free_range_total,
 		       uint64_t allocations)
 {
 	struct plane_vm_map_stats stats = plane_kernel_map_get_stats();
@@ -29,7 +38,7 @@ static int check_stats(const char *name,
 	failures += test_expect_u64("kernel map allocated pages",
 				    stats.allocated_pages, allocated_pages);
 	failures += test_expect_u64("kernel map free ranges",
-				    stats.free_range_count, free_ranges);
+				    stats.free_range_count, free_range_total);
 	failures += test_expect_u64("kernel map allocations",
 				    stats.allocation_count, allocations);
 	return failures;
@@ -79,6 +88,39 @@ static int test_rejects_invalid_init(void)
 				    stats.free_range_count, 0);
 	failures += test_expect_u64("invalid init allocations",
 				    stats.allocation_count, 0);
+	return failures;
+}
+
+static int test_init_is_one_shot_in_production_mode(void)
+{
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	test_reset_enabled = true;
+	failures += test_expect_bool("oneshot init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("oneshot alloc",
+				     plane_kernel_map_alloc_pages(2, &vaddr),
+				     true);
+
+	test_reset_enabled = false;
+	failures += test_expect_bool("oneshot reject valid reinit",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     false);
+	failures += test_expect_bool("oneshot reject invalid reinit",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   0),
+				     false);
+	failures += test_expect_bool("oneshot allocation preserved",
+				     plane_kernel_map_has_allocation(vaddr, 2),
+				     true);
+	failures += check_stats("oneshot stats preserved",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 1, 1);
+
+	test_reset_enabled = true;
 	return failures;
 }
 
@@ -174,118 +216,122 @@ static int test_rejects_exhausted_vaddr_space(void)
 	return failures;
 }
 
-static int test_rejects_exhausted_records(void)
+static int test_rejects_exhausted_entries(void)
 {
 	uint64_t vaddr = 0;
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
 	int failures = 0;
 
-	failures += test_expect_bool("records init",
+	failures += test_expect_bool("entries init",
 				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
-	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
-		failures += test_expect_bool("record alloc",
+	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
+		failures += test_expect_bool("entry alloc",
 					     plane_kernel_map_alloc_pages(1,
 									  &vaddr),
 					     true);
 	}
-	failures += test_expect_bool("record exhausted",
+
+	before = plane_kernel_map_get_stats();
+	failures += test_expect_bool("entry exhausted",
 				     plane_kernel_map_alloc_pages(1, &vaddr),
 				     false);
-	failures += check_stats("record stats",
-				TEST_KERNEL_MAP_PAGES - TEST_ALLOCATION_RECORDS,
-				TEST_ALLOCATION_RECORDS, 1,
-				TEST_ALLOCATION_RECORDS);
+	after = plane_kernel_map_get_stats();
+	failures += test_expect_u64("entry exhausted free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("entry exhausted allocated unchanged",
+				    after.allocated_pages, before.allocated_pages);
+	failures += test_expect_u64("entry exhausted range unchanged",
+				    after.free_range_count, before.free_range_count);
+	failures += test_expect_u64("entry exhausted count unchanged",
+				    after.allocation_count, before.allocation_count);
 	return failures;
 }
 
-static int test_free_merges_when_free_range_list_is_full(void)
+static int test_first_fit_reuses_lowest_hole(void)
 {
-	uint64_t addrs[TEST_ALLOCATION_RECORDS];
+	uint64_t first = 0;
+	uint64_t second = 0;
+	uint64_t reused = 0;
 	int failures = 0;
 
-	failures += test_expect_bool("merge full init",
+	failures += test_expect_bool("fit init",
 				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
-	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
-		failures += test_expect_bool("merge full alloc",
+	failures += test_expect_bool("fit alloc first",
+				     plane_kernel_map_alloc_pages(2, &first),
+				     true);
+	failures += test_expect_bool("fit alloc second",
+				     plane_kernel_map_alloc_pages(2, &second),
+				     true);
+	failures += test_expect_u64("fit second address", second,
+				    page_vaddr(2));
+	failures += test_expect_bool("fit free first",
+				     plane_kernel_map_free_pages(first, 2),
+				     true);
+	failures += check_stats("fit hole stats", TEST_KERNEL_MAP_PAGES - 2,
+				2, 2, 1);
+	failures += test_expect_bool("fit reuse hole",
+				     plane_kernel_map_alloc_pages(1, &reused),
+				     true);
+	failures += test_expect_u64("fit reused lowest hole", reused, first);
+	failures += check_stats("fit reused stats", TEST_KERNEL_MAP_PAGES - 3,
+				3, 2, 2);
+	return failures;
+}
+
+static int test_holes_merge_after_entry_removal(void)
+{
+	uint64_t addrs[5];
+	int failures = 0;
+
+	failures += test_expect_bool("merge init",
+				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
+							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(addrs); i++) {
+		failures += test_expect_bool("merge alloc",
 					     plane_kernel_map_alloc_pages(1,
 									  &addrs[i]),
 					     true);
 	}
 
-	for (uint64_t i = 0; i <= TEST_LAST_FRAGMENTED_ALLOCATION; i += 2) {
-		failures += test_expect_bool("merge full fragment",
-					     plane_kernel_map_free_pages(addrs[i],
-									 1),
-					     true);
-	}
-	failures += check_stats("merge full fragmented",
-				TEST_KERNEL_MAP_PAGES - 65, 65, 64, 65);
-
-	failures += test_expect_bool("merge full next merge",
-				     plane_kernel_map_free_pages(
-					     addrs[TEST_LAST_ALLOCATION], 1),
+	failures += test_expect_bool("merge free page 1",
+				     plane_kernel_map_free_pages(addrs[1], 1),
 				     true);
-	failures += check_stats("merge full merged",
-				TEST_KERNEL_MAP_PAGES - 64, 64, 64, 64);
-	return failures;
-}
-
-static int test_failed_free_keeps_allocation_record(void)
-{
-	uint64_t addrs[TEST_ALLOCATION_RECORDS];
-	int failures = 0;
-
-	failures += test_expect_bool("failed free init",
-				     plane_kernel_map_init(TEST_KERNEL_MAP_BASE,
-							   TEST_KERNEL_MAP_SIZE),
+	failures += test_expect_bool("merge free page 3",
+				     plane_kernel_map_free_pages(addrs[3], 1),
 				     true);
-	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
-		failures += test_expect_bool("failed free alloc",
-					     plane_kernel_map_alloc_pages(1,
-									  &addrs[i]),
-					     true);
-	}
-
-	for (uint64_t i = 0; i <= TEST_LAST_FRAGMENTED_ALLOCATION; i += 2) {
-		failures += test_expect_bool("failed free fragment",
-					     plane_kernel_map_free_pages(addrs[i],
-									 1),
-					     true);
-	}
-	failures += check_stats("failed free fragmented",
-				TEST_KERNEL_MAP_PAGES - 65, 65, 64, 65);
-
-	failures += test_expect_bool("failed free non-merge",
-				     plane_kernel_map_free_pages(
-					     addrs[TEST_UNMERGEABLE_ALLOCATION], 1),
-				     false);
-	failures += test_expect_bool("failed free record remains",
-				     plane_kernel_map_has_allocation(
-					     addrs[TEST_UNMERGEABLE_ALLOCATION], 1),
+	failures += check_stats("merge separated holes",
+				TEST_KERNEL_MAP_PAGES - 3, 3, 3, 3);
+	failures += test_expect_bool("merge bridge holes",
+				     plane_kernel_map_free_pages(addrs[2], 1),
 				     true);
-	failures += check_stats("failed free stats unchanged",
-				TEST_KERNEL_MAP_PAGES - 65, 65, 64, 65);
-	failures += test_expect_bool("failed free later merge",
-				     plane_kernel_map_free_pages(
-					     addrs[TEST_LAST_ALLOCATION], 1),
+	failures += check_stats("merge bridged holes",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 2);
+	failures += test_expect_bool("merge with tail hole",
+				     plane_kernel_map_free_pages(addrs[4], 1),
 				     true);
+	failures += check_stats("merge tail hole",
+				TEST_KERNEL_MAP_PAGES - 1, 1, 1, 1);
 	return failures;
 }
 
 int main(void)
 {
 	static const struct test_case cases[] = {
-		TEST_CASE(test_init_stats),
 		TEST_CASE(test_rejects_invalid_init),
+		TEST_CASE(test_init_stats),
+		TEST_CASE(test_init_is_one_shot_in_production_mode),
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_rejects_invalid_alloc_and_free),
 		TEST_CASE(test_rejects_exhausted_vaddr_space),
-		TEST_CASE(test_rejects_exhausted_records),
-		TEST_CASE(test_free_merges_when_free_range_list_is_full),
-		TEST_CASE(test_failed_free_keeps_allocation_record),
+		TEST_CASE(test_rejects_exhausted_entries),
+		TEST_CASE(test_first_fit_reuses_lowest_hole),
+		TEST_CASE(test_holes_merge_after_entry_removal),
 	};
 
 	return test_run_cases("vm_map_test", cases, TEST_ARRAY_SIZE(cases));
