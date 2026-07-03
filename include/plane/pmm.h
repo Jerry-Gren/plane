@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/bits.h>
 #include <plane/memmap.h>
 
 /*
@@ -14,6 +15,7 @@
  * The page metadata API is an early XNU-like foundation: each managed
  * physical page has a small struct plane_page, but full VM page queues,
  * objects, coloring, and SMP locking are intentionally not here yet.
+ * Pages are not zeroed unless PLANE_PMM_ALLOC_ZERO is requested.
  */
 
 struct plane_page;
@@ -23,6 +25,10 @@ enum plane_page_state {
 	PLANE_PAGE_FREE,
 	PLANE_PAGE_ALLOCATED,
 	PLANE_PAGE_METADATA,
+};
+
+enum plane_pmm_alloc_flags {
+	PLANE_PMM_ALLOC_ZERO = BIT(0),
 };
 
 struct plane_pmm_allocator_stats {
@@ -53,11 +59,16 @@ struct plane_pmm_stats {
 
 bool plane_pmm_init(const struct plane_mem_info *mem);
 bool plane_pmm_alloc_page(struct plane_page **page);
+bool plane_pmm_alloc_page_flags(uint32_t flags, struct plane_page **page);
 bool plane_pmm_free_page(struct plane_page *page);
 bool plane_pmm_alloc_page_phys(uint64_t *phys_addr);
 bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 				uint64_t alignment_pages,
 				uint64_t *phys_addr);
+bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
+				      uint64_t alignment_pages,
+				      uint32_t flags,
+				      uint64_t *phys_addr);
 bool plane_pmm_free_page_phys(uint64_t phys_addr);
 bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count);
 struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr);

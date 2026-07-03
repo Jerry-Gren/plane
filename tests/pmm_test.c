@@ -9,17 +9,17 @@
 #include "support/test.h"
 
 static bool direct_map_available = true;
-static uint8_t direct_map_storage[64 * 1024] __attribute__((aligned(PAGE_SIZE)));
+#define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
+static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
+	__attribute__((aligned(PAGE_SIZE)));
 
 void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
 {
-	(void)phys_addr;
-
-	if (!direct_map_available) {
+	if (!direct_map_available || phys_addr >= DIRECT_MAP_STORAGE_SIZE) {
 		return NULL;
 	}
 
-	return direct_map_storage;
+	return &direct_map_storage[phys_addr];
 }
 
 static void reset_direct_map_stub(void)
@@ -38,6 +38,31 @@ static int check_page_state(const char *name,
 
 	test_fail("%s expected=%d actual=%d", name, expected, actual);
 	return 1;
+}
+
+static int check_phys_bytes(const char *name,
+			    uint64_t phys_addr,
+			    uint8_t expected,
+			    uint64_t length)
+{
+	if (phys_addr > DIRECT_MAP_STORAGE_SIZE ||
+	    length > DIRECT_MAP_STORAGE_SIZE - phys_addr) {
+		test_fail("%s out of direct-map test storage", name);
+		return 1;
+	}
+
+	for (uint64_t i = 0; i < length; i++) {
+		if (direct_map_storage[phys_addr + i] != expected) {
+			test_fail("%s offset=%llu expected=%u actual=%u",
+				  name,
+				  (unsigned long long)i,
+				  expected,
+				  direct_map_storage[phys_addr + i]);
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 static uint64_t pages_for_bytes(uint64_t bytes)
@@ -324,6 +349,130 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 	return failures;
 }
 
+static int test_plain_allocation_does_not_zero_page(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("plain zero init", plane_pmm_init(&mem),
+				     true);
+
+	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
+	failures += test_expect_bool("plain alloc",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("plain alloc phys", phys, 0x2000);
+	failures += check_phys_bytes("plain alloc keeps data", phys, 0xa5,
+				      PAGE_SIZE);
+
+	return failures;
+}
+
+static int test_zeroed_single_page_allocation(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *page;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("zero page init", plane_pmm_init(&mem),
+				     true);
+
+	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
+	failures += test_expect_bool("zero page alloc",
+				plane_pmm_alloc_page_flags(PLANE_PMM_ALLOC_ZERO,
+							   &page),
+				true);
+	failures += test_expect_not_null("zero page metadata", page);
+	failures += test_expect_u64("zero page phys", plane_page_phys(page),
+				    0x2000);
+	failures += check_phys_bytes("zero page cleared", 0x2000, 0,
+				      PAGE_SIZE);
+
+	return failures;
+}
+
+static int test_zeroed_multi_page_allocation(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x7000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("zero multi init", plane_pmm_init(&mem),
+				     true);
+
+	memset(&direct_map_storage[0x2000], 0xa5, 3 * PAGE_SIZE);
+	memset(&direct_map_storage[0x5000], 0x5a, PAGE_SIZE);
+	failures += test_expect_bool("zero multi alloc",
+				plane_pmm_alloc_pages_phys_flags(
+					3, 1, PLANE_PMM_ALLOC_ZERO, &phys),
+				true);
+	failures += test_expect_u64("zero multi phys", phys, 0x2000);
+	failures += check_phys_bytes("zero multi cleared", 0x2000, 0,
+				      3 * PAGE_SIZE);
+	failures += check_phys_bytes("zero multi guard", 0x5000, 0x5a,
+				      PAGE_SIZE);
+
+	return failures;
+}
+
+static int test_zeroed_allocation_rolls_back_without_direct_map(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	uint64_t phys = UINT64_MAX;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("zero rollback init", plane_pmm_init(&mem),
+				     true);
+
+	direct_map_available = false;
+	failures += test_expect_bool("zero rollback alloc",
+				plane_pmm_alloc_pages_phys_flags(
+					1, 1, PLANE_PMM_ALLOC_ZERO, &phys),
+				false);
+	direct_map_available = true;
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("zero rollback stats", &stats,
+				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+	failures += check_page_state("zero rollback page state",
+				      plane_page_state(
+					      plane_pmm_phys_to_page(0x2000)),
+				      PLANE_PAGE_FREE);
+	failures += test_expect_bool("zero rollback reuses page",
+				plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("zero rollback reused phys", phys, 0x2000);
+
+	return failures;
+}
+
+static int test_allocation_flags_reject_unknown_bits(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	uint64_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("bad flags init", plane_pmm_init(&mem),
+				     true);
+	failures += test_expect_bool("bad flags alloc",
+				plane_pmm_alloc_pages_phys_flags(1, 1,
+								 0x80000000u,
+								 &phys),
+				false);
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("bad flags stats", &stats,
+				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+
+	return failures;
+}
+
 static int test_single_page_free_reuses_lowest_address(void)
 {
 	struct plane_mem_info mem = {0};
@@ -551,6 +700,11 @@ int main(void)
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),
 		TEST_CASE(test_single_page_allocation_order_and_exhaustion),
+		TEST_CASE(test_plain_allocation_does_not_zero_page),
+		TEST_CASE(test_zeroed_single_page_allocation),
+		TEST_CASE(test_zeroed_multi_page_allocation),
+		TEST_CASE(test_zeroed_allocation_rolls_back_without_direct_map),
+		TEST_CASE(test_allocation_flags_reject_unknown_bits),
 		TEST_CASE(test_single_page_free_reuses_lowest_address),
 		TEST_CASE(test_multi_page_alignment),
 		TEST_CASE(test_multi_page_rejects_non_contiguous_ranges),

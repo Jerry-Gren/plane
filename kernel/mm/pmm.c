@@ -2,6 +2,7 @@
 
 #include <hal/mmu.h>
 
+#include <klib/string.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
 #include <plane/util.h>
@@ -561,6 +562,29 @@ static bool page_range_is_free(uint64_t phys_addr, uint64_t page_count)
 	       page_state_range_matches(phys_addr, page_count, PLANE_PAGE_FREE);
 }
 
+static bool alloc_flags_valid(uint32_t flags)
+{
+	return (flags & ~PLANE_PMM_ALLOC_ZERO) == 0;
+}
+
+static bool zero_allocated_pages(uint64_t phys_addr, uint64_t page_count)
+{
+	uint64_t size;
+	void *vaddr;
+
+	if (!checked_mul_u64(page_count, PAGE_SIZE, &size)) {
+		return false;
+	}
+
+	vaddr = hal_mmu_direct_phys_to_virt(phys_addr);
+	if (vaddr == NULL) {
+		return false;
+	}
+
+	memset(vaddr, 0, size);
+	return true;
+}
+
 static bool find_free_page_run(uint64_t page_count,
 			       uint64_t alignment_pages,
 			       uint64_t *phys_addr)
@@ -609,15 +633,37 @@ static bool find_free_page_run(uint64_t page_count,
 	return false;
 }
 
-bool plane_pmm_alloc_pages_phys(uint64_t page_count,
-				uint64_t alignment_pages,
-				uint64_t *phys_addr)
+static bool plane_pmm_alloc_page_phys_raw(uint64_t *phys_addr)
+{
+	struct plane_page *page;
+
+	if (phys_addr == NULL) {
+		return false;
+	}
+
+	page = free_queue_pop_head();
+	if (page == NULL) {
+		return false;
+	}
+
+	page->state = PLANE_PAGE_ALLOCATED;
+	*phys_addr = page->phys_addr;
+	return true;
+}
+
+static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
+					   uint64_t alignment_pages,
+					   uint64_t *phys_addr)
 {
 	uint64_t alloc_base;
 
 	if (phys_addr == NULL || page_count == 0 ||
 	    !is_power_of_two(alignment_pages)) {
 		return false;
+	}
+
+	if (page_count == 1 && alignment_pages == 1) {
+		return plane_pmm_alloc_page_phys_raw(phys_addr);
 	}
 
 	if (!find_free_page_run(page_count, alignment_pages, &alloc_base)) {
@@ -645,11 +691,46 @@ bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 	return true;
 }
 
-bool plane_pmm_alloc_page(struct plane_page **page)
+bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
+				      uint64_t alignment_pages,
+				      uint32_t flags,
+				      uint64_t *phys_addr)
+{
+	uint64_t alloc_base;
+
+	if (phys_addr == NULL ||
+	    !alloc_flags_valid(flags) ||
+	    !plane_pmm_alloc_pages_phys_raw(page_count, alignment_pages,
+					    &alloc_base)) {
+		return false;
+	}
+
+	if ((flags & PLANE_PMM_ALLOC_ZERO) != 0 &&
+	    !zero_allocated_pages(alloc_base, page_count)) {
+		if (!plane_pmm_free_pages_phys(alloc_base, page_count)) {
+			return false;
+		}
+		return false;
+	}
+
+	*phys_addr = alloc_base;
+	return true;
+}
+
+bool plane_pmm_alloc_pages_phys(uint64_t page_count,
+				uint64_t alignment_pages,
+				uint64_t *phys_addr)
+{
+	return plane_pmm_alloc_pages_phys_flags(page_count, alignment_pages, 0,
+					       phys_addr);
+}
+
+bool plane_pmm_alloc_page_flags(uint32_t flags, struct plane_page **page)
 {
 	uint64_t phys_addr;
 
-	if (page == NULL || !plane_pmm_alloc_page_phys(&phys_addr)) {
+	if (page == NULL ||
+	    !plane_pmm_alloc_pages_phys_flags(1, 1, flags, &phys_addr)) {
 		return false;
 	}
 
@@ -664,22 +745,14 @@ bool plane_pmm_alloc_page(struct plane_page **page)
 	return true;
 }
 
+bool plane_pmm_alloc_page(struct plane_page **page)
+{
+	return plane_pmm_alloc_page_flags(0, page);
+}
+
 bool plane_pmm_alloc_page_phys(uint64_t *phys_addr)
 {
-	struct plane_page *page;
-
-	if (phys_addr == NULL) {
-		return false;
-	}
-
-	page = free_queue_pop_head();
-	if (page == NULL) {
-		return false;
-	}
-
-	page->state = PLANE_PAGE_ALLOCATED;
-	*phys_addr = page->phys_addr;
-	return true;
+	return plane_pmm_alloc_pages_phys_flags(1, 1, 0, phys_addr);
 }
 
 bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
