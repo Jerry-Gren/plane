@@ -122,7 +122,8 @@ static int test_init_is_one_shot_in_production_mode(void)
 							   0),
 				     false);
 	failures += test_expect_bool("oneshot allocation preserved",
-				     plane_vm_map_has_allocation(&test_map, vaddr, 2),
+				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+									NULL),
 				     true);
 	failures += check_stats("oneshot stats preserved",
 				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
@@ -145,7 +146,8 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("alloc vaddr", vaddr,
 				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_bool("has allocation",
-				     plane_vm_map_has_allocation(&test_map, vaddr, 2),
+				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+									NULL),
 				     true);
 	failures += check_stats("alloc stats", TEST_KERNEL_MAP_PAGES - 2,
 				2, 2, 1, 1);
@@ -188,7 +190,8 @@ static int test_rejects_invalid_alloc_and_free(void)
 				     plane_vm_map_free_pages(&test_map, vaddr, 1),
 				     false);
 	failures += test_expect_bool("partial allocation absent",
-				     plane_vm_map_has_allocation(&test_map, vaddr, 1),
+				     plane_vm_map_lookup_allocation(&test_map, vaddr, 1,
+									NULL),
 				     false);
 	failures += test_expect_bool("exact free accepted",
 				     plane_vm_map_free_pages(&test_map, vaddr, 2),
@@ -340,17 +343,19 @@ static int test_guarded_alloc_reserves_unmapped_sentinels(void)
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("guard alloc",
-				     plane_vm_map_alloc_pages_guarded(&test_map, 2, 1,
-									  &vaddr),
+				     plane_vm_map_alloc_pages_protected_max(
+					     &test_map, 2, 1, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
 				     true);
 	failures += test_expect_u64("guard user address", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("guard has user allocation",
-				     plane_vm_map_has_allocation(&test_map, vaddr, 2),
+				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+									NULL),
 				     true);
 	failures += test_expect_bool("guard base not allocation",
-				     plane_vm_map_has_allocation(&test_map, page_vaddr(0),
-								     1),
+				     plane_vm_map_lookup_allocation(&test_map,
+					     page_vaddr(0), 1, NULL),
 				     false);
 	failures += check_stats("guard stats", TEST_KERNEL_MAP_PAGES - 4,
 				4, 2, 1, 1);
@@ -384,16 +389,20 @@ static int test_guarded_alloc_rejects_invalid_ranges(void)
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("guard zero user",
-				     plane_vm_map_alloc_pages_guarded(&test_map, 0, 1,
-									  &vaddr),
+				     plane_vm_map_alloc_pages_protected_max(
+					     &test_map, 0, 1, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
 				     false);
 	failures += test_expect_bool("guard no room",
-				     plane_vm_map_alloc_pages_guarded(&test_map, 1, 1,
-									  &vaddr),
+				     plane_vm_map_alloc_pages_protected_max(
+					     &test_map, 1, 1, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
 				     false);
 	failures += test_expect_bool("guard overflow",
-				     plane_vm_map_alloc_pages_guarded(&test_map,
-					     1, UINT64_MAX / 2 + 1, &vaddr),
+				     plane_vm_map_alloc_pages_protected_max(
+					     &test_map, 1, UINT64_MAX / 2 + 1,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
 				     false);
 	after = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_u64("guard reject free unchanged",
@@ -492,11 +501,12 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 	failures += test_expect_u64("prot guard user address", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("prot guard has user allocation",
-				     plane_vm_map_has_allocation(&test_map, vaddr, 2),
+				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+									NULL),
 				     true);
 	failures += test_expect_bool("prot guard base not allocation",
-				     plane_vm_map_has_allocation(&test_map, page_vaddr(0),
-								     1),
+				     plane_vm_map_lookup_allocation(&test_map,
+					     page_vaddr(0), 1, NULL),
 				     false);
 	failures += test_expect_bool(
 		"prot guard lookup",

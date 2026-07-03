@@ -37,6 +37,11 @@ bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr);
 bool plane_kmem_free_pages(void *vaddr, uint64_t page_count);
 bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot);
 
+/*
+ * The in-map APIs are still kernel virtual allocation APIs. The supplied map
+ * must describe a HAL kernel mapping window, or an equivalent host-test map.
+ * They are not generic VM object or pageable map backing APIs.
+ */
 bool plane_kmem_alloc_in_map(struct plane_vm_map *map,
 			     uint64_t size,
 			     uint32_t flags,

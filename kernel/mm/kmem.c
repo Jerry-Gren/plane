@@ -389,7 +389,7 @@ bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 		return false;
 	}
 
-	if (!plane_vm_map_has_allocation(map, addr, page_count)) {
+	if (!plane_vm_map_lookup_allocation(map, addr, page_count, NULL)) {
 		return false;
 	}
 

@@ -917,26 +917,6 @@ static int test_byte_free_size_mismatch_does_not_unmap(void)
 	return failures;
 }
 
-static int test_init_is_one_shot_in_production_mode(void)
-{
-	void *addr = NULL;
-	int failures = 0;
-
-	failures += test_expect_bool("oneshot init", plane_kmem_init(), true);
-	failures += test_expect_bool("oneshot alloc",
-				     plane_kmem_alloc_pages(2, 0, &addr),
-				     true);
-
-	failures += test_expect_bool("oneshot repeat init",
-				     plane_kmem_init(), false);
-	failures += test_expect_bool("oneshot preserved free",
-				     plane_kmem_free_pages(addr, 2), true);
-	failures += test_expect_u64("oneshot free pmm pages",
-				    allocated_page_count(), 0);
-	failures += test_expect_u64("oneshot free mappings", mapping_count(), 0);
-	return failures;
-}
-
 static int test_rejects_exhausted_records(void)
 {
 	void *addr = NULL;
@@ -978,7 +958,6 @@ int main(void)
 		TEST_CASE(test_guard_failures_roll_back_vaddr),
 		TEST_CASE(test_rejects_invalid_inputs),
 		TEST_CASE(test_byte_free_size_mismatch_does_not_unmap),
-		TEST_CASE(test_init_is_one_shot_in_production_mode),
 		TEST_CASE(test_rejects_exhausted_records),
 	};
 

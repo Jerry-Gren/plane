@@ -347,22 +347,6 @@ bool plane_vm_map_alloc_pages_protected_max(struct plane_vm_map *map,
 	return true;
 }
 
-bool plane_vm_map_alloc_pages_guarded(struct plane_vm_map *map,
-				      uint64_t page_count,
-				      uint64_t guard_pages,
-				      uint64_t *vaddr)
-{
-	return plane_vm_map_alloc_pages_protected(
-		map, page_count, guard_pages, PLANE_VM_PROT_DEFAULT, vaddr);
-}
-
-bool plane_vm_map_has_allocation(struct plane_vm_map *map,
-				 uint64_t vaddr,
-				 uint64_t page_count)
-{
-	return plane_vm_map_lookup_allocation(map, vaddr, page_count, NULL);
-}
-
 bool plane_vm_map_lookup_allocation(
 	struct plane_vm_map *map,
 	uint64_t vaddr,
