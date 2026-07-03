@@ -13,12 +13,17 @@ struct pmm_managed_range {
 	uint64_t page_index;
 };
 
+enum pmm_page_queue_state {
+	PMM_PAGE_QUEUE_NONE = 0,
+	PMM_PAGE_QUEUE_FREE,
+};
+
 struct plane_page {
 	uint64_t phys_addr;
 	enum plane_page_state state;
-	struct plane_page *free_prev;
-	struct plane_page *free_next;
-	bool on_free_queue;
+	struct plane_page *queue_prev;
+	struct plane_page *queue_next;
+	enum pmm_page_queue_state queue_state;
 };
 
 struct pmm_page_queue {
@@ -217,71 +222,73 @@ static bool free_queue_insert_ordered(struct plane_page *page)
 	struct plane_page *next;
 
 	if (page == NULL || page->state != PLANE_PAGE_FREE ||
-	    page->on_free_queue) {
+	    page->queue_state != PMM_PAGE_QUEUE_NONE) {
 		return false;
 	}
 
 	if (free_queue.tail == NULL ||
 	    free_queue.tail->phys_addr < page->phys_addr) {
-		page->free_prev = free_queue.tail;
-		page->free_next = NULL;
+		page->queue_prev = free_queue.tail;
+		page->queue_next = NULL;
 		if (free_queue.tail != NULL) {
-			free_queue.tail->free_next = page;
+			free_queue.tail->queue_next = page;
 		} else {
 			free_queue.head = page;
 		}
 		free_queue.tail = page;
-		page->on_free_queue = true;
+		page->queue_state = PMM_PAGE_QUEUE_FREE;
 		free_queue.count++;
 		return true;
 	}
 
 	next = free_queue.head;
 	while (next != NULL && next->phys_addr < page->phys_addr) {
-		next = next->free_next;
+		next = next->queue_next;
 	}
 
-	page->free_next = next;
+	page->queue_next = next;
 	if (next != NULL) {
-		page->free_prev = next->free_prev;
-		next->free_prev = page;
+		page->queue_prev = next->queue_prev;
+		next->queue_prev = page;
 	} else {
-		page->free_prev = free_queue.tail;
+		page->queue_prev = free_queue.tail;
 		free_queue.tail = page;
 	}
 
-	if (page->free_prev != NULL) {
-		page->free_prev->free_next = page;
+	if (page->queue_prev != NULL) {
+		page->queue_prev->queue_next = page;
 	} else {
 		free_queue.head = page;
 	}
 
-	page->on_free_queue = true;
+	page->queue_state = PMM_PAGE_QUEUE_FREE;
 	free_queue.count++;
 	return true;
 }
 
 static bool free_queue_remove(struct plane_page *page)
 {
-	if (page == NULL || !page->on_free_queue || free_queue.count == 0) {
+	if (page == NULL ||
+	    page->queue_state != PMM_PAGE_QUEUE_FREE ||
+	    free_queue.count == 0) {
 		return false;
 	}
 
-	if (page->free_prev != NULL) {
-		page->free_prev->free_next = page->free_next;
+	if (page->queue_prev != NULL) {
+		page->queue_prev->queue_next = page->queue_next;
 	} else {
-		free_queue.head = page->free_next;
+		free_queue.head = page->queue_next;
 	}
 
-	if (page->free_next != NULL) {
-		page->free_next->free_prev = page->free_prev;
+	if (page->queue_next != NULL) {
+		page->queue_next->queue_prev = page->queue_prev;
 	} else {
-		free_queue.tail = page->free_prev;
+		free_queue.tail = page->queue_prev;
 	}
 
-	page->free_prev = NULL;
-	page->free_next = NULL;
-	page->on_free_queue = false;
+	page->queue_prev = NULL;
+	page->queue_next = NULL;
+	page->queue_state = PMM_PAGE_QUEUE_NONE;
 	free_queue.count--;
 	return true;
 }
@@ -370,6 +377,20 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	}
 
 	return page_pool[index].state;
+}
+
+static bool page_is_free_queued(const struct plane_page *page)
+{
+	return page != NULL &&
+	       page->state == PLANE_PAGE_FREE &&
+	       page->queue_state == PMM_PAGE_QUEUE_FREE;
+}
+
+static bool page_is_allocated_unqueued(const struct plane_page *page)
+{
+	return page != NULL &&
+	       page->state == PLANE_PAGE_ALLOCATED &&
+	       page->queue_state == PMM_PAGE_QUEUE_NONE;
 }
 
 static bool page_state_range_matches(uint64_t phys_addr,
@@ -473,9 +494,10 @@ static bool init_page_metadata(void)
 
 			page_pool[page_index].phys_addr = phys;
 			page_pool[page_index].state = PLANE_PAGE_FREE;
-			page_pool[page_index].free_prev = NULL;
-			page_pool[page_index].free_next = NULL;
-			page_pool[page_index].on_free_queue = false;
+			page_pool[page_index].queue_prev = NULL;
+			page_pool[page_index].queue_next = NULL;
+			page_pool[page_index].queue_state =
+				PMM_PAGE_QUEUE_NONE;
 		}
 	}
 
@@ -558,8 +580,27 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 
 static bool page_range_is_free(uint64_t phys_addr, uint64_t page_count)
 {
-	return managed_range_contains(phys_addr, page_count) &&
-	       page_state_range_matches(phys_addr, page_count, PLANE_PAGE_FREE);
+	if (!managed_range_contains(phys_addr, page_count)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < page_count; i++) {
+		struct plane_page *page;
+		uint64_t page_phys;
+		uint64_t offset;
+
+		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
+		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+			return false;
+		}
+
+		page = plane_pmm_phys_to_page(page_phys);
+		if (!page_is_free_queued(page)) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 static bool alloc_flags_valid(uint32_t flags)
@@ -588,9 +629,20 @@ static bool zero_allocated_pages(uint64_t phys_addr, uint64_t page_count)
 static bool rollback_allocated_page_run(uint64_t phys_addr,
 					uint64_t page_count)
 {
-	if (!page_state_range_matches(phys_addr, page_count,
-				      PLANE_PAGE_ALLOCATED)) {
-		return false;
+	for (uint64_t i = 0; i < page_count; i++) {
+		struct plane_page *page;
+		uint64_t page_phys;
+		uint64_t offset;
+
+		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
+		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+			return false;
+		}
+
+		page = plane_pmm_phys_to_page(page_phys);
+		if (!page_is_allocated_unqueued(page)) {
+			return false;
+		}
 	}
 
 	for (uint64_t i = 0; i < page_count; i++) {
@@ -604,10 +656,6 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 		}
 
 		page = plane_pmm_phys_to_page(page_phys);
-		if (page == NULL || page->on_free_queue) {
-			return false;
-		}
-
 		page->state = PLANE_PAGE_FREE;
 		if (!free_queue_insert_ordered(page)) {
 			return false;
@@ -849,7 +897,7 @@ struct plane_pmm_stats plane_pmm_get_stats(void)
 			struct plane_page *page =
 				&page_pool[managed_ranges[i].page_index + j];
 
-			if (page->state == PLANE_PAGE_FREE) {
+			if (page_is_free_queued(page)) {
 				if (!in_free_run) {
 					free_run_count++;
 					in_free_run = true;
