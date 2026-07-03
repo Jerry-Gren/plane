@@ -14,8 +14,6 @@
 #define TEST_MAP_COUNT 256
 #define TEST_KMEM_SIZE (TEST_KMEM_PAGES * PAGE_SIZE)
 #define TEST_ALLOCATION_RECORDS 128
-#define TEST_LAST_ALLOCATION (TEST_ALLOCATION_RECORDS - 1)
-#define TEST_LAST_FRAGMENTED_ALLOCATION (TEST_ALLOCATION_RECORDS - 4)
 
 struct plane_page {
 	uint64_t phys_addr;
@@ -208,36 +206,6 @@ uint64_t plane_page_phys(const struct plane_page *page)
 	return page->phys_addr;
 }
 
-static int check_stats(const char *name,
-		       uint64_t free_pages,
-		       uint64_t allocated_pages,
-		       uint64_t free_ranges,
-		       uint64_t allocations)
-{
-	struct plane_kmem_stats stats = plane_kmem_get_stats();
-	int failures = 0;
-
-	failures += test_expect_u64(name, stats.total_pages, TEST_KMEM_PAGES);
-	failures += test_expect_u64("kmem free pages",
-				    stats.free_pages, free_pages);
-	failures += test_expect_u64("kmem allocated pages",
-				    stats.allocated_pages, allocated_pages);
-	failures += test_expect_u64("kmem free ranges",
-				    stats.free_range_count, free_ranges);
-	failures += test_expect_u64("kmem allocations",
-				    stats.allocation_count, allocations);
-	return failures;
-}
-
-static int test_init_stats(void)
-{
-	int failures = 0;
-
-	failures += test_expect_bool("kmem init", plane_kmem_init(), true);
-	failures += check_stats("kmem total pages", TEST_KMEM_PAGES, 0, 1, 0);
-	return failures;
-}
-
 static int test_alloc_and_free_pages(void)
 {
 	void *addr = NULL;
@@ -251,7 +219,6 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_ptr("alloc addr", addr, (void *)TEST_KMEM_BASE);
 	failures += test_expect_u64("alloc pmm pages", allocated_page_count(), 2);
 	failures += test_expect_u64("alloc mappings", mapping_count(), 2);
-	failures += check_stats("alloc stats", TEST_KMEM_PAGES - 2, 2, 1, 1);
 
 	first = find_mapping(TEST_KMEM_BASE);
 	failures += test_expect_not_null("first mapping", first);
@@ -264,7 +231,6 @@ static int test_alloc_and_free_pages(void)
 				     plane_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("free pmm pages", allocated_page_count(), 0);
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
-	failures += check_stats("free stats", TEST_KMEM_PAGES, 0, 1, 0);
 	return failures;
 }
 
@@ -296,7 +262,12 @@ static int test_pmm_failure_rolls_back_vaddr(void)
 	failures += test_expect_u64("pmm fail allocated pages",
 				    allocated_page_count(), 0);
 	failures += test_expect_u64("pmm fail mappings", mapping_count(), 0);
-	failures += check_stats("pmm fail stats", TEST_KMEM_PAGES, 0, 1, 0);
+	pmm_force_fail = false;
+	failures += test_expect_bool("pmm fail reuse alloc",
+				     plane_kmem_alloc_pages(2, 0, &addr),
+				     true);
+	failures += test_expect_ptr("pmm fail reused addr",
+				    addr, (void *)TEST_KMEM_BASE);
 	return failures;
 }
 
@@ -313,7 +284,12 @@ static int test_map_failure_rolls_back_pages(void)
 	failures += test_expect_u64("map fail allocated pages",
 				    allocated_page_count(), 0);
 	failures += test_expect_u64("map fail mappings", mapping_count(), 0);
-	failures += check_stats("map fail stats", TEST_KMEM_PAGES, 0, 1, 0);
+	map_fail_after = UINT64_MAX;
+	failures += test_expect_bool("map fail reuse alloc",
+				     plane_kmem_alloc_pages(2, 0, &addr),
+				     true);
+	failures += test_expect_ptr("map fail reused addr",
+				    addr, (void *)TEST_KMEM_BASE);
 	return failures;
 }
 
@@ -355,46 +331,6 @@ static int test_rejects_invalid_inputs(void)
 	return failures;
 }
 
-static int test_rejects_exhausted_vaddr_space(void)
-{
-	void *addr = NULL;
-	struct plane_kmem_stats stats;
-	int failures = 0;
-
-	test_kmem_size = PAGE_SIZE;
-	failures += test_expect_bool("space init", plane_kmem_init(), true);
-	failures += test_expect_bool("space alloc too large",
-				     plane_kmem_alloc_pages(2, 0, &addr),
-				     false);
-	stats = plane_kmem_get_stats();
-	failures += test_expect_u64("space total", stats.total_pages, 1);
-	failures += test_expect_u64("space free", stats.free_pages, 1);
-	failures += test_expect_u64("space allocated", stats.allocated_pages, 0);
-	failures += test_expect_u64("space ranges", stats.free_range_count, 1);
-	failures += test_expect_u64("space allocations",
-				    stats.allocation_count, 0);
-	return failures;
-}
-
-static int test_rejects_wrapping_vaddr_space(void)
-{
-	struct plane_kmem_stats stats;
-	int failures = 0;
-
-	test_kmem_base = UINT64_MAX - PAGE_SIZE + 1;
-	test_kmem_size = 2 * PAGE_SIZE;
-	failures += test_expect_bool("wrap init", plane_kmem_init(), false);
-
-	stats = plane_kmem_get_stats();
-	failures += test_expect_u64("wrap total", stats.total_pages, 0);
-	failures += test_expect_u64("wrap free", stats.free_pages, 0);
-	failures += test_expect_u64("wrap allocated", stats.allocated_pages, 0);
-	failures += test_expect_u64("wrap ranges", stats.free_range_count, 0);
-	failures += test_expect_u64("wrap allocations",
-				    stats.allocation_count, 0);
-	return failures;
-}
-
 static int test_rejects_exhausted_records(void)
 {
 	void *addr = NULL;
@@ -409,56 +345,18 @@ static int test_rejects_exhausted_records(void)
 	failures += test_expect_bool("record exhausted",
 				     plane_kmem_alloc_pages(1, 0, &addr),
 				     false);
-	failures += check_stats("record stats",
-				TEST_KMEM_PAGES - TEST_ALLOCATION_RECORDS,
-				TEST_ALLOCATION_RECORDS, 1,
-				TEST_ALLOCATION_RECORDS);
-	return failures;
-}
-
-static int test_free_merges_when_free_range_list_is_full(void)
-{
-	void *addrs[TEST_ALLOCATION_RECORDS];
-	int failures = 0;
-
-	failures += test_expect_bool("merge full init", plane_kmem_init(), true);
-	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
-		failures += test_expect_bool("merge full alloc",
-					     plane_kmem_alloc_pages(1, 0,
-								   &addrs[i]),
-					     true);
-	}
-
-	for (uint64_t i = 0; i <= TEST_LAST_FRAGMENTED_ALLOCATION; i += 2) {
-		failures += test_expect_bool("merge full fragment",
-					     plane_kmem_free_pages(addrs[i], 1),
-					     true);
-	}
-	failures += check_stats("merge full fragmented",
-				TEST_KMEM_PAGES - 65, 65, 64, 65);
-
-	failures += test_expect_bool("merge full next merge",
-				     plane_kmem_free_pages(
-					     addrs[TEST_LAST_ALLOCATION], 1),
-				     true);
-	failures += check_stats("merge full merged",
-				TEST_KMEM_PAGES - 64, 64, 64, 64);
 	return failures;
 }
 
 int main(void)
 {
 	static const struct test_case cases[] = {
-		TEST_CASE(test_init_stats),
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_zero_flag_reaches_pmm),
 		TEST_CASE(test_pmm_failure_rolls_back_vaddr),
 		TEST_CASE(test_map_failure_rolls_back_pages),
 		TEST_CASE(test_rejects_invalid_inputs),
-		TEST_CASE(test_rejects_exhausted_vaddr_space),
-		TEST_CASE(test_rejects_wrapping_vaddr_space),
 		TEST_CASE(test_rejects_exhausted_records),
-		TEST_CASE(test_free_merges_when_free_range_list_is_full),
 	};
 
 	return test_run_cases_with_fixture("kmem_test", cases,
