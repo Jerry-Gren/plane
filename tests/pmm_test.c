@@ -231,7 +231,8 @@ static int test_phys_to_page_metadata(void)
 				      plane_vm_page_state(NULL),
 				      PLANE_VM_PAGE_INVALID);
 	failures += test_expect_u64("metadata null phys",
-			       plane_vm_page_phys(NULL), UINT64_MAX);
+				    plane_vm_page_phys(NULL),
+				    PLANE_VM_PAGE_NO_PHYS);
 
 	return failures;
 }
@@ -426,6 +427,7 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats before;
 	struct plane_pmm_stats after;
+	struct plane_vm_object object = {0};
 	struct plane_page *guard;
 	uint64_t wire_count = UINT64_MAX;
 	int failures = 0;
@@ -433,6 +435,9 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("guard pmm init",
 				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("guard object init",
+				     plane_vm_object_init(&object, PAGE_SIZE),
+				     true);
 	before = plane_pmm_get_stats();
 	guard = plane_vm_page_create_guard();
 	failures += test_expect_not_null("guard create", guard);
@@ -442,9 +447,11 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	failures += test_expect_bool("guard query",
 				     plane_vm_page_is_guard(guard), true);
 	failures += test_expect_u64("guard phys",
-				    plane_vm_page_phys(guard), UINT64_MAX);
+				    plane_vm_page_phys(guard),
+				    PLANE_VM_PAGE_GUARD_PHYS);
 	failures += test_expect_null("guard from phys",
-				     plane_vm_page_from_phys(UINT64_MAX));
+				     plane_vm_page_from_phys(
+					     PLANE_VM_PAGE_GUARD_PHYS));
 	failures += test_expect_bool("guard wire rejected",
 				     plane_vm_page_wire(guard), false);
 	failures += test_expect_bool("guard unwire rejected",
@@ -461,8 +468,19 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	failures += check_page_state("guard released state",
 				      plane_vm_page_state(guard),
 				      PLANE_VM_PAGE_INVALID);
+	failures += test_expect_u64("guard released phys",
+				    plane_vm_page_phys(guard),
+				    PLANE_VM_PAGE_NO_PHYS);
 	failures += test_expect_bool("guard released query",
 				     plane_vm_page_is_guard(guard), false);
+	failures += test_expect_bool("guard released wire count rejected",
+				     plane_vm_page_wire_count(guard,
+							      &wire_count),
+				     false);
+	failures += test_expect_bool("guard released attach rejected",
+				     plane_vm_page_attach_object(guard,
+								 &object, 0),
+				     false);
 	failures += test_expect_bool("guard double release rejected",
 				     plane_vm_page_release_guard(guard), false);
 	after = plane_pmm_get_stats();

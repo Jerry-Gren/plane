@@ -56,9 +56,14 @@ static bool is_test_guard_page(const struct plane_page *page)
 	       page < &test_guard_pages[TEST_GUARD_PAGE_COUNT];
 }
 
+static bool is_test_active_guard_page(const struct plane_page *page)
+{
+	return is_test_guard_page(page) && page->guard;
+}
+
 static bool is_test_vm_page(const struct plane_page *page)
 {
-	return is_test_page(page) || is_test_guard_page(page);
+	return is_test_page(page) || is_test_active_guard_page(page);
 }
 
 static uint64_t allocated_page_count(void)
@@ -249,10 +254,11 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 uint64_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (is_test_guard_page(page)) {
-		return UINT64_MAX;
+		return page->guard ? PLANE_VM_PAGE_GUARD_PHYS :
+				     PLANE_VM_PAGE_NO_PHYS;
 	}
 	if (!is_test_page(page)) {
-		return UINT64_MAX;
+		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
 	return page->phys_addr;
@@ -447,7 +453,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
 		if (!test_guard_pages[i].guard) {
 			test_guard_pages[i] = (struct plane_page){0};
-			test_guard_pages[i].phys_addr = UINT64_MAX;
+			test_guard_pages[i].phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
 			test_guard_pages[i].guard = true;
 			return &test_guard_pages[i];
 		}
@@ -471,6 +477,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	}
 
 	page->guard = false;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
 	return true;
 }
 

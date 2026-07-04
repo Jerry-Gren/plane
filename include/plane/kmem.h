@@ -18,7 +18,9 @@ struct plane_vm_object;
  * small kmem/vm_map foundation, not a sub-page heap or pageable VM.
  * PLANE_KMEM_ALLOC_ZERO clears the complete backing page range.
  * PLANE_KMEM_ALLOC_GUARD reserves one unmapped guard page before and after the
- * returned allocation. Guard pages have no PMM backing.
+ * returned allocation. This kernel-object path follows XNU's KMA_KOBJECT
+ * direction: guard pages are VA-only sentinels here, with no PMM backing and
+ * no resident guard page materialized in the object.
  * PLANE_KMEM_ALLOC_READONLY records read-only entry protection in the kernel
  * map; kmem consumes that protection when creating and protecting mappings.
  * Protect APIs only support exact allocation ranges in this early layer.

@@ -11,8 +11,6 @@
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
-#include "vm_page_internal.h"
-
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
 
 static struct plane_vm_map_entry kernel_map_entries[PLANE_KERNEL_MAP_MAX_ENTRIES];
@@ -157,110 +155,6 @@ static bool release_mapped_page(struct plane_vm_object *object,
 	return plane_pmm_free_page_phys(phys_addr);
 }
 
-static bool create_guard_page(struct plane_vm_object *object,
-			      uint64_t object_offset)
-{
-	struct plane_page *page = plane_vm_page_create_guard();
-
-	if (page == NULL) {
-		return false;
-	}
-	if (!plane_vm_object_insert_page(object, object_offset, page)) {
-		BUG_ON_MSG(!plane_vm_page_release_guard(page),
-			   "failed to release unused kmem guard page");
-		return false;
-	}
-	return true;
-}
-
-static bool release_guard_page(struct plane_vm_object *object,
-			       uint64_t object_offset)
-{
-	struct plane_page *page = plane_vm_object_lookup_page(object,
-							     object_offset);
-
-	if (page == NULL || !plane_vm_page_is_guard(page)) {
-		return false;
-	}
-	if (plane_vm_object_remove_page(object, object_offset) != page) {
-		return false;
-	}
-	return plane_vm_page_release_guard(page);
-}
-
-static bool insert_guard_pages(struct plane_vm_object *object,
-			       const struct plane_vm_map_allocation_info *info)
-{
-	uint64_t guard_end;
-	uint64_t reserved_end;
-	uint64_t reserved_size;
-	uint64_t user_size;
-	bool left_inserted = false;
-
-	if (info->reserved_pages == info->user_pages) {
-		return true;
-	}
-	if (!checked_page_offset(info->user_pages, &user_size) ||
-	    !checked_page_offset(info->reserved_pages, &reserved_size) ||
-	    !checked_add_u64(info->user_start, user_size, &guard_end) ||
-	    !checked_add_u64(info->reserved_start, reserved_size,
-			     &reserved_end)) {
-		return false;
-	}
-
-	if (info->reserved_start < info->user_start) {
-		if (!create_guard_page(object, info->reserved_start)) {
-			return false;
-		}
-		left_inserted = true;
-	}
-	if (guard_end < reserved_end) {
-		if (!create_guard_page(object, guard_end)) {
-			goto fail;
-		}
-	}
-
-	return true;
-
-fail:
-	if (left_inserted) {
-		BUG_ON_MSG(!release_guard_page(object, info->reserved_start),
-			   "failed to rollback left kmem guard page");
-	}
-	return false;
-}
-
-static bool release_guard_pages(struct plane_vm_object *object,
-				const struct plane_vm_map_allocation_info *info)
-{
-	uint64_t guard_end;
-	uint64_t reserved_end;
-	uint64_t reserved_size;
-	uint64_t user_size;
-
-	if (info->reserved_pages == info->user_pages) {
-		return true;
-	}
-	if (!checked_page_offset(info->user_pages, &user_size) ||
-	    !checked_page_offset(info->reserved_pages, &reserved_size) ||
-	    !checked_add_u64(info->user_start, user_size, &guard_end) ||
-	    !checked_add_u64(info->reserved_start, reserved_size,
-			     &reserved_end)) {
-		return false;
-	}
-
-	if (info->reserved_start < info->user_start &&
-	    !release_guard_page(object, info->reserved_start)) {
-		return false;
-	}
-	if (guard_end < reserved_end &&
-	    !release_guard_page(object, guard_end)) {
-		return false;
-	}
-
-	return true;
-}
-
 static bool rollback_mapped_pages(uint64_t vaddr,
 				  struct plane_vm_object *object,
 				  uint64_t object_offset,
@@ -344,7 +238,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 		}
 
 		phys_addr = plane_vm_page_phys(page);
-		if (phys_addr == UINT64_MAX) {
+		if (phys_addr == PLANE_VM_PAGE_NO_PHYS) {
 			bool page_ok = rollback_allocated_page(phys_addr);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);
@@ -548,11 +442,10 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 
 	BUG_ON_MSG(!plane_vm_map_lookup_allocation(map, base, page_count, &info),
 		   "failed to find reserved kmem allocation");
-	if (!insert_guard_pages(object, &info)) {
-		BUG_ON_MSG(!plane_vm_map_free_pages(map, base, page_count),
-			   "failed to release kmem virtual reservation");
-		return false;
-	}
+	/*
+	 * This is the XNU-like KMA_KOBJECT path: guard pages are VA-only
+	 * sentinels in the map entry, not materialized resident pages.
+	 */
 	BUG_ON_MSG(!plane_vm_map_wire_pages(map, base, page_count),
 		   "failed to wire kmem virtual reservation");
 
@@ -560,8 +453,6 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 				 flags, info.prot)) {
 		BUG_ON_MSG(!plane_vm_map_unwire_pages(map, base, page_count),
 			   "failed to unwire kmem virtual reservation");
-		BUG_ON_MSG(!release_guard_pages(object, &info),
-			   "failed to rollback kmem guard pages");
 		BUG_ON_MSG(!plane_vm_map_free_pages(map, base, page_count),
 			   "failed to release kmem virtual reservation");
 		return false;
@@ -644,8 +535,6 @@ bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 	BUG_ON_MSG(!rollback_mapped_pages(addr, object, info.object_offset,
 					  page_count),
 		   "failed to release kmem backing pages");
-	BUG_ON_MSG(!release_guard_pages(object, &info),
-		   "failed to release kmem guard pages");
 	BUG_ON_MSG(!plane_vm_map_unwire_pages(map, addr, page_count),
 		   "failed to unwire kmem virtual reservation");
 	BUG_ON_MSG(!plane_vm_map_free_pages(map, addr, page_count),

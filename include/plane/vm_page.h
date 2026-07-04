@@ -17,6 +17,9 @@
 struct plane_page;
 struct plane_vm_object;
 
+#define PLANE_VM_PAGE_NO_PHYS UINT64_MAX
+#define PLANE_VM_PAGE_GUARD_PHYS (UINT64_MAX - 1)
+
 enum plane_vm_page_state {
 	PLANE_VM_PAGE_INVALID = 0,
 	PLANE_VM_PAGE_FREE,

@@ -87,9 +87,14 @@ static bool is_test_guard_page(const struct plane_page *page)
 	       page < &test_guard_pages[TEST_GUARD_PAGE_COUNT];
 }
 
+static bool is_test_active_guard_page(const struct plane_page *page)
+{
+	return is_test_guard_page(page) && page->guard;
+}
+
 static bool is_test_vm_page(const struct plane_page *page)
 {
-	return is_test_page(page) || is_test_guard_page(page);
+	return is_test_page(page) || is_test_active_guard_page(page);
 }
 
 static void reset_kmem_test(void)
@@ -116,7 +121,7 @@ static void reset_kmem_test(void)
 	}
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
 		test_guard_pages[i] = (struct plane_page){0};
-		test_guard_pages[i].phys_addr = UINT64_MAX;
+		test_guard_pages[i].phys_addr = PLANE_VM_PAGE_NO_PHYS;
 	}
 
 	for (uint64_t i = 0; i < TEST_MAP_COUNT; i++) {
@@ -389,10 +394,11 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 uint64_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (is_test_guard_page(page)) {
-		return UINT64_MAX;
+		return page->guard ? PLANE_VM_PAGE_GUARD_PHYS :
+				     PLANE_VM_PAGE_NO_PHYS;
 	}
 	if (!is_test_page(page)) {
-		return UINT64_MAX;
+		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
 	return page->phys_addr;
@@ -587,7 +593,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
 		if (!test_guard_pages[i].guard) {
 			test_guard_pages[i] = (struct plane_page){0};
-			test_guard_pages[i].phys_addr = UINT64_MAX;
+			test_guard_pages[i].phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
 			test_guard_pages[i].guard = true;
 			return &test_guard_pages[i];
 		}
@@ -611,6 +617,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	}
 
 	page->guard = false;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
 	return true;
 }
 
@@ -921,23 +928,20 @@ static int test_guard_alloc_and_free_pages(void)
 	failures += test_expect_u64("guard pmm pages",
 				    allocated_page_count(), 2);
 	failures += test_expect_u64("guard wired pages", wired_page_count(), 2);
-	failures += test_expect_u64("guard object pages", object_page_count(), 4);
-	failures += test_expect_u64("guard active pages", guard_page_count(), 2);
+	failures += test_expect_u64("guard object pages", object_page_count(), 2);
+	failures += test_expect_u64("guard active pages", guard_page_count(), 0);
 	failures += test_expect_u64("guard object resident count",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
-				    4);
+				    2);
 	failures += test_expect_u64("guard object wired count",
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    2);
 	failures += test_expect_u64("guard mappings", mapping_count(), 2);
-	failures += test_expect_bool("guard object left page",
-				     plane_vm_page_is_guard(
-					     plane_vm_object_lookup_page(
-						     &test_object,
-						     TEST_KMEM_BASE)),
-				     true);
+	failures += test_expect_null("guard object left absent",
+				     plane_vm_object_lookup_page(&test_object,
+								 TEST_KMEM_BASE));
 	failures += test_expect_ptr("guard object first user",
 				    plane_vm_object_lookup_page(&test_object,
 								kmem_page_vaddr(1)),
@@ -946,12 +950,9 @@ static int test_guard_alloc_and_free_pages(void)
 				    plane_vm_object_lookup_page(&test_object,
 								kmem_page_vaddr(2)),
 				    &test_pages[1]);
-	failures += test_expect_bool("guard object right page",
-				     plane_vm_page_is_guard(
-					     plane_vm_object_lookup_page(
-						     &test_object,
-						     kmem_page_vaddr(3))),
-				     true);
+	failures += test_expect_null("guard object right absent",
+				     plane_vm_object_lookup_page(&test_object,
+								 kmem_page_vaddr(3)));
 	failures += test_expect_ptr("guard page object",
 				    plane_vm_page_object(&test_pages[0]),
 				    &test_object);
@@ -1030,13 +1031,13 @@ static int test_byte_guard_alloc_and_free(void)
 	failures += test_expect_u64("byte guard wired pages",
 				    wired_page_count(), 1);
 	failures += test_expect_u64("byte guard object pages",
-				    object_page_count(), 3);
+				    object_page_count(), 1);
 	failures += test_expect_u64("byte guard active pages",
-				    guard_page_count(), 2);
+				    guard_page_count(), 0);
 	failures += test_expect_u64("byte guard object resident count",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
-				    3);
+				    1);
 	failures += test_expect_u64("byte guard object wired count",
 				    plane_vm_object_wired_page_count(
 					    &test_object),
