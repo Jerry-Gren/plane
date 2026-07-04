@@ -8,9 +8,7 @@ struct plane_page;
 struct plane_vm_object;
 
 /*
- * VM resident-page helpers.
- *
- * These are the private mutation side of plane_page resident metadata.
+ * VM page resident metadata mutation helpers.
  * Public callers should use vm_object insert/remove instead.
  */
 bool plane_vm_page_attach_object(struct plane_page *page,
@@ -19,7 +17,11 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset);
-bool plane_vm_object_page_became_wired(struct plane_vm_object *object);
-bool plane_vm_object_page_became_unwired(struct plane_vm_object *object);
+struct plane_page *plane_vm_page_object_prev(const struct plane_page *page);
+struct plane_page *plane_vm_page_object_next(const struct plane_page *page);
+bool plane_vm_page_set_object_prev(struct plane_page *page,
+				   struct plane_page *prev);
+bool plane_vm_page_set_object_next(struct plane_page *page,
+				   struct plane_page *next);
 
 #endif /* PLANE_VM_PAGE_INTERNAL_H */

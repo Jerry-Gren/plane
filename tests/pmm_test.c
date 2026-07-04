@@ -423,7 +423,6 @@ static int test_wire_rejects_invalid_pages(void)
 static int test_page_object_identity_blocks_free(void)
 {
 	struct plane_mem_info mem = {0};
-	struct plane_vm_object_page object_pages[1] = {0};
 	struct plane_vm_object object = {0};
 	struct plane_page *page;
 	uint64_t offset = 0;
@@ -436,8 +435,7 @@ static int test_page_object_identity_blocks_free(void)
 	failures += test_expect_bool("object identity alloc",
 				     plane_pmm_alloc_page_phys(&phys), true);
 	failures += test_expect_bool("object identity object init",
-				     plane_vm_object_init(&object, object_pages,
-							  1, 0x8000),
+				     plane_vm_object_init(&object, 0x8000),
 				     true);
 	page = plane_vm_page_from_phys(phys);
 	failures += test_expect_null("object identity initial object",

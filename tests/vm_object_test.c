@@ -14,15 +14,16 @@ struct plane_page {
 	struct plane_vm_object *object;
 	uint64_t object_offset;
 	uint64_t wire_count;
+	struct plane_page *object_prev;
+	struct plane_page *object_next;
 	enum plane_vm_page_state state;
 };
 
-static struct plane_vm_object_page test_pages[TEST_OBJECT_PAGES];
-static struct plane_vm_object_page second_pages[TEST_OBJECT_PAGES];
 static struct plane_vm_object test_object;
 static struct plane_vm_object second_object;
 static struct plane_page allocated_page;
 static struct plane_page second_allocated_page;
+static struct plane_page third_allocated_page;
 static struct plane_page free_page;
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -98,19 +99,57 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	return true;
 }
 
+struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
+{
+	if (page == NULL) {
+		return NULL;
+	}
+
+	return page->object_prev;
+}
+
+struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
+{
+	if (page == NULL) {
+		return NULL;
+	}
+
+	return page->object_next;
+}
+
+bool plane_vm_page_set_object_prev(struct plane_page *page,
+				   struct plane_page *prev)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	page->object_prev = prev;
+	return true;
+}
+
+bool plane_vm_page_set_object_next(struct plane_page *page,
+				   struct plane_page *next)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	page->object_next = next;
+	return true;
+}
+
 static void reset_vm_object_test(void)
 {
 	test_object = (struct plane_vm_object){0};
 	second_object = (struct plane_vm_object){0};
-	for (uint64_t i = 0; i < TEST_OBJECT_PAGES; i++) {
-		test_pages[i] = (struct plane_vm_object_page){0};
-		second_pages[i] = (struct plane_vm_object_page){0};
-	}
 	allocated_page = (struct plane_page){0};
 	second_allocated_page = (struct plane_page){0};
+	third_allocated_page = (struct plane_page){0};
 	free_page = (struct plane_page){0};
 	allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	second_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
+	third_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	free_page.state = PLANE_VM_PAGE_FREE;
 }
 
@@ -119,29 +158,14 @@ static int test_init_rejects_invalid_inputs(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object init null object",
-				     plane_vm_object_init(NULL, test_pages,
-							  TEST_OBJECT_PAGES,
-							  TEST_OBJECT_SIZE),
-				     false);
-	failures += test_expect_bool("object init null pages",
-				     plane_vm_object_init(&test_object, NULL,
-							  TEST_OBJECT_PAGES,
-							  TEST_OBJECT_SIZE),
-				     false);
-	failures += test_expect_bool("object init empty storage",
-				     plane_vm_object_init(&test_object,
-							  test_pages, 0,
+				     plane_vm_object_init(NULL,
 							  TEST_OBJECT_SIZE),
 				     false);
 	failures += test_expect_bool("object init zero size",
-				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES, 0),
+				     plane_vm_object_init(&test_object, 0),
 				     false);
 	failures += test_expect_bool("object init unaligned size",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE - 1),
 				     false);
 	failures += test_expect_u64("invalid resident count",
@@ -158,14 +182,10 @@ static int test_init_is_one_shot(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	failures += test_expect_bool("object repeat init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     false);
 	return failures;
@@ -179,8 +199,6 @@ static int test_insert_lookup_and_remove_page(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	failures += test_expect_u64("object initial resident count",
@@ -242,8 +260,6 @@ static int test_insert_tracks_wired_page_count(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	allocated_page.wire_count = 2;
@@ -280,8 +296,6 @@ static int test_insert_rejects_invalid_page_or_offset(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	failures += test_expect_bool("object reject unaligned offset",
@@ -310,8 +324,6 @@ static int test_rejects_duplicate_and_missing_remove(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	failures += test_expect_bool("object insert",
@@ -333,8 +345,6 @@ static int test_rejects_duplicate_and_missing_remove(void)
 				     false);
 	failures += test_expect_bool("second object init",
 				     plane_vm_object_init(&second_object,
-							  second_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	failures += test_expect_bool("object reject page in other object",
@@ -365,8 +375,6 @@ static int test_multiple_pages_update_counts(void)
 
 	failures += test_expect_bool("object init",
 				     plane_vm_object_init(&test_object,
-							  test_pages,
-							  TEST_OBJECT_PAGES,
 							  TEST_OBJECT_SIZE),
 				     true);
 	second_allocated_page.wire_count = 1;
@@ -380,29 +388,45 @@ static int test_multiple_pages_update_counts(void)
 					     &test_object, PAGE_SIZE,
 					     &second_allocated_page),
 				     true);
+	failures += test_expect_bool("object insert third",
+				     plane_vm_object_insert_page(
+					     &test_object, 2 * PAGE_SIZE,
+					     &third_allocated_page),
+				     true);
 	failures += test_expect_u64("object multi resident count",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
-				    2);
+				    3);
 	failures += test_expect_u64("object multi wired count",
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    1);
-	failures += test_expect_ptr("object remove first",
-				    plane_vm_object_remove_page(&test_object, 0),
-				    &allocated_page);
-	failures += test_expect_u64("object multi resident after first",
-				    plane_vm_object_resident_page_count(
-					    &test_object),
-				    1);
-	failures += test_expect_u64("object multi wired after first",
-				    plane_vm_object_wired_page_count(
-					    &test_object),
-				    1);
-	failures += test_expect_ptr("object remove second",
+	failures += test_expect_ptr("object remove middle",
 				    plane_vm_object_remove_page(&test_object,
 								PAGE_SIZE),
 				    &second_allocated_page);
+	failures += test_expect_u64("object multi resident after middle",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    2);
+	failures += test_expect_u64("object multi wired after middle",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_ptr("object lookup head",
+				    plane_vm_object_lookup_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_ptr("object lookup tail",
+				    plane_vm_object_lookup_page(&test_object,
+								2 * PAGE_SIZE),
+				    &third_allocated_page);
+	failures += test_expect_ptr("object remove head",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_ptr("object remove tail",
+				    plane_vm_object_remove_page(&test_object,
+								2 * PAGE_SIZE),
+				    &third_allocated_page);
 	failures += test_expect_u64("object multi resident empty",
 				    plane_vm_object_resident_page_count(
 					    &test_object),

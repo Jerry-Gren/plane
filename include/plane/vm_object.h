@@ -15,29 +15,21 @@
  * references, pager accounting, ledgers, or pageout state.
  *
  * A plane_vm_object must be zero-initialized before its first init call.
- * Resident page storage does not need to be zeroed by callers; init resets it.
  */
 
 struct plane_page;
 
-struct plane_vm_object_page {
-	uint64_t offset;
-	struct plane_page *page;
-	bool used;
-};
-
 struct plane_vm_object {
 	uint64_t offset_limit;
-	uint64_t page_capacity;
 	uint64_t resident_page_count;
 	uint64_t wired_page_count;
-	struct plane_vm_object_page *pages;
+	struct plane_page *resident_head;
+	struct plane_page *resident_tail;
+	struct plane_page *resident_hint;
 	bool initialized;
 };
 
 bool plane_vm_object_init(struct plane_vm_object *object,
-			  struct plane_vm_object_page *pages,
-			  uint64_t page_capacity,
 			  uint64_t offset_limit);
 bool plane_vm_object_insert_page(struct plane_vm_object *object,
 				 uint64_t offset,

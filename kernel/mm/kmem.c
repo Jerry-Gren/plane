@@ -12,11 +12,9 @@
 #include <plane/vm_object.h>
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
-#define PLANE_KERNEL_OBJECT_MAX_PAGES 4096
 
 static struct plane_vm_map_entry kernel_map_entries[PLANE_KERNEL_MAP_MAX_ENTRIES];
 static struct plane_vm_map kernel_map;
-static struct plane_vm_object_page kernel_object_pages[PLANE_KERNEL_OBJECT_MAX_PAGES];
 static struct plane_vm_object kernel_object;
 static bool kmem_initialized;
 
@@ -323,8 +321,7 @@ bool plane_kmem_init(void)
 	    !is_page_aligned(base) ||
 	    !is_page_aligned(size) ||
 	    !checked_add_u64(base, size, &object_size) ||
-	    ARRAY_SIZE(kernel_map_entries) == 0 ||
-	    ARRAY_SIZE(kernel_object_pages) == 0) {
+	    ARRAY_SIZE(kernel_map_entries) == 0) {
 		return false;
 	}
 
@@ -333,9 +330,7 @@ bool plane_kmem_init(void)
 		return false;
 	}
 
-	BUG_ON_MSG(!plane_vm_object_init(&kernel_object, kernel_object_pages,
-					 ARRAY_SIZE(kernel_object_pages),
-					 object_size),
+	BUG_ON_MSG(!plane_vm_object_init(&kernel_object, object_size),
 		   "failed to initialize kernel object");
 
 	kmem_initialized = true;

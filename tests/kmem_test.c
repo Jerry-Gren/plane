@@ -22,7 +22,6 @@
 
 static struct plane_vm_map_entry test_map_entries[TEST_ALLOCATION_RECORDS];
 static struct plane_vm_map test_map;
-static struct plane_vm_object_page test_object_pages[TEST_PAGE_COUNT];
 static struct plane_vm_object test_object;
 
 struct plane_page {
@@ -30,6 +29,8 @@ struct plane_page {
 	uint64_t wire_count;
 	struct plane_vm_object *object;
 	uint64_t object_offset;
+	struct plane_page *object_prev;
+	struct plane_page *object_next;
 	bool allocated;
 	uint32_t flags;
 };
@@ -58,15 +59,14 @@ static void reset_kmem_test(void)
 	for (uint64_t i = 0; i < TEST_ALLOCATION_RECORDS; i++) {
 		test_map_entries[i] = (struct plane_vm_map_entry){0};
 	}
-	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
-		test_object_pages[i] = (struct plane_vm_object_page){0};
-	}
 
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		test_pages[i].phys_addr = i * PAGE_SIZE;
 		test_pages[i].wire_count = 0;
 		test_pages[i].object = NULL;
 		test_pages[i].object_offset = 0;
+		test_pages[i].object_prev = NULL;
+		test_pages[i].object_next = NULL;
 		test_pages[i].allocated = false;
 		test_pages[i].flags = 0;
 	}
@@ -90,8 +90,7 @@ static void reset_kmem_test(void)
 			       TEST_KMEM_SIZE)) {
 		test_fail("failed to init kmem test map");
 	}
-	if (!plane_vm_object_init(&test_object, test_object_pages,
-				  TEST_PAGE_COUNT, TEST_KMEM_OBJECT_SIZE)) {
+	if (!plane_vm_object_init(&test_object, TEST_KMEM_OBJECT_SIZE)) {
 		test_fail("failed to init kmem test object");
 	}
 }
@@ -151,15 +150,7 @@ static uint64_t wired_page_count(void)
 
 static uint64_t object_page_count(void)
 {
-	uint64_t count = 0;
-
-	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
-		if (test_object_pages[i].used) {
-			count++;
-		}
-	}
-
-	return count;
+	return plane_vm_object_resident_page_count(&test_object);
 }
 
 static uint64_t kmem_page_vaddr(uint64_t page)
@@ -420,6 +411,54 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 
 	page->object = NULL;
 	page->object_offset = 0;
+	return true;
+}
+
+struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return NULL;
+	}
+
+	return page->object_prev;
+}
+
+struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return NULL;
+	}
+
+	return page->object_next;
+}
+
+bool plane_vm_page_set_object_prev(struct plane_page *page,
+				   struct plane_page *prev)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	page->object_prev = prev;
+	return true;
+}
+
+bool plane_vm_page_set_object_next(struct plane_page *page,
+				   struct plane_page *next)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	page->object_next = next;
 	return true;
 }
 
