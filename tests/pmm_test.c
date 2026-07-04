@@ -43,8 +43,8 @@ static void reset_direct_map_stub(void)
 }
 
 static int check_page_state(const char *name,
-			     enum plane_page_state actual,
-			     enum plane_page_state expected)
+			     enum plane_vm_page_state actual,
+			     enum plane_vm_page_state expected)
 {
 	if (actual == expected) {
 		return 0;
@@ -206,31 +206,31 @@ static int test_phys_to_page_metadata(void)
 	add_region(&mem, 0x8000, 0x1000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("metadata init", plane_pmm_init(&mem), true);
 
-	page = plane_pmm_phys_to_page(0x1000);
+	page = plane_vm_page_from_phys(0x1000);
 	failures += test_expect_not_null("metadata page 0x1000", page);
 	failures += test_expect_u64("metadata phys 0x1000",
-			       plane_page_phys(page), 0x1000);
+			       plane_vm_page_phys(page), 0x1000);
 	failures += check_page_state("metadata state",
-				      plane_page_state(page),
-				      PLANE_PAGE_METADATA);
+				      plane_vm_page_state(page),
+				      PLANE_VM_PAGE_METADATA);
 
-	page = plane_pmm_phys_to_page(0x8000);
+	page = plane_vm_page_from_phys(0x8000);
 	failures += test_expect_not_null("metadata non-contig page", page);
 	failures += test_expect_u64("metadata non-contig phys",
-			       plane_page_phys(page), 0x8000);
+			       plane_vm_page_phys(page), 0x8000);
 	failures += check_page_state("metadata non-contig state",
-				      plane_page_state(page),
-				      PLANE_PAGE_FREE);
+				      plane_vm_page_state(page),
+				      PLANE_VM_PAGE_FREE);
 
 	failures += test_expect_null("metadata reject unaligned",
-				    plane_pmm_phys_to_page(0x1001));
+				    plane_vm_page_from_phys(0x1001));
 	failures += test_expect_null("metadata reject unmanaged",
-				    plane_pmm_phys_to_page(0x4000));
+				    plane_vm_page_from_phys(0x4000));
 	failures += check_page_state("metadata null state",
-				      plane_page_state(NULL),
-				      PLANE_PAGE_INVALID);
+				      plane_vm_page_state(NULL),
+				      PLANE_VM_PAGE_INVALID);
 	failures += test_expect_u64("metadata null phys",
-			       plane_page_phys(NULL), UINT64_MAX);
+			       plane_vm_page_phys(NULL), UINT64_MAX);
 
 	return failures;
 }
@@ -279,10 +279,10 @@ static int test_page_api_allocates_and_frees_metadata(void)
 				plane_pmm_alloc_page(&page), true);
 	failures += test_expect_not_null("allocated page api page", page);
 	failures += test_expect_u64("allocated page api phys",
-			       plane_page_phys(page), 0x2000);
+			       plane_vm_page_phys(page), 0x2000);
 	failures += check_page_state("allocated page api state",
-				      plane_page_state(page),
-				      PLANE_PAGE_ALLOCATED);
+				      plane_vm_page_state(page),
+				      PLANE_VM_PAGE_ALLOCATED);
 
 	stats = plane_pmm_get_stats();
 	failures += check_stats("page api allocated", &stats,
@@ -295,8 +295,8 @@ static int test_page_api_allocates_and_frees_metadata(void)
 	failures += test_expect_bool("free page api page",
 				plane_pmm_free_page(page), true);
 	failures += check_page_state("freed page api state",
-				      plane_page_state(page),
-				      PLANE_PAGE_FREE);
+				      plane_vm_page_state(page),
+				      PLANE_VM_PAGE_FREE);
 	failures += test_expect_bool("reject page api double free",
 				plane_pmm_free_page(page), false);
 
@@ -321,20 +321,20 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 	failures += test_expect_bool("wire alloc",
 				plane_pmm_alloc_page_phys(&phys), true);
 	failures += test_expect_u64("wire alloc phys", phys, 0x2000);
-	page = plane_pmm_phys_to_page(phys);
+	page = plane_vm_page_from_phys(phys);
 	failures += test_expect_bool("wire initial count query",
 				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire initial count", wire_count, 0);
 
 	failures += test_expect_bool("wire page",
-				     plane_pmm_wire_page(page), true);
+				     plane_vm_page_wire(page), true);
 	failures += test_expect_bool("wire count one query",
 				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count one", wire_count, 1);
 	failures += test_expect_bool("wire page again",
-				     plane_pmm_wire_page(page), true);
+				     plane_vm_page_wire(page), true);
 	failures += test_expect_bool("wire count two query",
 				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
@@ -347,19 +347,19 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 				     plane_pmm_free_page_phys(phys), false);
 
 	failures += test_expect_bool("unwire page",
-				     plane_pmm_unwire_page(page), true);
+				     plane_vm_page_unwire(page), true);
 	failures += test_expect_bool("wire count one after unwire query",
 				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count one after unwire", wire_count, 1);
 	failures += test_expect_bool("unwire page again",
-				     plane_pmm_unwire_page(page), true);
+				     plane_vm_page_unwire(page), true);
 	failures += test_expect_bool("wire count zero query",
 				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count zero", wire_count, 0);
 	failures += test_expect_bool("unwire zero rejected",
-				     plane_pmm_unwire_page(page), false);
+				     plane_vm_page_unwire(page), false);
 	failures += test_expect_bool("free unwired page",
 				     plane_pmm_free_page_phys(phys), true);
 
@@ -381,20 +381,20 @@ static int test_wire_rejects_invalid_pages(void)
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("wire invalid init",
 				     plane_pmm_init(&mem), true);
-	metadata_page = plane_pmm_phys_to_page(0x1000);
-	free_page = plane_pmm_phys_to_page(0x2000);
+	metadata_page = plane_vm_page_from_phys(0x1000);
+	free_page = plane_vm_page_from_phys(0x2000);
 	failures += test_expect_bool("wire rejects metadata",
-				     plane_pmm_wire_page(metadata_page), false);
+				     plane_vm_page_wire(metadata_page), false);
 	failures += test_expect_bool("unwire rejects metadata",
-				     plane_pmm_unwire_page(metadata_page), false);
+				     plane_vm_page_unwire(metadata_page), false);
 	failures += test_expect_bool("wire rejects free page",
-				     plane_pmm_wire_page(free_page), false);
+				     plane_vm_page_wire(free_page), false);
 	failures += test_expect_bool("unwire rejects free page",
-				     plane_pmm_unwire_page(free_page), false);
+				     plane_vm_page_unwire(free_page), false);
 	failures += test_expect_bool("wire rejects unmanaged",
-				     plane_pmm_wire_page(NULL), false);
+				     plane_vm_page_wire(NULL), false);
 	failures += test_expect_bool("unwire rejects unmanaged",
-				     plane_pmm_unwire_page(NULL), false);
+				     plane_vm_page_unwire(NULL), false);
 	failures += test_expect_bool("wire count rejects null page",
 				     plane_vm_page_wire_count(NULL, &wire_count),
 				     false);
@@ -439,7 +439,7 @@ static int test_page_object_identity_blocks_free(void)
 				     plane_vm_object_init(&object, object_pages,
 							  1, 0x8000),
 				     true);
-	page = plane_pmm_phys_to_page(phys);
+	page = plane_vm_page_from_phys(phys);
 	failures += test_expect_null("object identity initial object",
 				     plane_vm_page_object(page));
 	failures += test_expect_bool("object identity initial offset",
@@ -586,7 +586,7 @@ static int test_zeroed_single_page_allocation(void)
 							   &page),
 				true);
 	failures += test_expect_not_null("zero page metadata", page);
-	failures += test_expect_u64("zero page phys", plane_page_phys(page),
+	failures += test_expect_u64("zero page phys", plane_vm_page_phys(page),
 				    0x2000);
 	failures += check_phys_bytes("zero page cleared", 0x2000, 0,
 				      PAGE_SIZE);
@@ -641,9 +641,9 @@ static int test_zeroed_allocation_rolls_back_without_direct_map(void)
 	failures += check_stats("zero rollback stats", &stats,
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 	failures += check_page_state("zero rollback page state",
-				      plane_page_state(
-					      plane_pmm_phys_to_page(0x2000)),
-				      PLANE_PAGE_FREE);
+				      plane_vm_page_state(
+					      plane_vm_page_from_phys(0x2000)),
+				      PLANE_VM_PAGE_FREE);
 	failures += test_expect_bool("zero rollback reuses page",
 				plane_pmm_alloc_page_phys(&phys), true);
 	failures += test_expect_u64("zero rollback reused phys", phys, 0x2000);
@@ -673,9 +673,9 @@ static int test_zeroed_allocation_rolls_back_without_range_coverage(void)
 	failures += check_stats("zero range rollback stats", &stats,
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 	failures += check_page_state("zero range rollback page state",
-				      plane_page_state(
-					      plane_pmm_phys_to_page(0x2000)),
-				      PLANE_PAGE_FREE);
+				      plane_vm_page_state(
+					      plane_vm_page_from_phys(0x2000)),
+				      PLANE_VM_PAGE_FREE);
 	failures += test_expect_bool("zero range rollback reuses page",
 				plane_pmm_alloc_page_phys(&phys), true);
 	failures += test_expect_u64("zero range rollback reused phys", phys,
@@ -760,8 +760,8 @@ static int test_multi_page_alignment(void)
 				plane_pmm_alloc_pages_phys(1, 4, &phys), true);
 	failures += test_expect_u64("aligned allocation address", phys, 0x4000);
 	failures += check_page_state("aligned allocation page state",
-				      plane_page_state(plane_pmm_phys_to_page(phys)),
-				      PLANE_PAGE_ALLOCATED);
+				      plane_vm_page_state(plane_vm_page_from_phys(phys)),
+				      PLANE_VM_PAGE_ALLOCATED);
 
 	stats = plane_pmm_get_stats();
 	failures += check_stats("aligned allocation", &stats,
@@ -819,10 +819,10 @@ static int test_multi_page_phys_api_updates_metadata(void)
 	failures += test_expect_u64("multi metadata alloc addr", phys, 0x2000);
 	for (uint64_t i = 0; i < 3; i++) {
 		failures += check_page_state("multi metadata allocated",
-					      plane_page_state(
-						      plane_pmm_phys_to_page(
+					      plane_vm_page_state(
+						      plane_vm_page_from_phys(
 							      phys + i * PAGE_SIZE)),
-					      PLANE_PAGE_ALLOCATED);
+					      PLANE_VM_PAGE_ALLOCATED);
 	}
 
 	stats = plane_pmm_get_stats();
@@ -833,10 +833,10 @@ static int test_multi_page_phys_api_updates_metadata(void)
 				plane_pmm_free_pages_phys(phys, 3), true);
 	for (uint64_t i = 0; i < 3; i++) {
 		failures += check_page_state("multi metadata free",
-					      plane_page_state(
-						      plane_pmm_phys_to_page(
+					      plane_vm_page_state(
+						      plane_vm_page_from_phys(
 							      phys + i * PAGE_SIZE)),
-					      PLANE_PAGE_FREE);
+					      PLANE_VM_PAGE_FREE);
 	}
 
 	stats = plane_pmm_get_stats();

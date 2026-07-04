@@ -4,8 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <plane/pmm.h>
-
+struct plane_page;
 struct plane_vm_object;
 
 /*

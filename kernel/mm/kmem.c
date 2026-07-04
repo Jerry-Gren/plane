@@ -133,7 +133,7 @@ static bool release_mapped_page(struct plane_vm_object *object,
 		return false;
 	}
 
-	page = plane_pmm_phys_to_page(phys_addr);
+	page = plane_vm_page_from_phys(phys_addr);
 	if (!plane_vm_page_wire_count(page, &wire_count)) {
 		return false;
 	}
@@ -150,7 +150,7 @@ static bool release_mapped_page(struct plane_vm_object *object,
 	if (plane_vm_object_remove_page(object, object_offset) != page) {
 		return false;
 	}
-	if (!plane_pmm_unwire_page(page)) {
+	if (!plane_vm_page_unwire(page)) {
 		return false;
 	}
 
@@ -190,13 +190,13 @@ static bool rollback_object_page(struct plane_vm_object *object,
 				 struct plane_page *page)
 {
 	struct plane_page *removed;
-	uint64_t phys_addr = plane_page_phys(page);
+	uint64_t phys_addr = plane_vm_page_phys(page);
 
 	removed = plane_vm_object_remove_page(object, object_offset);
 	if (removed != page) {
 		return false;
 	}
-	if (!plane_pmm_unwire_page(page)) {
+	if (!plane_vm_page_unwire(page)) {
 		return false;
 	}
 	return plane_pmm_free_page_phys(phys_addr);
@@ -239,7 +239,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 			return false;
 		}
 
-		phys_addr = plane_page_phys(page);
+		phys_addr = plane_vm_page_phys(page);
 		if (phys_addr == UINT64_MAX) {
 			bool page_ok = rollback_allocated_page(phys_addr);
 			bool mappings_ok = rollback_mapped_pages(
@@ -250,7 +250,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 			return false;
 		}
 
-		if (!plane_pmm_wire_page(page)) {
+		if (!plane_vm_page_wire(page)) {
 			bool page_ok = rollback_allocated_page(phys_addr);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);
@@ -261,7 +261,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 		}
 
 		if (!plane_vm_object_insert_page(object, page_object_offset, page)) {
-			bool page_ok = plane_pmm_unwire_page(page) &&
+			bool page_ok = plane_vm_page_unwire(page) &&
 				       rollback_allocated_page(phys_addr);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);

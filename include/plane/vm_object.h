@@ -4,8 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <plane/pmm.h>
-
 /*
  * Early resident VM object metadata.
  *
@@ -17,6 +15,8 @@
  * A plane_vm_object must be zero-initialized before its first init call.
  * Resident page storage does not need to be zeroed by callers; init resets it.
  */
+
+struct plane_page;
 
 struct plane_vm_object_page {
 	uint64_t offset;

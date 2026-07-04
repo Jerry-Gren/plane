@@ -77,7 +77,7 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 
 	if (!offset_valid(object, offset) ||
 	    page == NULL ||
-	    plane_page_state(page) != PLANE_PAGE_ALLOCATED ||
+	    plane_vm_page_state(page) != PLANE_VM_PAGE_ALLOCATED ||
 	    plane_vm_page_object(page) != NULL ||
 	    find_page_index(object, offset) >= 0) {
 		return false;

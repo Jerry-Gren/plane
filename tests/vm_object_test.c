@@ -13,7 +13,7 @@
 struct plane_page {
 	struct plane_vm_object *object;
 	uint64_t object_offset;
-	enum plane_page_state state;
+	enum plane_vm_page_state state;
 };
 
 static struct plane_vm_object_page test_pages[TEST_OBJECT_PAGES];
@@ -23,10 +23,10 @@ static struct plane_vm_object second_object;
 static struct plane_page allocated_page;
 static struct plane_page free_page;
 
-enum plane_page_state plane_page_state(const struct plane_page *page)
+enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
 	if (page == NULL) {
-		return PLANE_PAGE_INVALID;
+		return PLANE_VM_PAGE_INVALID;
 	}
 
 	return page->state;
@@ -60,7 +60,7 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 	if (page == NULL ||
 	    object == NULL ||
 	    page->object != NULL ||
-	    page->state != PLANE_PAGE_ALLOCATED) {
+	    page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return false;
 	}
 
@@ -77,7 +77,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	    object == NULL ||
 	    page->object != object ||
 	    page->object_offset != offset ||
-	    page->state != PLANE_PAGE_ALLOCATED) {
+	    page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return false;
 	}
 
@@ -96,8 +96,8 @@ static void reset_vm_object_test(void)
 	}
 	allocated_page = (struct plane_page){0};
 	free_page = (struct plane_page){0};
-	allocated_page.state = PLANE_PAGE_ALLOCATED;
-	free_page.state = PLANE_PAGE_FREE;
+	allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
+	free_page.state = PLANE_VM_PAGE_FREE;
 }
 
 static int test_init_rejects_invalid_inputs(void)

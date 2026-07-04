@@ -183,7 +183,7 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 	return true;
 }
 
-bool plane_pmm_wire_page(struct plane_page *page)
+bool plane_vm_page_wire(struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
@@ -197,7 +197,7 @@ bool plane_pmm_wire_page(struct plane_page *page)
 	return true;
 }
 
-bool plane_pmm_unwire_page(struct plane_page *page)
+bool plane_vm_page_unwire(struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
@@ -211,7 +211,7 @@ bool plane_pmm_unwire_page(struct plane_page *page)
 	return true;
 }
 
-struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr)
+struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 {
 	uint64_t page = phys_addr / PAGE_SIZE;
 
@@ -223,7 +223,7 @@ struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr)
 	return &test_pages[page];
 }
 
-uint64_t plane_page_phys(const struct plane_page *page)
+uint64_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
@@ -234,15 +234,15 @@ uint64_t plane_page_phys(const struct plane_page *page)
 	return page->phys_addr;
 }
 
-enum plane_page_state plane_page_state(const struct plane_page *page)
+enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
 	    page >= &test_pages[TEST_PAGE_COUNT]) {
-		return PLANE_PAGE_INVALID;
+		return PLANE_VM_PAGE_INVALID;
 	}
 
-	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
+	return page->allocated ? PLANE_VM_PAGE_ALLOCATED : PLANE_VM_PAGE_FREE;
 }
 
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
