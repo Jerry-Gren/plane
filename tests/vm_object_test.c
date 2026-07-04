@@ -17,6 +17,7 @@ struct plane_page {
 	struct plane_page *object_prev;
 	struct plane_page *object_next;
 	struct plane_page *object_hash_next;
+	bool object_tabled;
 	bool object_hashed;
 	enum plane_vm_page_state state;
 };
@@ -128,6 +129,15 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 	return page->object_hash_next;
 }
 
+bool plane_vm_page_object_tabled(const struct plane_page *page)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	return page->object_tabled;
+}
+
 bool plane_vm_page_object_hashed(const struct plane_page *page)
 {
 	if (page == NULL) {
@@ -167,6 +177,16 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 	}
 
 	page->object_hash_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	page->object_tabled = tabled;
 	return true;
 }
 
@@ -271,6 +291,8 @@ static int test_insert_lookup_and_remove_page(void)
 					     &test_object, PAGE_SIZE,
 					     &allocated_page),
 				     true);
+	failures += test_expect_bool("page tabled after insert",
+				     allocated_page.object_tabled, true);
 	failures += test_expect_bool("page hashed after insert",
 				     allocated_page.object_hashed, true);
 	failures += test_expect_u64("object resident count",
@@ -293,6 +315,8 @@ static int test_insert_lookup_and_remove_page(void)
 	failures += test_expect_ptr("object lookup", page, &allocated_page);
 	page = plane_vm_object_remove_page(&test_object, PAGE_SIZE);
 	failures += test_expect_ptr("object remove", page, &allocated_page);
+	failures += test_expect_bool("page untabled after remove",
+				     allocated_page.object_tabled, false);
 	failures += test_expect_bool("page unhashed after remove",
 				     allocated_page.object_hashed, false);
 	failures += test_expect_u64("object resident count removed",
@@ -518,6 +542,8 @@ static int test_reinsert_page_uses_new_offset(void)
 	failures += test_expect_ptr("object remove first offset",
 				    plane_vm_object_remove_page(&test_object, 0),
 				    &allocated_page);
+	failures += test_expect_bool("object untabled before reinsert",
+				     allocated_page.object_tabled, false);
 	failures += test_expect_bool("object unhashed before reinsert",
 				     allocated_page.object_hashed, false);
 	failures += test_expect_bool("object reinsert second offset",
@@ -525,6 +551,8 @@ static int test_reinsert_page_uses_new_offset(void)
 					     &test_object, 3 * PAGE_SIZE,
 					     &allocated_page),
 				     true);
+	failures += test_expect_bool("object tabled after reinsert",
+				     allocated_page.object_tabled, true);
 	failures += test_expect_bool("object hashed after reinsert",
 				     allocated_page.object_hashed, true);
 	failures += test_expect_null("object old offset gone",

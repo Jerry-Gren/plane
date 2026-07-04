@@ -32,6 +32,7 @@ struct plane_page {
 	struct plane_page *object_prev;
 	struct plane_page *object_next;
 	struct plane_page *object_hash_next;
+	bool object_tabled;
 	bool object_hashed;
 	bool allocated;
 	uint32_t flags;
@@ -86,6 +87,7 @@ static void reset_kmem_test(void)
 		test_pages[i].object_prev = NULL;
 		test_pages[i].object_next = NULL;
 		test_pages[i].object_hash_next = NULL;
+		test_pages[i].object_tabled = false;
 		test_pages[i].object_hashed = false;
 		test_pages[i].allocated = false;
 		test_pages[i].flags = 0;
@@ -467,6 +469,17 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 	return page->object_hash_next;
 }
 
+bool plane_vm_page_object_tabled(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	return page->object_tabled;
+}
+
 bool plane_vm_page_object_hashed(const struct plane_page *page)
 {
 	if (page == NULL ||
@@ -514,6 +527,18 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 	}
 
 	page->object_hash_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	page->object_tabled = tabled;
 	return true;
 }
 

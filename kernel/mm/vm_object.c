@@ -56,6 +56,8 @@ static struct plane_page *find_page_in_hash(struct plane_vm_object *object,
 		resident_hash[resident_hash_index(object, offset)];
 
 	while (page != NULL) {
+		BUG_ON_MSG(!plane_vm_page_object_hashed(page),
+			   "resident hash page is not marked hashed");
 		if (plane_vm_page_object(page) == object &&
 		    page_offset_matches(page, offset)) {
 			object->resident_hint = page;
@@ -76,6 +78,8 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 	if (object->resident_hint != NULL &&
 	    plane_vm_page_object(object->resident_hint) == object &&
 	    page_offset_matches(object->resident_hint, offset)) {
+		BUG_ON_MSG(!plane_vm_page_object_tabled(object->resident_hint),
+			   "resident hint page is not marked tabled");
 		return object->resident_hint;
 	}
 
@@ -84,6 +88,8 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 		if (page != NULL &&
 		    plane_vm_page_object(page) == object &&
 		    page_offset_matches(page, offset)) {
+			BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+				   "resident hint next page is not marked tabled");
 			object->resident_hint = page;
 			return page;
 		}
@@ -92,6 +98,8 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 		if (page != NULL &&
 		    plane_vm_page_object(page) == object &&
 		    page_offset_matches(page, offset)) {
+			BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+				   "resident hint prev page is not marked tabled");
 			object->resident_hint = page;
 			return page;
 		}
@@ -104,6 +112,8 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 
 	page = object->resident_head;
 	while (page != NULL) {
+		BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+			   "resident list page is not marked tabled");
 		if (plane_vm_page_object(page) == object &&
 		    page_offset_matches(page, offset)) {
 			object->resident_hint = page;
@@ -128,6 +138,8 @@ static bool remove_page_from_hash_at(struct plane_vm_object *object,
 		struct plane_page *next =
 			plane_vm_page_object_hash_next(current);
 
+		BUG_ON_MSG(!plane_vm_page_object_hashed(current),
+			   "resident hash page is not marked hashed");
 		if (current == page) {
 			if (prev != NULL) {
 				BUG_ON_MSG(!plane_vm_page_set_object_hash_next(prev,
@@ -170,6 +182,8 @@ static void insert_page_into_hash(struct plane_vm_object *object,
 	BUG_ON_MSG(plane_vm_page_object(page) != object ||
 		   !page_offset_matches(page, offset),
 		   "resident page hash insert without object identity");
+	BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+		   "resident page hash insert before resident list insert");
 	BUG_ON_MSG(plane_vm_page_object_hashed(page),
 		   "resident page already marked hashed");
 	BUG_ON_MSG(plane_vm_page_object_hash_next(page) != NULL,
@@ -187,6 +201,12 @@ static void append_resident_page(struct plane_vm_object *object,
 {
 	struct plane_page *old_tail = object->resident_tail;
 
+	BUG_ON_MSG(plane_vm_page_object(page) != object,
+		   "resident page list insert without object identity");
+	BUG_ON_MSG(plane_vm_page_object_tabled(page),
+		   "resident page already marked tabled");
+	BUG_ON_MSG(plane_vm_page_object_hashed(page),
+		   "resident page already marked hashed before list insert");
 	BUG_ON_MSG(!plane_vm_page_set_object_prev(page, old_tail),
 		   "failed to set resident page prev link");
 	BUG_ON_MSG(!plane_vm_page_set_object_next(page, NULL),
@@ -203,6 +223,8 @@ static void append_resident_page(struct plane_vm_object *object,
 	if (object->resident_hint == NULL) {
 		object->resident_hint = page;
 	}
+	BUG_ON_MSG(!plane_vm_page_set_object_tabled(page, true),
+		   "failed to mark resident page tabled");
 }
 
 static void remove_resident_page(struct plane_vm_object *object,
@@ -212,6 +234,8 @@ static void remove_resident_page(struct plane_vm_object *object,
 	struct plane_page *prev = plane_vm_page_object_prev(page);
 	struct plane_page *next = plane_vm_page_object_next(page);
 
+	BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+		   "resident page is not marked tabled");
 	remove_page_from_hash(object, page, offset);
 
 	if (prev != NULL) {
@@ -232,6 +256,8 @@ static void remove_resident_page(struct plane_vm_object *object,
 		   "failed to clear resident page prev link");
 	BUG_ON_MSG(!plane_vm_page_set_object_next(page, NULL),
 		   "failed to clear resident page next link");
+	BUG_ON_MSG(!plane_vm_page_set_object_tabled(page, false),
+		   "failed to clear resident tabled state");
 
 	if (object->resident_hint == page) {
 		object->resident_hint = next != NULL ? next : prev;
