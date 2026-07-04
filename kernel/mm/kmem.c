@@ -5,7 +5,6 @@
 #include <plane/kmem.h>
 #include <plane/mm.h>
 #include <plane/printk.h>
-#include <plane/pmm.h>
 #include <plane/util.h>
 #include <plane/vm_map.h>
 #include <plane/vm_page.h>
@@ -45,15 +44,15 @@ static bool kmem_prot_valid(uint32_t prot)
 	       (prot & ~PLANE_VM_PROT_ALL) == 0;
 }
 
-static uint32_t kmem_to_pmm_flags(uint32_t flags)
+static uint32_t kmem_to_vm_page_grab_flags(uint32_t flags)
 {
-	uint32_t pmm_flags = 0;
+	uint32_t grab_flags = 0;
 
 	if ((flags & PLANE_KMEM_ALLOC_ZERO) != 0) {
-		pmm_flags |= PLANE_PMM_ALLOC_ZERO;
+		grab_flags |= PLANE_VM_PAGE_GRAB_ZERO;
 	}
 
-	return pmm_flags;
+	return grab_flags;
 }
 
 static bool reserve_kmem_vaddr(struct plane_vm_map *map,
@@ -122,7 +121,7 @@ static bool release_mapped_page(struct plane_vm_object *object,
 		return false;
 	}
 
-	return plane_pmm_free_page_phys(phys_addr);
+	return plane_vm_page_release(page);
 }
 
 static bool rollback_mapped_pages(uint64_t vaddr,
@@ -148,9 +147,9 @@ static bool rollback_mapped_pages(uint64_t vaddr,
 	return true;
 }
 
-static bool rollback_allocated_page(uint64_t phys_addr)
+static bool rollback_allocated_page(struct plane_page *page)
 {
-	return plane_pmm_free_page_phys(phys_addr);
+	return plane_vm_page_release(page);
 }
 
 static bool rollback_object_page(struct plane_vm_object *object,
@@ -158,7 +157,6 @@ static bool rollback_object_page(struct plane_vm_object *object,
 				 struct plane_page *page)
 {
 	struct plane_page *removed;
-	uint64_t phys_addr = plane_vm_page_phys(page);
 
 	removed = plane_vm_object_remove_page(object, object_offset);
 	if (removed != page) {
@@ -167,7 +165,7 @@ static bool rollback_object_page(struct plane_vm_object *object,
 	if (!plane_vm_page_unwire(page)) {
 		return false;
 	}
-	return plane_pmm_free_page_phys(phys_addr);
+	return plane_vm_page_release(page);
 }
 
 static bool map_allocated_pages(uint64_t vaddr,
@@ -177,7 +175,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 				uint32_t flags,
 				uint32_t prot)
 {
-	uint32_t pmm_flags = kmem_to_pmm_flags(flags);
+	uint32_t grab_flags = kmem_to_vm_page_grab_flags(flags);
 	uint32_t map_flags = kmem_prot_to_map_flags(prot);
 	uint64_t mapped_pages = 0;
 
@@ -199,7 +197,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 			return false;
 		}
 
-		if (!plane_pmm_alloc_page_flags(pmm_flags, &page)) {
+		if (!plane_vm_page_grab(grab_flags, &page)) {
 			BUG_ON_MSG(!rollback_mapped_pages(vaddr, object,
 							  object_offset,
 							  mapped_pages),
@@ -209,7 +207,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 
 		phys_addr = plane_vm_page_phys(page);
 		if (phys_addr == PLANE_VM_PAGE_NO_PHYS) {
-			bool page_ok = rollback_allocated_page(phys_addr);
+			bool page_ok = rollback_allocated_page(page);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);
 
@@ -219,7 +217,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 		}
 
 		if (!plane_vm_page_wire(page)) {
-			bool page_ok = rollback_allocated_page(phys_addr);
+			bool page_ok = rollback_allocated_page(page);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);
 
@@ -230,7 +228,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 
 		if (!plane_vm_object_insert_page(object, page_object_offset, page)) {
 			bool page_ok = plane_vm_page_unwire(page) &&
-				       rollback_allocated_page(phys_addr);
+				       rollback_allocated_page(page);
 			bool mappings_ok = rollback_mapped_pages(
 				vaddr, object, object_offset, mapped_pages);
 

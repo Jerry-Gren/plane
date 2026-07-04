@@ -4,7 +4,6 @@
 #include <hal/mmu.h>
 #include <plane/kmem.h>
 #include <plane/mm.h>
-#include <plane/pmm.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
@@ -179,9 +178,9 @@ bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 	return true;
 }
 
-bool plane_pmm_alloc_page_flags(uint32_t flags, struct plane_page **page)
+bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 {
-	if (page == NULL || (flags & ~PLANE_PMM_ALLOC_ZERO) != 0) {
+	if (page == NULL || (flags & ~PLANE_VM_PAGE_GRAB_ZERO) != 0) {
 		return false;
 	}
 
@@ -197,21 +196,18 @@ bool plane_pmm_alloc_page_flags(uint32_t flags, struct plane_page **page)
 	return false;
 }
 
-bool plane_pmm_free_page_phys(uint64_t phys_addr)
+bool plane_vm_page_release(struct plane_page *page)
 {
-	uint64_t page = phys_addr / PAGE_SIZE;
-
-	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
-	    page >= TEST_PAGE_COUNT ||
-	    !test_pages[page].allocated ||
-	    test_pages[page].wire_count != 0 ||
-	    test_pages[page].object != NULL) {
+	if (!is_test_page(page) ||
+	    !page->allocated ||
+	    page->wire_count != 0 ||
+	    page->object != NULL) {
 		return false;
 	}
 
-	test_pages[page].allocated = false;
-	test_pages[page].object = NULL;
-	test_pages[page].object_offset = 0;
+	page->allocated = false;
+	page->object = NULL;
+	page->object_offset = 0;
 	return true;
 }
 
@@ -496,7 +492,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("global preserved free",
 				     plane_kmem_free_pages(addr, 2), true);
-	failures += test_expect_u64("global free pmm pages",
+	failures += test_expect_u64("global free backing pages",
 				    allocated_page_count(), 0);
 	failures += test_expect_u64("global free wired pages",
 				    wired_page_count(), 0);

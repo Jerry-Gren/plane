@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/bits.h>
+
 /*
  * Early VM page metadata facade.
  *
@@ -12,6 +14,10 @@
  * locking.
  * VM object fields are resident-page metadata only; they do not imply object
  * reference counts, pager state, shadow objects, or pageout behavior.
+ * plane_vm_page_grab() is the XNU-like entry for resident backing pages;
+ * the physical address is a page metadata property, not the primary API.
+ * XNU-style busy/wanted wait state is intentionally absent until Plane has
+ * object locks, wait/wakeup, fault, and pageout semantics.
  */
 
 struct plane_page;
@@ -19,6 +25,7 @@ struct plane_vm_object;
 
 #define PLANE_VM_PAGE_NO_PHYS UINT64_MAX
 #define PLANE_VM_PAGE_GUARD_PHYS (UINT64_MAX - 1)
+#define PLANE_VM_PAGE_GRAB_ZERO BIT(0)
 
 enum plane_vm_page_state {
 	PLANE_VM_PAGE_INVALID = 0,
@@ -28,6 +35,8 @@ enum plane_vm_page_state {
 	PLANE_VM_PAGE_GUARD,
 };
 
+bool plane_vm_page_grab(uint32_t flags, struct plane_page **page);
+bool plane_vm_page_release(struct plane_page *page);
 struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr);
 uint64_t plane_vm_page_phys(const struct plane_page *page);
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page);

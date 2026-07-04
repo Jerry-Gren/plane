@@ -264,7 +264,7 @@ static int test_init_accounts_all_memmap_types(void)
 	return failures;
 }
 
-static int test_page_api_allocates_and_frees_metadata(void)
+static int test_vm_page_grab_allocates_and_releases_metadata(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
@@ -273,37 +273,37 @@ static int test_page_api_allocates_and_frees_metadata(void)
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
-	failures += test_expect_bool("page api init", plane_pmm_init(&mem), true);
+	failures += test_expect_bool("vm page init", plane_pmm_init(&mem), true);
 
-	failures += test_expect_bool("reject null page output",
-				plane_pmm_alloc_page(NULL), false);
-	failures += test_expect_bool("alloc page api page",
-				plane_pmm_alloc_page(&page), true);
-	failures += test_expect_not_null("allocated page api page", page);
-	failures += test_expect_u64("allocated page api phys",
+	failures += test_expect_bool("reject null vm page output",
+				plane_vm_page_grab(0, NULL), false);
+	failures += test_expect_bool("grab vm page",
+				plane_vm_page_grab(0, &page), true);
+	failures += test_expect_not_null("grabbed vm page", page);
+	failures += test_expect_u64("grabbed vm page phys",
 			       plane_vm_page_phys(page), 0x2000);
-	failures += check_page_state("allocated page api state",
+	failures += check_page_state("grabbed vm page state",
 				      plane_vm_page_state(page),
 				      PLANE_VM_PAGE_ALLOCATED);
 
 	stats = plane_pmm_get_stats();
-	failures += check_stats("page api allocated", &stats,
+	failures += check_stats("vm page grabbed", &stats,
 				 3, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
-	failures += test_expect_bool("reject null metadata free",
-				plane_pmm_free_page(NULL), false);
-	failures += test_expect_bool("reject foreign metadata free",
-				plane_pmm_free_page(bad_page), false);
-	failures += test_expect_bool("free page api page",
-				plane_pmm_free_page(page), true);
-	failures += check_page_state("freed page api state",
+	failures += test_expect_bool("reject null vm page release",
+				plane_vm_page_release(NULL), false);
+	failures += test_expect_bool("reject foreign vm page release",
+				plane_vm_page_release(bad_page), false);
+	failures += test_expect_bool("release vm page",
+				plane_vm_page_release(page), true);
+	failures += check_page_state("released vm page state",
 				      plane_vm_page_state(page),
 				      PLANE_VM_PAGE_FREE);
-	failures += test_expect_bool("reject page api double free",
-				plane_pmm_free_page(page), false);
+	failures += test_expect_bool("reject vm page double release",
+				plane_vm_page_release(page), false);
 
 	stats = plane_pmm_get_stats();
-	failures += check_stats("page api freed", &stats,
+	failures += check_stats("vm page released", &stats,
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
 	return failures;
@@ -347,6 +347,8 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 				 3, 1, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 	failures += test_expect_bool("free wired rejected",
 				     plane_pmm_free_page_phys(phys), false);
+	failures += test_expect_bool("release wired rejected",
+				     plane_vm_page_release(page), false);
 
 	failures += test_expect_bool("unwire page",
 				     plane_vm_page_unwire(page), true);
@@ -462,7 +464,7 @@ static int test_guard_pages_are_not_pmm_managed(void)
 				     true);
 	failures += test_expect_u64("guard wire count", wire_count, 0);
 	failures += test_expect_bool("guard pmm free rejected",
-				     plane_pmm_free_page(guard), false);
+				     plane_vm_page_release(guard), false);
 	failures += test_expect_bool("guard release",
 				     plane_vm_page_release_guard(guard), true);
 	failures += check_page_state("guard released state",
@@ -523,6 +525,8 @@ static int test_page_object_identity_blocks_free(void)
 				     plane_vm_object_insert_page(&object,
 								 0x4000, page),
 				     true);
+	failures += test_expect_bool("object identity release rejected",
+				     plane_vm_page_release(page), false);
 	failures += test_expect_u64("object identity resident count",
 				    plane_vm_object_resident_page_count(&object),
 				    1);
@@ -688,8 +692,8 @@ static int test_zeroed_single_page_allocation(void)
 
 	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
 	failures += test_expect_bool("zero page alloc",
-				plane_pmm_alloc_page_flags(PLANE_PMM_ALLOC_ZERO,
-							   &page),
+				plane_vm_page_grab(PLANE_VM_PAGE_GRAB_ZERO,
+						   &page),
 				true);
 	failures += test_expect_not_null("zero page metadata", page);
 	failures += test_expect_u64("zero page phys", plane_vm_page_phys(page),
@@ -1050,7 +1054,7 @@ int main(void)
 	static const struct test_case cases[] = {
 		TEST_CASE(test_init_accounts_all_memmap_types),
 		TEST_CASE(test_phys_to_page_metadata),
-		TEST_CASE(test_page_api_allocates_and_frees_metadata),
+		TEST_CASE(test_vm_page_grab_allocates_and_releases_metadata),
 		TEST_CASE(test_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_wire_rejects_invalid_pages),
 		TEST_CASE(test_guard_pages_are_not_pmm_managed),

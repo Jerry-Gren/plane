@@ -17,8 +17,6 @@
  * queries and resident-page operations live in the VM page layer.
  */
 
-struct plane_page;
-
 enum plane_pmm_alloc_flags {
 	PLANE_PMM_ALLOC_ZERO = BIT(0),
 };
@@ -51,9 +49,6 @@ struct plane_pmm_stats {
 };
 
 bool plane_pmm_init(const struct plane_mem_info *mem);
-bool plane_pmm_alloc_page(struct plane_page **page);
-bool plane_pmm_alloc_page_flags(uint32_t flags, struct plane_page **page);
-bool plane_pmm_free_page(struct plane_page *page);
 bool plane_pmm_alloc_page_phys(uint64_t *phys_addr);
 bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 				uint64_t alignment_pages,
