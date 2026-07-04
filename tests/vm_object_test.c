@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 
 #include <plane/mm.h>
@@ -7,8 +8,9 @@
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
 
-#define TEST_OBJECT_PAGES 8
+#define TEST_OBJECT_PAGES 16
 #define TEST_OBJECT_SIZE (TEST_OBJECT_PAGES * PAGE_SIZE)
+#define TEST_HASH_PAGE_COUNT 12
 
 struct plane_page {
 	struct plane_vm_object *object;
@@ -27,6 +29,7 @@ static struct plane_vm_object second_object;
 static struct plane_page allocated_page;
 static struct plane_page second_allocated_page;
 static struct plane_page third_allocated_page;
+static struct plane_page hash_pages[TEST_HASH_PAGE_COUNT];
 static struct plane_page free_page;
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -223,6 +226,10 @@ static void reset_vm_object_test(void)
 	allocated_page = (struct plane_page){0};
 	second_allocated_page = (struct plane_page){0};
 	third_allocated_page = (struct plane_page){0};
+	for (size_t i = 0; i < TEST_HASH_PAGE_COUNT; i++) {
+		hash_pages[i] = (struct plane_page){0};
+		hash_pages[i].state = PLANE_VM_PAGE_ALLOCATED;
+	}
 	free_page = (struct plane_page){0};
 	allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	second_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
@@ -265,6 +272,20 @@ static int test_init_is_one_shot(void)
 				     plane_vm_object_init(&test_object,
 							  TEST_OBJECT_SIZE),
 				     false);
+	return failures;
+}
+
+static int test_lookup_empty_object_returns_null(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_null("empty lookup",
+				     plane_vm_object_lookup_page(&test_object,
+								 0));
 	return failures;
 }
 
@@ -336,6 +357,69 @@ static int test_insert_lookup_and_remove_page(void)
 	failures += test_expect_null("object lookup removed",
 				     plane_vm_object_lookup_page(&test_object,
 								 PAGE_SIZE));
+	return failures;
+}
+
+static int test_lookup_small_object_scans_resident_list(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object insert first",
+				     plane_vm_object_insert_page(
+					     &test_object, 0,
+					     &allocated_page),
+				     true);
+	failures += test_expect_bool("object insert second",
+				     plane_vm_object_insert_page(
+					     &test_object, PAGE_SIZE,
+					     &second_allocated_page),
+				     true);
+	failures += test_expect_bool("object insert third",
+				     plane_vm_object_insert_page(
+					     &test_object, 2 * PAGE_SIZE,
+					     &third_allocated_page),
+				     true);
+	test_object.resident_hint = NULL;
+	failures += test_expect_ptr("small object list lookup",
+				    plane_vm_object_lookup_page(&test_object,
+								2 * PAGE_SIZE),
+				    &third_allocated_page);
+	failures += test_expect_ptr("small object updates hint",
+				    test_object.resident_hint,
+				    &third_allocated_page);
+	return failures;
+}
+
+static int test_lookup_large_object_uses_hash(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	for (size_t i = 0; i < TEST_HASH_PAGE_COUNT; i++) {
+		failures += test_expect_bool("object insert hash page",
+					     plane_vm_object_insert_page(
+						     &test_object,
+						     i * PAGE_SIZE,
+						     &hash_pages[i]),
+					     true);
+	}
+	test_object.resident_hint = NULL;
+	failures += test_expect_ptr("large object hash lookup",
+				    plane_vm_object_lookup_page(
+					    &test_object,
+					    (TEST_HASH_PAGE_COUNT - 1) *
+					    PAGE_SIZE),
+				    &hash_pages[TEST_HASH_PAGE_COUNT - 1]);
+	failures += test_expect_ptr("large object updates hint",
+				    test_object.resident_hint,
+				    &hash_pages[TEST_HASH_PAGE_COUNT - 1]);
 	return failures;
 }
 
@@ -573,7 +657,10 @@ int main(void)
 	const struct test_case cases[] = {
 		TEST_CASE(test_init_rejects_invalid_inputs),
 		TEST_CASE(test_init_is_one_shot),
+		TEST_CASE(test_lookup_empty_object_returns_null),
 		TEST_CASE(test_insert_lookup_and_remove_page),
+		TEST_CASE(test_lookup_small_object_scans_resident_list),
+		TEST_CASE(test_lookup_large_object_uses_hash),
 		TEST_CASE(test_insert_tracks_wired_page_count),
 		TEST_CASE(test_insert_rejects_invalid_page_or_offset),
 		TEST_CASE(test_rejects_duplicate_and_missing_remove),

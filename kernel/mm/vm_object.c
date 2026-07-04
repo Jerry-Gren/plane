@@ -15,6 +15,11 @@
  * past early boot constraints.
  */
 #define PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS 256
+/*
+ * Match XNU's VM_PAGE_HASH_LOOKUP_THRESHOLD direction: for tiny resident
+ * sets, a short object-list scan is cheaper than hash lookup machinery.
+ */
+#define PLANE_VM_OBJECT_HASH_LOOKUP_THRESHOLD 10
 
 static struct plane_page *resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
 
@@ -58,6 +63,8 @@ static struct plane_page *find_page_in_hash(struct plane_vm_object *object,
 	while (page != NULL) {
 		BUG_ON_MSG(!plane_vm_page_object_hashed(page),
 			   "resident hash page is not marked hashed");
+		BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+			   "resident hash page is not marked tabled");
 		if (plane_vm_page_object(page) == object &&
 		    page_offset_matches(page, offset)) {
 			object->resident_hint = page;
@@ -75,55 +82,67 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 {
 	struct plane_page *page;
 
-	if (object->resident_hint != NULL &&
-	    plane_vm_page_object(object->resident_hint) == object &&
-	    page_offset_matches(object->resident_hint, offset)) {
-		BUG_ON_MSG(!plane_vm_page_object_tabled(object->resident_hint),
-			   "resident hint page is not marked tabled");
-		return object->resident_hint;
+	if (object->resident_page_count == 0) {
+		BUG_ON_MSG(object->resident_head != NULL ||
+			   object->resident_tail != NULL ||
+			   object->resident_hint != NULL,
+			   "empty object has stale resident links");
+		return NULL;
 	}
 
 	if (object->resident_hint != NULL) {
+		BUG_ON_MSG(!plane_vm_page_object_tabled(object->resident_hint),
+			   "resident hint page is not marked tabled");
+		BUG_ON_MSG(plane_vm_page_object(object->resident_hint) != object,
+			   "resident hint page belongs to another object");
+		if (page_offset_matches(object->resident_hint, offset)) {
+			return object->resident_hint;
+		}
+
 		page = plane_vm_page_object_next(object->resident_hint);
-		if (page != NULL &&
-		    plane_vm_page_object(page) == object &&
-		    page_offset_matches(page, offset)) {
+		if (page != NULL) {
 			BUG_ON_MSG(!plane_vm_page_object_tabled(page),
 				   "resident hint next page is not marked tabled");
-			object->resident_hint = page;
-			return page;
+			BUG_ON_MSG(plane_vm_page_object(page) != object,
+				   "resident hint next page belongs to another object");
+			if (page_offset_matches(page, offset)) {
+				object->resident_hint = page;
+				return page;
+			}
 		}
 
 		page = plane_vm_page_object_prev(object->resident_hint);
-		if (page != NULL &&
-		    plane_vm_page_object(page) == object &&
-		    page_offset_matches(page, offset)) {
+		if (page != NULL) {
 			BUG_ON_MSG(!plane_vm_page_object_tabled(page),
 				   "resident hint prev page is not marked tabled");
-			object->resident_hint = page;
-			return page;
+			BUG_ON_MSG(plane_vm_page_object(page) != object,
+				   "resident hint prev page belongs to another object");
+			if (page_offset_matches(page, offset)) {
+				object->resident_hint = page;
+				return page;
+			}
 		}
 	}
 
-	page = find_page_in_hash(object, offset);
-	if (page != NULL) {
-		return page;
-	}
+	if (object->resident_page_count <=
+	    PLANE_VM_OBJECT_HASH_LOOKUP_THRESHOLD) {
+		page = object->resident_head;
+		while (page != NULL) {
+			BUG_ON_MSG(!plane_vm_page_object_tabled(page),
+				   "resident list page is not marked tabled");
+			BUG_ON_MSG(plane_vm_page_object(page) != object,
+				   "resident list page belongs to another object");
+			if (page_offset_matches(page, offset)) {
+				object->resident_hint = page;
+				return page;
+			}
 
-	page = object->resident_head;
-	while (page != NULL) {
-		BUG_ON_MSG(!plane_vm_page_object_tabled(page),
-			   "resident list page is not marked tabled");
-		if (plane_vm_page_object(page) == object &&
-		    page_offset_matches(page, offset)) {
-			object->resident_hint = page;
-			return page;
+			page = plane_vm_page_object_next(page);
 		}
-
-		page = plane_vm_page_object_next(page);
+		return NULL;
 	}
 
-	return NULL;
+	return find_page_in_hash(object, offset);
 }
 
 static bool remove_page_from_hash_at(struct plane_vm_object *object,
@@ -140,6 +159,8 @@ static bool remove_page_from_hash_at(struct plane_vm_object *object,
 
 		BUG_ON_MSG(!plane_vm_page_object_hashed(current),
 			   "resident hash page is not marked hashed");
+		BUG_ON_MSG(!plane_vm_page_object_tabled(current),
+			   "resident hash page is not marked tabled");
 		if (current == page) {
 			if (prev != NULL) {
 				BUG_ON_MSG(!plane_vm_page_set_object_hash_next(prev,
