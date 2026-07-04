@@ -19,9 +19,14 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 				 uint64_t offset);
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page);
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page);
+struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page);
+bool plane_vm_page_object_hashed(const struct plane_page *page);
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev);
 bool plane_vm_page_set_object_next(struct plane_page *page,
 				   struct plane_page *next);
+bool plane_vm_page_set_object_hash_next(struct plane_page *page,
+					struct plane_page *next);
+bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed);
 
 #endif /* PLANE_VM_PAGE_INTERNAL_H */

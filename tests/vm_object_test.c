@@ -16,6 +16,8 @@ struct plane_page {
 	uint64_t wire_count;
 	struct plane_page *object_prev;
 	struct plane_page *object_next;
+	struct plane_page *object_hash_next;
+	bool object_hashed;
 	enum plane_vm_page_state state;
 };
 
@@ -117,6 +119,24 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 	return page->object_next;
 }
 
+struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
+{
+	if (page == NULL) {
+		return NULL;
+	}
+
+	return page->object_hash_next;
+}
+
+bool plane_vm_page_object_hashed(const struct plane_page *page)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	return page->object_hashed;
+}
+
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
@@ -139,8 +159,45 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 	return true;
 }
 
+bool plane_vm_page_set_object_hash_next(struct plane_page *page,
+					struct plane_page *next)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	page->object_hash_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
+{
+	if (page == NULL) {
+		return false;
+	}
+
+	page->object_hashed = hashed;
+	return true;
+}
+
+static void cleanup_vm_object(struct plane_vm_object *object)
+{
+	while (object->initialized && object->resident_head != NULL) {
+		struct plane_page *page = object->resident_head;
+		struct plane_page *removed;
+
+		removed = plane_vm_object_remove_page(object,
+						      page->object_offset);
+		if (removed == NULL) {
+			break;
+		}
+	}
+}
+
 static void reset_vm_object_test(void)
 {
+	cleanup_vm_object(&test_object);
+	cleanup_vm_object(&second_object);
 	test_object = (struct plane_vm_object){0};
 	second_object = (struct plane_vm_object){0};
 	allocated_page = (struct plane_page){0};
@@ -214,6 +271,8 @@ static int test_insert_lookup_and_remove_page(void)
 					     &test_object, PAGE_SIZE,
 					     &allocated_page),
 				     true);
+	failures += test_expect_bool("page hashed after insert",
+				     allocated_page.object_hashed, true);
 	failures += test_expect_u64("object resident count",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -234,6 +293,8 @@ static int test_insert_lookup_and_remove_page(void)
 	failures += test_expect_ptr("object lookup", page, &allocated_page);
 	page = plane_vm_object_remove_page(&test_object, PAGE_SIZE);
 	failures += test_expect_ptr("object remove", page, &allocated_page);
+	failures += test_expect_bool("page unhashed after remove",
+				     allocated_page.object_hashed, false);
 	failures += test_expect_u64("object resident count removed",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -416,6 +477,9 @@ static int test_multiple_pages_update_counts(void)
 	failures += test_expect_ptr("object lookup head",
 				    plane_vm_object_lookup_page(&test_object, 0),
 				    &allocated_page);
+	failures += test_expect_null("object lookup removed middle",
+				     plane_vm_object_lookup_page(&test_object,
+								 PAGE_SIZE));
 	failures += test_expect_ptr("object lookup tail",
 				    plane_vm_object_lookup_page(&test_object,
 								2 * PAGE_SIZE),
@@ -438,6 +502,44 @@ static int test_multiple_pages_update_counts(void)
 	return failures;
 }
 
+static int test_reinsert_page_uses_new_offset(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object insert first offset",
+				     plane_vm_object_insert_page(
+					     &test_object, 0,
+					     &allocated_page),
+				     true);
+	failures += test_expect_ptr("object remove first offset",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_bool("object unhashed before reinsert",
+				     allocated_page.object_hashed, false);
+	failures += test_expect_bool("object reinsert second offset",
+				     plane_vm_object_insert_page(
+					     &test_object, 3 * PAGE_SIZE,
+					     &allocated_page),
+				     true);
+	failures += test_expect_bool("object hashed after reinsert",
+				     allocated_page.object_hashed, true);
+	failures += test_expect_null("object old offset gone",
+				     plane_vm_object_lookup_page(&test_object, 0));
+	failures += test_expect_ptr("object new offset lookup",
+				    plane_vm_object_lookup_page(&test_object,
+								3 * PAGE_SIZE),
+				    &allocated_page);
+	failures += test_expect_u64("object reinsert resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	return failures;
+}
+
 int main(void)
 {
 	const struct test_case cases[] = {
@@ -448,6 +550,7 @@ int main(void)
 		TEST_CASE(test_insert_rejects_invalid_page_or_offset),
 		TEST_CASE(test_rejects_duplicate_and_missing_remove),
 		TEST_CASE(test_multiple_pages_update_counts),
+		TEST_CASE(test_reinsert_page_uses_new_offset),
 	};
 
 	return test_run_cases_with_fixture("vm_object_test", cases,

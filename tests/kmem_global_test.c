@@ -24,6 +24,8 @@ struct plane_page {
 	uint64_t object_offset;
 	struct plane_page *object_prev;
 	struct plane_page *object_next;
+	struct plane_page *object_hash_next;
+	bool object_hashed;
 	bool allocated;
 };
 
@@ -332,6 +334,28 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 	return page->object_next;
 }
 
+struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return NULL;
+	}
+
+	return page->object_hash_next;
+}
+
+bool plane_vm_page_object_hashed(const struct plane_page *page)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	return page->object_hashed;
+}
+
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
@@ -355,6 +379,31 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 	}
 
 	page->object_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_hash_next(struct plane_page *page,
+					struct plane_page *next)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	page->object_hash_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
+{
+	if (page == NULL ||
+	    page < &test_pages[0] ||
+	    page >= &test_pages[TEST_PAGE_COUNT]) {
+		return false;
+	}
+
+	page->object_hashed = hashed;
 	return true;
 }
 

@@ -30,6 +30,8 @@ struct plane_page {
 	uint64_t vm_object_offset;
 	struct plane_page *object_prev;
 	struct plane_page *object_next;
+	struct plane_page *object_hash_next;
+	bool object_hashed;
 	enum plane_vm_page_state state;
 	struct plane_page *queue_prev;
 	struct plane_page *queue_next;
@@ -453,6 +455,8 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 	page_pool[index].vm_object_offset = offset;
 	page_pool[index].object_prev = NULL;
 	page_pool[index].object_next = NULL;
+	page_pool[index].object_hash_next = NULL;
+	page_pool[index].object_hashed = false;
 	return true;
 }
 
@@ -474,6 +478,8 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	page_pool[index].vm_object_offset = 0;
 	page_pool[index].object_prev = NULL;
 	page_pool[index].object_next = NULL;
+	page_pool[index].object_hash_next = NULL;
+	page_pool[index].object_hashed = false;
 	return true;
 }
 
@@ -497,6 +503,28 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 	}
 
 	return page_pool[index].object_next;
+}
+
+struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
+{
+	uint64_t index;
+
+	if (!page_pointer_index(page, &index)) {
+		return NULL;
+	}
+
+	return page_pool[index].object_hash_next;
+}
+
+bool plane_vm_page_object_hashed(const struct plane_page *page)
+{
+	uint64_t index;
+
+	if (!page_pointer_index(page, &index)) {
+		return false;
+	}
+
+	return page_pool[index].object_hashed;
 }
 
 bool plane_vm_page_set_object_prev(struct plane_page *page,
@@ -524,6 +552,32 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 	}
 
 	page_pool[index].object_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_hash_next(struct plane_page *page,
+					struct plane_page *next)
+{
+	uint64_t index;
+
+	if (!page_pointer_index(page, &index) ||
+	    (next != NULL && !page_pointer_index(next, NULL))) {
+		return false;
+	}
+
+	page_pool[index].object_hash_next = next;
+	return true;
+}
+
+bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
+{
+	uint64_t index;
+
+	if (!page_pointer_index(page, &index)) {
+		return false;
+	}
+
+	page_pool[index].object_hashed = hashed;
 	return true;
 }
 
@@ -648,6 +702,8 @@ static bool init_page_metadata(void)
 			page_pool[page_index].vm_object_offset = 0;
 			page_pool[page_index].object_prev = NULL;
 			page_pool[page_index].object_next = NULL;
+			page_pool[page_index].object_hash_next = NULL;
+			page_pool[page_index].object_hashed = false;
 			page_pool[page_index].state = PLANE_VM_PAGE_FREE;
 			page_pool[page_index].queue_prev = NULL;
 			page_pool[page_index].queue_next = NULL;
@@ -841,6 +897,8 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 		page->vm_object_offset = 0;
 		page->object_prev = NULL;
 		page->object_next = NULL;
+		page->object_hash_next = NULL;
+		page->object_hashed = false;
 		if (!free_queue_insert_ordered(page)) {
 			return false;
 		}
@@ -915,6 +973,8 @@ static bool plane_pmm_alloc_page_phys_raw(uint64_t *phys_addr)
 	page->vm_object_offset = 0;
 	page->object_prev = NULL;
 	page->object_next = NULL;
+	page->object_hash_next = NULL;
+	page->object_hashed = false;
 	*phys_addr = page->phys_addr;
 	return true;
 }
@@ -957,6 +1017,8 @@ static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
 		page->vm_object_offset = 0;
 		page->object_prev = NULL;
 		page->object_next = NULL;
+		page->object_hash_next = NULL;
+		page->object_hashed = false;
 	}
 
 	*phys_addr = alloc_base;
@@ -1056,6 +1118,8 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 		page->vm_object_offset = 0;
 		page->object_prev = NULL;
 		page->object_next = NULL;
+		page->object_hash_next = NULL;
+		page->object_hashed = false;
 		BUG_ON_MSG(!free_queue_insert_ordered(page),
 			   "failed to insert PMM free page");
 	}

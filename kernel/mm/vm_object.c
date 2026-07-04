@@ -1,5 +1,6 @@
 #include <plane/mm.h>
 #include <plane/printk.h>
+#include <plane/compiler.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
@@ -7,6 +8,15 @@
 
 #include "vm_object_internal.h"
 #include "vm_page_internal.h"
+
+/*
+ * Early fixed-size resident hash. XNU sizes vm_page_buckets from managed
+ * memory; Plane keeps a small static table until VM metadata allocation grows
+ * past early boot constraints.
+ */
+#define PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS 256
+
+static struct plane_page *resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
 
 static bool is_page_aligned(uint64_t value)
 {
@@ -29,6 +39,35 @@ static bool page_offset_matches(struct plane_page *page, uint64_t offset)
 	       page_offset == offset;
 }
 
+static uint64_t resident_hash_index(const struct plane_vm_object *object,
+				    uint64_t offset)
+{
+	uintptr_t object_key = (uintptr_t)object;
+	uint64_t page_key = offset / PAGE_SIZE;
+
+	return (object_key ^ page_key ^ (page_key >> 8)) &
+	       (PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS - 1);
+}
+
+static struct plane_page *find_page_in_hash(struct plane_vm_object *object,
+					    uint64_t offset)
+{
+	struct plane_page *page =
+		resident_hash[resident_hash_index(object, offset)];
+
+	while (page != NULL) {
+		if (plane_vm_page_object(page) == object &&
+		    page_offset_matches(page, offset)) {
+			object->resident_hint = page;
+			return page;
+		}
+
+		page = plane_vm_page_object_hash_next(page);
+	}
+
+	return NULL;
+}
+
 static struct plane_page *find_page(struct plane_vm_object *object,
 				    uint64_t offset)
 {
@@ -38,6 +77,29 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 	    plane_vm_page_object(object->resident_hint) == object &&
 	    page_offset_matches(object->resident_hint, offset)) {
 		return object->resident_hint;
+	}
+
+	if (object->resident_hint != NULL) {
+		page = plane_vm_page_object_next(object->resident_hint);
+		if (page != NULL &&
+		    plane_vm_page_object(page) == object &&
+		    page_offset_matches(page, offset)) {
+			object->resident_hint = page;
+			return page;
+		}
+
+		page = plane_vm_page_object_prev(object->resident_hint);
+		if (page != NULL &&
+		    plane_vm_page_object(page) == object &&
+		    page_offset_matches(page, offset)) {
+			object->resident_hint = page;
+			return page;
+		}
+	}
+
+	page = find_page_in_hash(object, offset);
+	if (page != NULL) {
+		return page;
 	}
 
 	page = object->resident_head;
@@ -52,6 +114,72 @@ static struct plane_page *find_page(struct plane_vm_object *object,
 	}
 
 	return NULL;
+}
+
+static bool remove_page_from_hash_at(struct plane_vm_object *object,
+				     struct plane_page *page,
+				     uint64_t offset)
+{
+	uint64_t index = resident_hash_index(object, offset);
+	struct plane_page *current = resident_hash[index];
+	struct plane_page *prev = NULL;
+
+	while (current != NULL) {
+		struct plane_page *next =
+			plane_vm_page_object_hash_next(current);
+
+		if (current == page) {
+			if (prev != NULL) {
+				BUG_ON_MSG(!plane_vm_page_set_object_hash_next(prev,
+									       next),
+					   "failed to unlink resident hash page");
+			} else {
+				resident_hash[index] = next;
+			}
+			BUG_ON_MSG(!plane_vm_page_set_object_hash_next(page,
+								       NULL),
+				   "failed to clear resident hash link");
+			return true;
+		}
+
+		prev = current;
+		current = next;
+	}
+
+	return false;
+}
+
+static void remove_page_from_hash(struct plane_vm_object *object,
+				  struct plane_page *page,
+				  uint64_t offset)
+{
+	BUG_ON_MSG(!plane_vm_page_object_hashed(page),
+		   "resident page is not marked hashed");
+	BUG_ON_MSG(!remove_page_from_hash_at(object, page, offset),
+		   "resident page missing from hash");
+	BUG_ON_MSG(!plane_vm_page_set_object_hashed(page, false),
+		   "failed to clear resident hash state");
+}
+
+static void insert_page_into_hash(struct plane_vm_object *object,
+				  struct plane_page *page,
+				  uint64_t offset)
+{
+	uint64_t index = resident_hash_index(object, offset);
+
+	BUG_ON_MSG(plane_vm_page_object(page) != object ||
+		   !page_offset_matches(page, offset),
+		   "resident page hash insert without object identity");
+	BUG_ON_MSG(plane_vm_page_object_hashed(page),
+		   "resident page already marked hashed");
+	BUG_ON_MSG(plane_vm_page_object_hash_next(page) != NULL,
+		   "resident page has stale hash link");
+	BUG_ON_MSG(!plane_vm_page_set_object_hash_next(page,
+						       resident_hash[index]),
+		   "failed to link resident hash page");
+	resident_hash[index] = page;
+	BUG_ON_MSG(!plane_vm_page_set_object_hashed(page, true),
+		   "failed to mark resident page hashed");
 }
 
 static void append_resident_page(struct plane_vm_object *object,
@@ -78,10 +206,13 @@ static void append_resident_page(struct plane_vm_object *object,
 }
 
 static void remove_resident_page(struct plane_vm_object *object,
-				 struct plane_page *page)
+				 struct plane_page *page,
+				 uint64_t offset)
 {
 	struct plane_page *prev = plane_vm_page_object_prev(page);
 	struct plane_page *next = plane_vm_page_object_next(page);
+
+	remove_page_from_hash(object, page, offset);
 
 	if (prev != NULL) {
 		BUG_ON_MSG(!plane_vm_page_set_object_next(prev, next),
@@ -137,6 +268,10 @@ bool plane_vm_object_page_became_unwired(struct plane_vm_object *object)
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit)
 {
+	BUILD_BUG_ON(PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS == 0);
+	BUILD_BUG_ON((PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS &
+		      (PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS - 1)) != 0);
+
 	if (object == NULL ||
 	    object->initialized ||
 	    offset_limit == 0 ||
@@ -176,6 +311,7 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 		return false;
 	}
 	append_resident_page(object, page);
+	insert_page_into_hash(object, page, offset);
 	object->resident_page_count++;
 	if (wire_count != 0) {
 		object->wired_page_count++;
@@ -210,7 +346,7 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	    (wire_count != 0 && object->wired_page_count == 0)) {
 		return NULL;
 	}
-	remove_resident_page(object, page);
+	remove_resident_page(object, page, offset);
 	BUG_ON_MSG(!plane_vm_page_detach_object(page, object, offset),
 		   "failed to detach resident page from object");
 	object->resident_page_count--;
