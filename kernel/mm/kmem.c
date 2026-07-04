@@ -8,6 +8,7 @@
 #include <plane/pmm.h>
 #include <plane/util.h>
 #include <plane/vm_map.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
@@ -133,7 +134,7 @@ static bool release_mapped_page(struct plane_vm_object *object,
 	}
 
 	page = plane_pmm_phys_to_page(phys_addr);
-	if (!plane_page_wire_count(page, &wire_count)) {
+	if (!plane_vm_page_wire_count(page, &wire_count)) {
 		return false;
 	}
 	object_page = plane_vm_object_lookup_page(object, object_offset);

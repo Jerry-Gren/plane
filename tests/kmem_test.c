@@ -6,6 +6,7 @@
 #include <plane/mm.h>
 #include <plane/pmm.h>
 #include <plane/vm_map.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #include "support/test.h"
@@ -359,7 +360,7 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
 }
 
-struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
@@ -370,7 +371,7 @@ struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
 	return page->object;
 }
 
-bool plane_page_vm_object_offset(const struct plane_page *page,
+bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
@@ -422,7 +423,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	return true;
 }
 
-bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
+bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
 	    page == NULL ||
@@ -466,7 +467,7 @@ static int test_alloc_and_free_pages(void)
 								PAGE_SIZE),
 				    &test_pages[1]);
 	failures += test_expect_ptr("alloc page object",
-				    plane_page_vm_object(&test_pages[0]),
+				    plane_vm_page_object(&test_pages[0]),
 				    &test_object);
 	failures += test_expect_u64("alloc page object offset",
 				    test_pages[0].object_offset,
@@ -487,7 +488,7 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("free wired pages", wired_page_count(), 0);
 	failures += test_expect_u64("free object pages", object_page_count(), 0);
 	failures += test_expect_null("free page object cleared",
-				     plane_page_vm_object(&test_pages[0]));
+				     plane_vm_page_object(&test_pages[0]));
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
 	return failures;
 }
@@ -740,7 +741,7 @@ static int test_guard_alloc_and_free_pages(void)
 								kmem_page_vaddr(2)),
 				    &test_pages[1]);
 	failures += test_expect_ptr("guard page object",
-				    plane_page_vm_object(&test_pages[0]),
+				    plane_vm_page_object(&test_pages[0]),
 				    &test_object);
 	failures += test_expect_u64("guard page object offset",
 				    test_pages[0].object_offset,

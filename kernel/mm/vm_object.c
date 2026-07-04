@@ -1,4 +1,5 @@
 #include <plane/mm.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #include <stddef.h>
@@ -77,7 +78,7 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	if (!offset_valid(object, offset) ||
 	    page == NULL ||
 	    plane_page_state(page) != PLANE_PAGE_ALLOCATED ||
-	    plane_page_vm_object(page) != NULL ||
+	    plane_vm_page_object(page) != NULL ||
 	    find_page_index(object, offset) >= 0) {
 		return false;
 	}

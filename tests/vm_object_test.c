@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include <plane/mm.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #include "support/test.h"
@@ -31,7 +32,7 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	return page->state;
 }
 
-struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
 	if (page == NULL) {
 		return NULL;
@@ -40,7 +41,7 @@ struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
 	return page->object;
 }
 
-bool plane_page_vm_object_offset(const struct plane_page *page, uint64_t *offset)
+bool plane_vm_page_object_offset(const struct plane_page *page, uint64_t *offset)
 {
 	if (page == NULL ||
 	    page->object == NULL ||
@@ -169,10 +170,10 @@ static int test_insert_lookup_and_remove_page(void)
 					     &allocated_page),
 				     true);
 	failures += test_expect_ptr("page object",
-				    plane_page_vm_object(&allocated_page),
+				    plane_vm_page_object(&allocated_page),
 				    &test_object);
 	failures += test_expect_bool("page object offset query",
-				     plane_page_vm_object_offset(&allocated_page,
+				     plane_vm_page_object_offset(&allocated_page,
 								 &offset),
 				     true);
 	failures += test_expect_u64("page object offset", offset, PAGE_SIZE);
@@ -181,9 +182,9 @@ static int test_insert_lookup_and_remove_page(void)
 	page = plane_vm_object_remove_page(&test_object, PAGE_SIZE);
 	failures += test_expect_ptr("object remove", page, &allocated_page);
 	failures += test_expect_null("page object cleared",
-				     plane_page_vm_object(&allocated_page));
+				     plane_vm_page_object(&allocated_page));
 	failures += test_expect_bool("page object offset cleared",
-				     plane_page_vm_object_offset(&allocated_page,
+				     plane_vm_page_object_offset(&allocated_page,
 								 &offset),
 				     false);
 	failures += test_expect_null("object lookup removed",

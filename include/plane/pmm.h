@@ -7,8 +7,6 @@
 #include <plane/bits.h>
 #include <plane/memmap.h>
 
-struct plane_vm_object;
-
 /*
  * Early physical page allocator.
  *
@@ -20,8 +18,6 @@ struct plane_vm_object;
  * objects, coloring, and SMP locking are intentionally not here yet.
  * Wire/unwire operations use struct plane_page as the page identity; callers
  * that start with a physical address should look up the page metadata first.
- * VM object fields are resident-page metadata only; they do not imply object
- * reference counts, pager state, shadow objects, or pageout behavior.
  */
 
 struct plane_page;
@@ -83,11 +79,6 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count);
 struct plane_page *plane_pmm_phys_to_page(uint64_t phys_addr);
 uint64_t plane_page_phys(const struct plane_page *page);
 enum plane_page_state plane_page_state(const struct plane_page *page);
-bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count);
-/* Resident VM object metadata query; mutation belongs to VM object insert/remove. */
-struct plane_vm_object *plane_page_vm_object(const struct plane_page *page);
-bool plane_page_vm_object_offset(const struct plane_page *page,
-				 uint64_t *offset);
 struct plane_pmm_stats plane_pmm_get_stats(void);
 void plane_pmm_log_stats(void);
 

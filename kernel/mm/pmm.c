@@ -7,6 +7,7 @@
 #include <plane/pmm.h>
 #include <plane/printk.h>
 #include <plane/util.h>
+#include <plane/vm_page.h>
 
 #include "vm_page_internal.h"
 
@@ -392,7 +393,8 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	return page_pool[index].state;
 }
 
-bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
+bool plane_vm_page_wire_count(const struct plane_page *page,
+			      uint64_t *wire_count)
 {
 	uint64_t index;
 
@@ -405,7 +407,7 @@ bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 	return true;
 }
 
-struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
 	uint64_t index;
 
@@ -416,7 +418,7 @@ struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
 	return page_pool[index].vm_object;
 }
 
-bool plane_page_vm_object_offset(const struct plane_page *page,
+bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	uint64_t index;

@@ -6,6 +6,7 @@
 #include <plane/memmap.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #include "support/test.h"
@@ -322,20 +323,20 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 	failures += test_expect_u64("wire alloc phys", phys, 0x2000);
 	page = plane_pmm_phys_to_page(phys);
 	failures += test_expect_bool("wire initial count query",
-				     plane_page_wire_count(page, &wire_count),
+				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire initial count", wire_count, 0);
 
 	failures += test_expect_bool("wire page",
 				     plane_pmm_wire_page(page), true);
 	failures += test_expect_bool("wire count one query",
-				     plane_page_wire_count(page, &wire_count),
+				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count one", wire_count, 1);
 	failures += test_expect_bool("wire page again",
 				     plane_pmm_wire_page(page), true);
 	failures += test_expect_bool("wire count two query",
-				     plane_page_wire_count(page, &wire_count),
+				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count two", wire_count, 2);
 
@@ -348,13 +349,13 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 	failures += test_expect_bool("unwire page",
 				     plane_pmm_unwire_page(page), true);
 	failures += test_expect_bool("wire count one after unwire query",
-				     plane_page_wire_count(page, &wire_count),
+				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count one after unwire", wire_count, 1);
 	failures += test_expect_bool("unwire page again",
 				     plane_pmm_unwire_page(page), true);
 	failures += test_expect_bool("wire count zero query",
-				     plane_page_wire_count(page, &wire_count),
+				     plane_vm_page_wire_count(page, &wire_count),
 				     true);
 	failures += test_expect_u64("wire count zero", wire_count, 0);
 	failures += test_expect_bool("unwire zero rejected",
@@ -395,18 +396,18 @@ static int test_wire_rejects_invalid_pages(void)
 	failures += test_expect_bool("unwire rejects unmanaged",
 				     plane_pmm_unwire_page(NULL), false);
 	failures += test_expect_bool("wire count rejects null page",
-				     plane_page_wire_count(NULL, &wire_count),
+				     plane_vm_page_wire_count(NULL, &wire_count),
 				     false);
 	failures += test_expect_bool("wire count rejects null out",
-				     plane_page_wire_count(free_page, NULL),
+				     plane_vm_page_wire_count(free_page, NULL),
 				     false);
 	failures += test_expect_bool("wire count accepts metadata page",
-				     plane_page_wire_count(metadata_page,
+				     plane_vm_page_wire_count(metadata_page,
 							   &wire_count),
 				     true);
 	failures += test_expect_u64("metadata wire count", wire_count, 0);
 	failures += test_expect_bool("wire count accepts free page",
-				     plane_page_wire_count(free_page,
+				     plane_vm_page_wire_count(free_page,
 							   &wire_count),
 				     true);
 	failures += test_expect_u64("free page wire count", wire_count, 0);
@@ -440,18 +441,18 @@ static int test_page_object_identity_blocks_free(void)
 				     true);
 	page = plane_pmm_phys_to_page(phys);
 	failures += test_expect_null("object identity initial object",
-				     plane_page_vm_object(page));
+				     plane_vm_page_object(page));
 	failures += test_expect_bool("object identity initial offset",
-				     plane_page_vm_object_offset(page, &offset),
+				     plane_vm_page_object_offset(page, &offset),
 				     false);
 	failures += test_expect_bool("object identity insert",
 				     plane_vm_object_insert_page(&object,
 								 0x4000, page),
 				     true);
 	failures += test_expect_ptr("object identity object",
-				    plane_page_vm_object(page), &object);
+				    plane_vm_page_object(page), &object);
 	failures += test_expect_bool("object identity offset query",
-				     plane_page_vm_object_offset(page, &offset),
+				     plane_vm_page_object_offset(page, &offset),
 				     true);
 	failures += test_expect_u64("object identity offset", offset, 0x4000);
 	failures += test_expect_bool("object identity free rejected",
@@ -460,9 +461,9 @@ static int test_page_object_identity_blocks_free(void)
 				    plane_vm_object_remove_page(&object, 0x4000),
 				    page);
 	failures += test_expect_null("object identity cleared object",
-				     plane_page_vm_object(page));
+				     plane_vm_page_object(page));
 	failures += test_expect_bool("object identity cleared offset",
-				     plane_page_vm_object_offset(page, &offset),
+				     plane_vm_page_object_offset(page, &offset),
 				     false);
 	failures += test_expect_bool("object identity free",
 				     plane_pmm_free_page_phys(phys), true);

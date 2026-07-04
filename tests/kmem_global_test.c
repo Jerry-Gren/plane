@@ -5,6 +5,7 @@
 #include <plane/kmem.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
 #include "support/test.h"
@@ -244,7 +245,7 @@ enum plane_page_state plane_page_state(const struct plane_page *page)
 	return page->allocated ? PLANE_PAGE_ALLOCATED : PLANE_PAGE_FREE;
 }
 
-struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
+struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
 	if (page == NULL ||
 	    page < &test_pages[0] ||
@@ -255,7 +256,7 @@ struct plane_vm_object *plane_page_vm_object(const struct plane_page *page)
 	return page->object;
 }
 
-bool plane_page_vm_object_offset(const struct plane_page *page,
+bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
@@ -307,7 +308,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	return true;
 }
 
-bool plane_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
+bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
 	    page == NULL ||
