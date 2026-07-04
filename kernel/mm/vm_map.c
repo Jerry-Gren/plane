@@ -6,31 +6,6 @@
 
 #define VM_MAP_ENTRY_NONE UINT64_MAX
 
-static bool is_page_aligned(uint64_t value)
-{
-	return (value & (PAGE_SIZE - 1)) == 0;
-}
-
-static bool checked_add_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (rhs > UINT64_MAX - lhs) {
-		return false;
-	}
-
-	*out = lhs + rhs;
-	return true;
-}
-
-static bool checked_mul_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
-		return false;
-	}
-
-	*out = lhs * rhs;
-	return true;
-}
-
 static uint64_t page_count_from_size(uint64_t size)
 {
 	return size / PAGE_SIZE;
@@ -190,8 +165,8 @@ static int64_t find_exact_entry(struct plane_vm_map *map,
 	uint64_t end;
 	uint64_t current;
 
-	if (!checked_mul_u64(page_count, PAGE_SIZE, &size) ||
-	    !checked_add_u64(vaddr, size, &end)) {
+	if (!plane_checked_page_offset(page_count, &size) ||
+	    !plane_checked_add_u64(vaddr, size, &end)) {
 		return -1;
 	}
 
@@ -269,9 +244,9 @@ bool plane_vm_map_init(struct plane_vm_map *map,
 	    entry_capacity == 0 ||
 	    map->initialized ||
 	    size == 0 ||
-	    !checked_add_u64(base, size, &end) ||
-	    !is_page_aligned(base) ||
-	    !is_page_aligned(size)) {
+	    !plane_checked_add_u64(base, size, &end) ||
+	    !plane_is_page_aligned(base) ||
+	    !plane_is_page_aligned(size)) {
 		return false;
 	}
 
@@ -341,25 +316,25 @@ bool plane_vm_map_alloc_pages_object(struct plane_vm_map *map,
 	    (object == NULL && object_offset != 0) ||
 	    (object != NULL &&
 	     object_offset != PLANE_VM_MAP_OBJECT_OFFSET_AUTO &&
-	     !is_page_aligned(object_offset)) ||
+	     !plane_is_page_aligned(object_offset)) ||
 	    !prot_allowed(prot, max_prot)) {
 		return false;
 	}
 
 	entry_index = alloc_entry_index(map);
-	if (!checked_mul_u64(guard_pages, 2, &guard_total) ||
-	    !checked_add_u64(page_count, guard_total, &total_pages)) {
+	if (!plane_checked_mul_u64(guard_pages, 2, &guard_total) ||
+	    !plane_checked_add_u64(page_count, guard_total, &total_pages)) {
 		return false;
 	}
 
 	if (entry_index < 0 ||
-	    !checked_mul_u64(total_pages, PAGE_SIZE, &size) ||
+	    !plane_checked_page_offset(total_pages, &size) ||
 	    !find_first_fit(map, size, &start, &prev, &next) ||
-	    !checked_add_u64(start, size, &end) ||
-	    !checked_mul_u64(guard_pages, PAGE_SIZE, &guard_size) ||
-	    !checked_add_u64(start, guard_size, &user_start) ||
-	    !checked_mul_u64(page_count, PAGE_SIZE, &user_size) ||
-	    !checked_add_u64(user_start, user_size, &user_end)) {
+	    !plane_checked_add_u64(start, size, &end) ||
+	    !plane_checked_page_offset(guard_pages, &guard_size) ||
+	    !plane_checked_add_u64(start, guard_size, &user_start) ||
+	    !plane_checked_page_offset(page_count, &user_size) ||
+	    !plane_checked_add_u64(user_start, user_size, &user_end)) {
 		return false;
 	}
 
@@ -385,7 +360,7 @@ bool plane_vm_map_lookup_allocation(
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr)) {
 		return false;
 	}
 
@@ -423,7 +398,7 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !is_page_aligned(vaddr) ||
+	    !plane_is_page_aligned(vaddr) ||
 	    !prot_valid(prot)) {
 		return false;
 	}
@@ -447,7 +422,7 @@ bool plane_vm_map_wire_pages(struct plane_vm_map *map,
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr)) {
 		return false;
 	}
 
@@ -470,7 +445,7 @@ bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr)) {
 		return false;
 	}
 
@@ -493,7 +468,7 @@ bool plane_vm_map_free_pages(struct plane_vm_map *map,
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr)) {
 		return false;
 	}
 

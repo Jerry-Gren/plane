@@ -10,6 +10,7 @@
 
 #include <plane/boot_info.h>
 #include <plane/entry.h>
+#include <plane/overflow.h>
 #include <plane/printk.h>
 #include <plane/util.h>
 
@@ -18,16 +19,6 @@ struct multiboot_info_base {
     uint32_t total_size;
     uint32_t reserved;
 };
-
-static bool checked_u64_mul(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
-		return false;
-	}
-
-	*out = lhs * rhs;
-	return true;
-}
 
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
@@ -93,7 +84,8 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	uint64_t phys_addr = fb_common->framebuffer_addr;
 	uint64_t fb_size;
 
-	BUG_ON_MSG(!checked_u64_mul(video->pitch, video->height, &fb_size),
+	BUG_ON_MSG(!plane_checked_mul_u64(video->pitch, video->height,
+					  &fb_size),
 		   "multiboot2 framebuffer size overflow: pitch=%u height=%u",
 		   video->pitch, video->height);
 	BUG_ON_MSG(fb_size == 0, "multiboot2 framebuffer size is zero");

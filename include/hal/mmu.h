@@ -13,6 +13,8 @@ enum hal_mmu_map_flags {
 	HAL_MMU_MAP_WRITE = BIT(0),
 };
 
+#define HAL_MMU_INVALID_PHYS UINT64_MAX
+
 /*
  * Kernel direct map.
  *

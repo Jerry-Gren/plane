@@ -44,7 +44,7 @@ static int test_direct_map_roundtrip(void)
 	failures += test_expect_u64("direct reject kernel vma",
 				    hal_mmu_direct_virt_to_phys(
 					    (void *)KERNEL_VMA_BASE),
-				    UINT64_MAX);
+				    HAL_MMU_INVALID_PHYS);
 
 	return failures;
 }
@@ -158,7 +158,7 @@ static int test_direct_map_rejects_uncovered_usable_memory(void)
 	failures += test_expect_u64("direct reject leaves virt unavailable",
 				    hal_mmu_direct_virt_to_phys(
 					    (void *)X86_64_DIRECT_MAP_BASE),
-				    UINT64_MAX);
+				    HAL_MMU_INVALID_PHYS);
 
 	return failures;
 }

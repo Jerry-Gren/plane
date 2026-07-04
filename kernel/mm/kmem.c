@@ -18,48 +18,18 @@ static struct plane_vm_map kernel_map;
 static struct plane_vm_object kernel_object;
 static bool kmem_initialized;
 
-static bool checked_add_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (rhs > UINT64_MAX - lhs) {
-		return false;
-	}
-
-	*out = lhs + rhs;
-	return true;
-}
-
-static bool checked_mul_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
-		return false;
-	}
-
-	*out = lhs * rhs;
-	return true;
-}
-
-static bool checked_page_offset(uint64_t page_index, uint64_t *offset)
-{
-	return checked_mul_u64(page_index, PAGE_SIZE, offset);
-}
-
 static bool kmem_size_to_pages(uint64_t size, uint64_t *page_count)
 {
 	uint64_t rounded;
 
 	if (page_count == NULL ||
 	    size == 0 ||
-	    !checked_add_u64(size, PAGE_SIZE - 1, &rounded)) {
+	    !plane_checked_add_u64(size, PAGE_SIZE - 1, &rounded)) {
 		return false;
 	}
 
 	*page_count = rounded / PAGE_SIZE;
 	return true;
-}
-
-static bool is_page_aligned(uint64_t value)
-{
-	return (value & (PAGE_SIZE - 1)) == 0;
 }
 
 static bool kmem_flags_valid(uint32_t flags)
@@ -165,10 +135,10 @@ static bool rollback_mapped_pages(uint64_t vaddr,
 		uint64_t page_object_offset;
 		uint64_t offset;
 
-		if (!checked_page_offset(i - 1, &offset) ||
-		    !checked_add_u64(vaddr, offset, &page_vaddr) ||
-		    !checked_add_u64(object_offset, offset,
-				     &page_object_offset) ||
+		if (!plane_checked_page_offset(i - 1, &offset) ||
+		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
+		    !plane_checked_add_u64(object_offset, offset,
+					   &page_object_offset) ||
 		    !release_mapped_page(object, page_object_offset,
 					 page_vaddr)) {
 			return false;
@@ -218,10 +188,10 @@ static bool map_allocated_pages(uint64_t vaddr,
 		uint64_t phys_addr;
 		uint64_t offset;
 
-		if (!checked_page_offset(i, &offset) ||
-		    !checked_add_u64(vaddr, offset, &page_vaddr) ||
-		    !checked_add_u64(object_offset, offset,
-				     &page_object_offset)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
+		    !plane_checked_add_u64(object_offset, offset,
+					   &page_object_offset)) {
 			BUG_ON_MSG(!rollback_mapped_pages(vaddr, object,
 							  object_offset,
 							  mapped_pages),
@@ -296,8 +266,8 @@ static bool protect_mapped_pages(uint64_t vaddr,
 		uint64_t page_vaddr;
 		uint64_t offset;
 
-		if (!checked_page_offset(i, &offset) ||
-		    !checked_add_u64(vaddr, offset, &page_vaddr) ||
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
 		    !hal_mmu_protect_kernel_page(page_vaddr, map_flags)) {
 			return false;
 		}
@@ -318,9 +288,9 @@ bool plane_kmem_init(void)
 
 	if (!hal_mmu_kernel_vma_range(&base, &size) ||
 	    size == 0 ||
-	    !is_page_aligned(base) ||
-	    !is_page_aligned(size) ||
-	    !checked_add_u64(base, size, &object_size) ||
+	    !plane_is_page_aligned(base) ||
+	    !plane_is_page_aligned(size) ||
+	    !plane_checked_add_u64(base, size, &object_size) ||
 	    ARRAY_SIZE(kernel_map_entries) == 0) {
 		return false;
 	}
@@ -482,7 +452,7 @@ bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,
 	if (map == NULL ||
 	    vaddr == NULL ||
 	    page_count == 0 ||
-	    !is_page_aligned(addr) ||
+	    !plane_is_page_aligned(addr) ||
 	    !kmem_prot_valid(prot)) {
 		return false;
 	}
@@ -523,7 +493,7 @@ bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 	    object == NULL ||
 	    vaddr == NULL ||
 	    page_count == 0 ||
-	    !is_page_aligned(addr)) {
+	    !plane_is_page_aligned(addr)) {
 		return false;
 	}
 

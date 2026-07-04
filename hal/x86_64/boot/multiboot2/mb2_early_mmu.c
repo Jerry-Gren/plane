@@ -2,6 +2,7 @@
 
 #include <hal/mmu.h>
 
+#include <plane/overflow.h>
 #include <plane/util.h>
 
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
@@ -11,37 +12,31 @@ extern uint64_t x86_64_mb2_early_pml4[];
 extern uint64_t x86_64_mb2_early_pd_kernel[];
 extern uint64_t x86_64_mb2_early_pd_fb[];
 
-static bool checked_align_up(uint64_t value, uint64_t align, uint64_t *out)
-{
-	if (value > UINT64_MAX - (align - 1)) {
-		return false;
-	}
-
-	*out = ALIGN(value, align);
-	return true;
-}
-
 bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
-				      void **vaddr) {
+				      void **vaddr)
+{
 	if (vaddr == NULL || size == 0) {
 		return false;
 	}
 
 	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
 	uint64_t page_offset = phys_addr - phys_base;
-
-	if (size > UINT64_MAX - page_offset) {
-		return false;
-	}
-
-	uint64_t fb_size_with_offset = size + page_offset;
+	uint64_t fb_size_with_offset;
 	uint64_t fb_aligned_size;
-	if (!checked_align_up(fb_size_with_offset, ARCH_LARGE_PAGE_SIZE,
-			      &fb_aligned_size)) {
+	uint64_t phys_end;
+
+	if (!plane_checked_add_u64(size, page_offset, &fb_size_with_offset)) {
 		return false;
 	}
 
-	if ((fb_aligned_size - 1) > UINT64_MAX - phys_base) {
+	if (!plane_checked_align_up_u64(fb_size_with_offset,
+					ARCH_LARGE_PAGE_SIZE,
+					&fb_aligned_size)) {
+		return false;
+	}
+
+	if (!plane_checked_add_u64(phys_base, fb_aligned_size - 1,
+				   &phys_end)) {
 		return false;
 	}
 
@@ -60,7 +55,7 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 	for (uint64_t i = 0; i < pages_needed; i++) {
 		uint64_t offset = i * ARCH_LARGE_PAGE_SIZE;
 		uint64_t current_vaddr = X86_64_MB2_FRAMEBUFFER_VMA_BASE + offset;
-		
+
 		target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
 		hal_mmu_invalidate_tlb(current_vaddr);
 	}

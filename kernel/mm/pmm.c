@@ -57,71 +57,6 @@ static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
 static struct plane_page guard_page_pool[PLANE_VM_GUARD_PAGE_POOL_SIZE];
 
-static bool is_power_of_two(uint64_t value)
-{
-	return value != 0 && (value & (value - 1)) == 0;
-}
-
-static bool checked_add_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (rhs > UINT64_MAX - lhs) {
-		return false;
-	}
-
-	*out = lhs + rhs;
-	return true;
-}
-
-static bool checked_mul_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (lhs != 0 && rhs > UINT64_MAX / lhs) {
-		return false;
-	}
-
-	*out = lhs * rhs;
-	return true;
-}
-
-static bool checked_region_end(uint64_t base, uint64_t length, uint64_t *end)
-{
-	return checked_add_u64(base, length, end);
-}
-
-static bool checked_align_up(uint64_t value, uint64_t align, uint64_t *out)
-{
-	uint64_t mask;
-
-	if (!is_power_of_two(align)) {
-		return false;
-	}
-
-	mask = align - 1;
-	if ((value & mask) == 0) {
-		*out = value;
-		return true;
-	}
-
-	if (value > UINT64_MAX - mask) {
-		return false;
-	}
-
-	*out = (value + mask) & ~mask;
-	return true;
-}
-
-static bool checked_page_range_end(uint64_t base,
-				   uint64_t page_count,
-				   uint64_t *end)
-{
-	uint64_t size;
-
-	if (!checked_mul_u64(page_count, PAGE_SIZE, &size)) {
-		return false;
-	}
-
-	return checked_add_u64(base, size, end);
-}
-
 static uint64_t page_count_for_region(uint64_t start, uint64_t end)
 {
 	return (end - start) / PAGE_SIZE;
@@ -135,7 +70,7 @@ static bool append_managed_range(uint64_t base, uint64_t page_count)
 		return false;
 	}
 
-	if (!checked_add_u64(tracked_page_count, page_count,
+	if (!plane_checked_add_u64(tracked_page_count, page_count,
 			     &new_tracked_count)) {
 		return false;
 	}
@@ -155,14 +90,14 @@ static uint64_t allocated_page_count(void)
 
 static bool add_pages_to_stat(uint64_t *stat, uint64_t pages)
 {
-	return checked_add_u64(*stat, pages, stat);
+	return plane_checked_add_u64(*stat, pages, stat);
 }
 
 static bool append_usable_region(uint64_t base, uint64_t page_count)
 {
 	uint64_t managed_pages;
 
-	if (!checked_add_u64(pmm_stats.allocator.managed_pages, page_count,
+	if (!plane_checked_add_u64(pmm_stats.allocator.managed_pages, page_count,
 			     &managed_pages) ||
 	    !append_managed_range(base, page_count) ||
 	    !add_pages_to_stat(&pmm_stats.memtype.usable_pages, page_count)) {
@@ -207,14 +142,14 @@ static bool managed_range_contains(uint64_t base, uint64_t page_count)
 {
 	uint64_t end;
 
-	if (!checked_page_range_end(base, page_count, &end)) {
+	if (!plane_checked_page_range_end(base, page_count, &end)) {
 		return false;
 	}
 
 	for (uint64_t i = 0; i < managed_range_count; i++) {
 		uint64_t managed_end;
 
-		if (!checked_page_range_end(managed_ranges[i].base,
+		if (!plane_checked_page_range_end(managed_ranges[i].base,
 					    managed_ranges[i].page_count,
 					    &managed_end)) {
 			return false;
@@ -487,7 +422,7 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 	for (uint64_t i = 0; i < managed_range_count; i++) {
 		uint64_t managed_end;
 
-		if (!checked_page_range_end(managed_ranges[i].base,
+		if (!plane_checked_page_range_end(managed_ranges[i].base,
 					    managed_ranges[i].page_count,
 					    &managed_end)) {
 			return NULL;
@@ -860,8 +795,8 @@ static bool page_state_range_matches(uint64_t phys_addr,
 		uint64_t page_phys;
 		struct plane_page *page;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -888,8 +823,8 @@ static bool set_page_state_range(uint64_t phys_addr,
 		uint64_t page_phys;
 		struct plane_page *page;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -911,9 +846,10 @@ static bool init_page_metadata(void)
 		return true;
 	}
 
-	if (!checked_mul_u64(pmm_stats.allocator.managed_pages, sizeof(page_pool[0]),
-			     &metadata_bytes) ||
-	    !checked_align_up(metadata_bytes, PAGE_SIZE, &metadata_size)) {
+	if (!plane_checked_mul_u64(pmm_stats.allocator.managed_pages,
+				   sizeof(page_pool[0]), &metadata_bytes) ||
+	    !plane_checked_align_up_u64(metadata_bytes, PAGE_SIZE,
+					&metadata_size)) {
 		return false;
 	}
 	metadata_pages = metadata_size / PAGE_SIZE;
@@ -944,10 +880,11 @@ static bool init_page_metadata(void)
 			uint64_t phys;
 			uint64_t page_index;
 
-			if (!checked_mul_u64(j, PAGE_SIZE, &phys) ||
-			    !checked_add_u64(managed_ranges[i].base, phys, &phys) ||
-			    !checked_add_u64(managed_ranges[i].page_index, j,
-					     &page_index)) {
+			if (!plane_checked_page_offset(j, &phys) ||
+			    !plane_checked_add_u64(managed_ranges[i].base, phys,
+						   &phys) ||
+			    !plane_checked_add_u64(managed_ranges[i].page_index, j,
+						   &page_index)) {
 				return false;
 			}
 
@@ -1009,12 +946,12 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 			continue;
 		}
 
-		if (!checked_region_end(region->base, region->length, &end)) {
+		if (!plane_checked_add_u64(region->base, region->length, &end)) {
 			return false;
 		}
 
 		if (region->type == PLANE_MEM_USABLE) {
-			if (!checked_align_up(region->base, PAGE_SIZE, &start)) {
+			if (!plane_checked_align_up_u64(region->base, PAGE_SIZE, &start)) {
 				return false;
 			}
 			aligned_end = ALIGN_DOWN(end, PAGE_SIZE);
@@ -1030,7 +967,7 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 		}
 
 		start = ALIGN_DOWN(region->base, PAGE_SIZE);
-		if (!checked_align_up(end, PAGE_SIZE, &aligned_end)) {
+		if (!plane_checked_align_up_u64(end, PAGE_SIZE, &aligned_end)) {
 			return false;
 		}
 		if (start >= aligned_end) {
@@ -1057,8 +994,8 @@ static bool page_range_is_free(uint64_t phys_addr, uint64_t page_count)
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -1084,8 +1021,8 @@ static bool page_range_is_allocated_unwired(uint64_t phys_addr,
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -1106,7 +1043,7 @@ static bool zero_allocated_pages(uint64_t phys_addr, uint64_t page_count)
 	uint64_t size;
 	void *vaddr;
 
-	if (!checked_mul_u64(page_count, PAGE_SIZE, &size)) {
+	if (!plane_checked_page_offset(page_count, &size)) {
 		return false;
 	}
 
@@ -1127,8 +1064,8 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -1143,8 +1080,8 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 
@@ -1174,10 +1111,10 @@ static bool find_free_page_run(uint64_t page_count,
 		uint64_t range_end_page;
 		uint64_t candidate_page;
 
-		if (!checked_add_u64(range_base_page,
+		if (!plane_checked_add_u64(range_base_page,
 				     managed_ranges[i].page_count,
 				     &range_end_page) ||
-		    !checked_align_up(range_base_page, alignment_pages,
+		    !plane_checked_align_up_u64(range_base_page, alignment_pages,
 				      &candidate_page)) {
 			return false;
 		}
@@ -1186,15 +1123,15 @@ static bool find_free_page_run(uint64_t page_count,
 			uint64_t candidate_end_page;
 			uint64_t candidate_phys;
 
-			if (!checked_add_u64(candidate_page, page_count,
+			if (!plane_checked_add_u64(candidate_page, page_count,
 					     &candidate_end_page)) {
 				return false;
 			}
 			if (candidate_end_page > range_end_page) {
 				break;
 			}
-			if (!checked_mul_u64(candidate_page, PAGE_SIZE,
-					     &candidate_phys)) {
+			if (!plane_checked_page_offset(candidate_page,
+						       &candidate_phys)) {
 				return false;
 			}
 
@@ -1203,7 +1140,7 @@ static bool find_free_page_run(uint64_t page_count,
 				return true;
 			}
 
-			if (!checked_add_u64(candidate_page, alignment_pages,
+			if (!plane_checked_add_u64(candidate_page, alignment_pages,
 					     &candidate_page)) {
 				return false;
 			}
@@ -1245,7 +1182,7 @@ static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
 	uint64_t alloc_base;
 
 	if (phys_addr == NULL || page_count == 0 ||
-	    !is_power_of_two(alignment_pages)) {
+	    !plane_is_power_of_two_u64(alignment_pages)) {
 		return false;
 	}
 
@@ -1262,8 +1199,8 @@ static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(alloc_base, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(alloc_base, offset, &page_phys)) {
 			return false;
 		}
 
@@ -1368,8 +1305,8 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 		uint64_t page_phys;
 		uint64_t offset;
 
-		if (!checked_mul_u64(i, PAGE_SIZE, &offset) ||
-		    !checked_add_u64(phys_addr, offset, &page_phys)) {
+		if (!plane_checked_page_offset(i, &offset) ||
+		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
 			return false;
 		}
 

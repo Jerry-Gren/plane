@@ -3,19 +3,10 @@
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
 #include <plane/memmap.h>
+#include <plane/overflow.h>
 
 static uint64_t direct_map_base = X86_64_DIRECT_MAP_BASE;
 static bool direct_map_initialized;
-
-static bool checked_add_u64(uint64_t lhs, uint64_t rhs, uint64_t *out)
-{
-	if (rhs > UINT64_MAX - lhs) {
-		return false;
-	}
-
-	*out = lhs + rhs;
-	return true;
-}
 
 void hal_mmu_set_direct_map_base(uint64_t base)
 {
@@ -33,8 +24,8 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 		return false;
 	}
 
-	if (!checked_add_u64(direct_map_base, X86_64_DIRECT_MAP_SIZE,
-			     &direct_map_end) ||
+	if (!plane_checked_add_u64(direct_map_base, X86_64_DIRECT_MAP_SIZE,
+				   &direct_map_end) ||
 	    (KERNEL_VMA_BASE >= direct_map_base &&
 	     KERNEL_VMA_BASE < direct_map_end)) {
 		return false;
@@ -48,7 +39,7 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 			continue;
 		}
 
-		if (!checked_add_u64(region->base, region->length, &end) ||
+		if (!plane_checked_add_u64(region->base, region->length, &end) ||
 		    end > X86_64_DIRECT_MAP_SIZE) {
 			return false;
 		}
@@ -68,7 +59,7 @@ void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
 	uint64_t end;
 
 	if (!direct_map_initialized || size == 0 ||
-	    !checked_add_u64(phys_addr, size, &end) ||
+	    !plane_checked_add_u64(phys_addr, size, &end) ||
 	    end > X86_64_DIRECT_MAP_SIZE) {
 		return NULL;
 	}
@@ -82,12 +73,12 @@ uint64_t hal_mmu_direct_virt_to_phys(const void *vaddr)
 	uint64_t offset;
 
 	if (!direct_map_initialized || addr < direct_map_base) {
-		return UINT64_MAX;
+		return HAL_MMU_INVALID_PHYS;
 	}
 
 	offset = addr - direct_map_base;
 	if (offset >= X86_64_DIRECT_MAP_SIZE) {
-		return UINT64_MAX;
+		return HAL_MMU_INVALID_PHYS;
 	}
 
 	return offset;

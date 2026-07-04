@@ -23,16 +23,11 @@
 
 static struct plane_page *resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
 
-static bool is_page_aligned(uint64_t value)
-{
-	return (value & (PAGE_SIZE - 1)) == 0;
-}
-
 static bool offset_valid(const struct plane_vm_object *object, uint64_t offset)
 {
 	return object != NULL &&
 	       object->initialized &&
-	       is_page_aligned(offset) &&
+	       plane_is_page_aligned(offset) &&
 	       offset < object->offset_limit;
 }
 
@@ -322,7 +317,7 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 	if (object == NULL ||
 	    object->initialized ||
 	    offset_limit == 0 ||
-	    !is_page_aligned(offset_limit)) {
+	    !plane_is_page_aligned(offset_limit)) {
 		return false;
 	}
 
