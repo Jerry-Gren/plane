@@ -10,6 +10,7 @@
 #include <plane/vm_object.h>
 
 #include "support/test.h"
+#include "../kernel/mm/vm_page_internal.h"
 
 static bool direct_map_available = true;
 #define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
@@ -417,6 +418,63 @@ static int test_wire_rejects_invalid_pages(void)
 	failures += test_expect_u64("wire invalid phys", phys, 0x2000);
 	failures += test_expect_bool("wire invalid free unwired",
 				     plane_pmm_free_page_phys(phys), true);
+	return failures;
+}
+
+static int test_guard_pages_are_not_pmm_managed(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats before;
+	struct plane_pmm_stats after;
+	struct plane_page *guard;
+	uint64_t wire_count = UINT64_MAX;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("guard pmm init",
+				     plane_pmm_init(&mem), true);
+	before = plane_pmm_get_stats();
+	guard = plane_vm_page_create_guard();
+	failures += test_expect_not_null("guard create", guard);
+	failures += check_page_state("guard state",
+				      plane_vm_page_state(guard),
+				      PLANE_VM_PAGE_GUARD);
+	failures += test_expect_bool("guard query",
+				     plane_vm_page_is_guard(guard), true);
+	failures += test_expect_u64("guard phys",
+				    plane_vm_page_phys(guard), UINT64_MAX);
+	failures += test_expect_null("guard from phys",
+				     plane_vm_page_from_phys(UINT64_MAX));
+	failures += test_expect_bool("guard wire rejected",
+				     plane_vm_page_wire(guard), false);
+	failures += test_expect_bool("guard unwire rejected",
+				     plane_vm_page_unwire(guard), false);
+	failures += test_expect_bool("guard wire count query",
+				     plane_vm_page_wire_count(guard,
+							      &wire_count),
+				     true);
+	failures += test_expect_u64("guard wire count", wire_count, 0);
+	failures += test_expect_bool("guard pmm free rejected",
+				     plane_pmm_free_page(guard), false);
+	failures += test_expect_bool("guard release",
+				     plane_vm_page_release_guard(guard), true);
+	failures += check_page_state("guard released state",
+				      plane_vm_page_state(guard),
+				      PLANE_VM_PAGE_INVALID);
+	failures += test_expect_bool("guard released query",
+				     plane_vm_page_is_guard(guard), false);
+	failures += test_expect_bool("guard double release rejected",
+				     plane_vm_page_release_guard(guard), false);
+	after = plane_pmm_get_stats();
+	failures += test_expect_u64("guard managed unchanged",
+				    after.allocator.managed_pages,
+				    before.allocator.managed_pages);
+	failures += test_expect_u64("guard free unchanged",
+				    after.allocator.free_pages,
+				    before.allocator.free_pages);
+	failures += test_expect_u64("guard wired unchanged",
+				    after.allocator.wired_pages,
+				    before.allocator.wired_pages);
 	return failures;
 }
 
@@ -977,6 +1035,7 @@ int main(void)
 		TEST_CASE(test_page_api_allocates_and_frees_metadata),
 		TEST_CASE(test_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_wire_rejects_invalid_pages),
+		TEST_CASE(test_guard_pages_are_not_pmm_managed),
 		TEST_CASE(test_page_object_identity_blocks_free),
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),

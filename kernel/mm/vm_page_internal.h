@@ -12,6 +12,8 @@ struct plane_vm_object;
  * Public callers should use vm_object insert/remove instead.
  * Tabled/hashed state is VM-resident membership state, not public page API.
  */
+struct plane_page *plane_vm_page_create_guard(void);
+bool plane_vm_page_release_guard(struct plane_page *page);
 bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset);

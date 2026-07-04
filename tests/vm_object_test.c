@@ -21,6 +21,7 @@ struct plane_page {
 	struct plane_page *object_hash_next;
 	bool object_tabled;
 	bool object_hashed;
+	bool guard;
 	enum plane_vm_page_state state;
 };
 
@@ -30,6 +31,7 @@ static struct plane_page allocated_page;
 static struct plane_page second_allocated_page;
 static struct plane_page third_allocated_page;
 static struct plane_page hash_pages[TEST_HASH_PAGE_COUNT];
+static struct plane_page guard_page;
 static struct plane_page free_page;
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -39,6 +41,11 @@ enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 	}
 
 	return page->state;
+}
+
+bool plane_vm_page_is_guard(const struct plane_page *page)
+{
+	return plane_vm_page_state(page) == PLANE_VM_PAGE_GUARD;
 }
 
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
@@ -79,7 +86,8 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 	if (page == NULL ||
 	    object == NULL ||
 	    page->object != NULL ||
-	    page->state != PLANE_VM_PAGE_ALLOCATED) {
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD)) {
 		return false;
 	}
 
@@ -96,7 +104,8 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	    object == NULL ||
 	    page->object != object ||
 	    page->object_offset != offset ||
-	    page->state != PLANE_VM_PAGE_ALLOCATED) {
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD)) {
 		return false;
 	}
 
@@ -226,6 +235,7 @@ static void reset_vm_object_test(void)
 	allocated_page = (struct plane_page){0};
 	second_allocated_page = (struct plane_page){0};
 	third_allocated_page = (struct plane_page){0};
+	guard_page = (struct plane_page){0};
 	for (size_t i = 0; i < TEST_HASH_PAGE_COUNT; i++) {
 		hash_pages[i] = (struct plane_page){0};
 		hash_pages[i].state = PLANE_VM_PAGE_ALLOCATED;
@@ -234,6 +244,8 @@ static void reset_vm_object_test(void)
 	allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	second_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	third_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
+	guard_page.state = PLANE_VM_PAGE_GUARD;
+	guard_page.guard = true;
 	free_page.state = PLANE_VM_PAGE_FREE;
 }
 
@@ -459,6 +471,96 @@ static int test_insert_tracks_wired_page_count(void)
 	return failures;
 }
 
+static int test_guard_page_insert_lookup_and_remove(void)
+{
+	struct plane_page *page;
+	int failures = 0;
+
+	failures += test_expect_bool("guard object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("guard page state",
+				     plane_vm_page_is_guard(&guard_page),
+				     true);
+	failures += test_expect_bool("guard insert",
+				     plane_vm_object_insert_page(
+					     &test_object, PAGE_SIZE,
+					     &guard_page),
+				     true);
+	failures += test_expect_bool("guard tabled after insert",
+				     guard_page.object_tabled, true);
+	failures += test_expect_bool("guard hashed after insert",
+				     guard_page.object_hashed, true);
+	failures += test_expect_u64("guard resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_u64("guard wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
+	page = plane_vm_object_lookup_page(&test_object, PAGE_SIZE);
+	failures += test_expect_ptr("guard lookup", page, &guard_page);
+	page = plane_vm_object_remove_page(&test_object, PAGE_SIZE);
+	failures += test_expect_ptr("guard remove", page, &guard_page);
+	failures += test_expect_bool("guard untabled after remove",
+				     guard_page.object_tabled, false);
+	failures += test_expect_bool("guard unhashed after remove",
+				     guard_page.object_hashed, false);
+	failures += test_expect_u64("guard resident removed",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("guard wired removed",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_null("guard object cleared",
+				     plane_vm_page_object(&guard_page));
+	return failures;
+}
+
+static int test_guard_page_rejects_wire_backed_assumptions(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("guard reject init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	guard_page.wire_count = 1;
+	failures += test_expect_bool("guard reject wired insert",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &guard_page),
+				     false);
+	failures += test_expect_u64("guard reject resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("guard reject wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
+	guard_page.wire_count = 0;
+	failures += test_expect_bool("guard insert after clear",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &guard_page),
+				     true);
+	failures += test_expect_bool("guard duplicate rejected",
+				     plane_vm_object_insert_page(
+					     &test_object, PAGE_SIZE,
+					     &guard_page),
+				     false);
+	failures += test_expect_null("guard missing remove",
+				     plane_vm_object_remove_page(&test_object,
+								 PAGE_SIZE));
+	failures += test_expect_ptr("guard remove existing",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &guard_page);
+	return failures;
+}
+
 static int test_insert_rejects_invalid_page_or_offset(void)
 {
 	int failures = 0;
@@ -662,6 +764,8 @@ int main(void)
 		TEST_CASE(test_lookup_small_object_scans_resident_list),
 		TEST_CASE(test_lookup_large_object_uses_hash),
 		TEST_CASE(test_insert_tracks_wired_page_count),
+		TEST_CASE(test_guard_page_insert_lookup_and_remove),
+		TEST_CASE(test_guard_page_rejects_wire_backed_assumptions),
 		TEST_CASE(test_insert_rejects_invalid_page_or_offset),
 		TEST_CASE(test_rejects_duplicate_and_missing_remove),
 		TEST_CASE(test_multiple_pages_update_counts),

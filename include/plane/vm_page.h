@@ -22,6 +22,7 @@ enum plane_vm_page_state {
 	PLANE_VM_PAGE_FREE,
 	PLANE_VM_PAGE_ALLOCATED,
 	PLANE_VM_PAGE_METADATA,
+	PLANE_VM_PAGE_GUARD,
 };
 
 struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr);
@@ -31,6 +32,7 @@ bool plane_vm_page_wire(struct plane_page *page);
 bool plane_vm_page_unwire(struct plane_page *page);
 bool plane_vm_page_wire_count(const struct plane_page *page,
 			      uint64_t *wire_count);
+bool plane_vm_page_is_guard(const struct plane_page *page);
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page);
 bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset);

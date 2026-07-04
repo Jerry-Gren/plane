@@ -23,6 +23,8 @@ enum pmm_page_queue_state {
 	PMM_PAGE_QUEUE_FREE,
 };
 
+#define PLANE_VM_GUARD_PAGE_POOL_SIZE 64
+
 struct plane_page {
 	uint64_t phys_addr;
 	uint64_t wire_count;
@@ -53,6 +55,7 @@ static struct pmm_page_queue free_queue;
 static struct plane_pmm_stats pmm_stats;
 static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
+static struct plane_page guard_page_pool[PLANE_VM_GUARD_PAGE_POOL_SIZE];
 
 static bool is_power_of_two(uint64_t value)
 {
@@ -349,6 +352,110 @@ static bool page_pointer_index(const struct plane_page *page, uint64_t *index)
 	return true;
 }
 
+static bool guard_page_index(const struct plane_page *page, uint64_t *index)
+{
+	uintptr_t pool_base;
+	uintptr_t page_addr;
+	uintptr_t offset;
+
+	if (page == NULL) {
+		return false;
+	}
+
+	pool_base = (uintptr_t)guard_page_pool;
+	page_addr = (uintptr_t)page;
+	if (page_addr < pool_base) {
+		return false;
+	}
+
+	offset = page_addr - pool_base;
+	if ((offset % sizeof(guard_page_pool[0])) != 0) {
+		return false;
+	}
+
+	offset /= sizeof(guard_page_pool[0]);
+	if (offset >= PLANE_VM_GUARD_PAGE_POOL_SIZE) {
+		return false;
+	}
+
+	if (index != NULL) {
+		*index = offset;
+	}
+	return true;
+}
+
+static bool vm_page_known(const struct plane_page *page)
+{
+	return page_pointer_index(page, NULL) || guard_page_index(page, NULL);
+}
+
+static bool vm_page_resident_state_valid(enum plane_vm_page_state state)
+{
+	return state == PLANE_VM_PAGE_ALLOCATED ||
+	       state == PLANE_VM_PAGE_GUARD;
+}
+
+static void reset_resident_links(struct plane_page *page)
+{
+	page->vm_object = NULL;
+	page->vm_object_offset = 0;
+	page->object_prev = NULL;
+	page->object_next = NULL;
+	page->object_hash_next = NULL;
+	page->object_tabled = false;
+	page->object_hashed = false;
+}
+
+static void reset_guard_page_pool(void)
+{
+	for (uint64_t i = 0; i < PLANE_VM_GUARD_PAGE_POOL_SIZE; i++) {
+		guard_page_pool[i] = (struct plane_page){0};
+		guard_page_pool[i].phys_addr = UINT64_MAX;
+		guard_page_pool[i].state = PLANE_VM_PAGE_INVALID;
+		guard_page_pool[i].queue_state = PMM_PAGE_QUEUE_NONE;
+	}
+}
+
+struct plane_page *plane_vm_page_create_guard(void)
+{
+	for (uint64_t i = 0; i < PLANE_VM_GUARD_PAGE_POOL_SIZE; i++) {
+		struct plane_page *page = &guard_page_pool[i];
+
+		if (page->state != PLANE_VM_PAGE_INVALID) {
+			continue;
+		}
+
+		page->phys_addr = UINT64_MAX;
+		page->wire_count = 0;
+		reset_resident_links(page);
+		page->state = PLANE_VM_PAGE_GUARD;
+		page->queue_prev = NULL;
+		page->queue_next = NULL;
+		page->queue_state = PMM_PAGE_QUEUE_NONE;
+		return page;
+	}
+
+	return NULL;
+}
+
+bool plane_vm_page_release_guard(struct plane_page *page)
+{
+	if (!guard_page_index(page, NULL) ||
+	    page->state != PLANE_VM_PAGE_GUARD ||
+	    page->wire_count != 0 ||
+	    page->vm_object != NULL ||
+	    page->object_prev != NULL ||
+	    page->object_next != NULL ||
+	    page->object_hash_next != NULL ||
+	    page->object_tabled ||
+	    page->object_hashed) {
+		return false;
+	}
+
+	page->state = PLANE_VM_PAGE_INVALID;
+	return true;
+}
+
 struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 {
 	if (page_pool == NULL || (phys_addr & (PAGE_SIZE - 1)) != 0) {
@@ -381,6 +488,9 @@ uint64_t plane_vm_page_phys(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, NULL)) {
+		return UINT64_MAX;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return UINT64_MAX;
 	}
@@ -392,6 +502,9 @@ enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].state;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return PLANE_VM_PAGE_INVALID;
 	}
@@ -404,8 +517,14 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 {
 	uint64_t index;
 
-	if (wire_count == NULL ||
-	    !page_pointer_index(page, &index)) {
+	if (wire_count == NULL) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		*wire_count = guard_page_pool[index].wire_count;
+		return true;
+	}
+	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
 
@@ -413,10 +532,18 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 	return true;
 }
 
+bool plane_vm_page_is_guard(const struct plane_page *page)
+{
+	return plane_vm_page_state(page) == PLANE_VM_PAGE_GUARD;
+}
+
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].vm_object;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return NULL;
 	}
@@ -429,8 +556,17 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 {
 	uint64_t index;
 
-	if (offset == NULL ||
-	    !page_pointer_index(page, &index) ||
+	if (offset == NULL) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		if (guard_page_pool[index].vm_object == NULL) {
+			return false;
+		}
+		*offset = guard_page_pool[index].vm_object_offset;
+		return true;
+	}
+	if (!page_pointer_index(page, &index) ||
 	    page_pool[index].vm_object == NULL) {
 		return false;
 	}
@@ -445,9 +581,26 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 {
 	uint64_t index;
 
-	if (object == NULL ||
-	    !page_pointer_index(page, &index) ||
-	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED ||
+	if (object == NULL) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		if (!vm_page_resident_state_valid(guard_page_pool[index].state) ||
+		    guard_page_pool[index].vm_object != NULL) {
+			return false;
+		}
+
+		guard_page_pool[index].vm_object = object;
+		guard_page_pool[index].vm_object_offset = offset;
+		guard_page_pool[index].object_prev = NULL;
+		guard_page_pool[index].object_next = NULL;
+		guard_page_pool[index].object_hash_next = NULL;
+		guard_page_pool[index].object_tabled = false;
+		guard_page_pool[index].object_hashed = false;
+		return true;
+	}
+	if (!page_pointer_index(page, &index) ||
+	    !vm_page_resident_state_valid(page_pool[index].state) ||
 	    page_pool[index].vm_object != NULL) {
 		return false;
 	}
@@ -468,8 +621,20 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 {
 	uint64_t index;
 
-	if (object == NULL ||
-	    !page_pointer_index(page, &index) ||
+	if (object == NULL) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		if (guard_page_pool[index].state != PLANE_VM_PAGE_GUARD ||
+		    guard_page_pool[index].vm_object != object ||
+		    guard_page_pool[index].vm_object_offset != offset) {
+			return false;
+		}
+
+		reset_resident_links(&guard_page_pool[index]);
+		return true;
+	}
+	if (!page_pointer_index(page, &index) ||
 	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED ||
 	    page_pool[index].vm_object != object ||
 	    page_pool[index].vm_object_offset != offset) {
@@ -490,6 +655,9 @@ struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].object_prev;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return NULL;
 	}
@@ -501,6 +669,9 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].object_next;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return NULL;
 	}
@@ -512,6 +683,9 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].object_hash_next;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return NULL;
 	}
@@ -523,6 +697,9 @@ bool plane_vm_page_object_tabled(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].object_tabled;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
@@ -534,6 +711,9 @@ bool plane_vm_page_object_hashed(const struct plane_page *page)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		return guard_page_pool[index].object_hashed;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
@@ -546,8 +726,14 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 {
 	uint64_t index;
 
-	if (!page_pointer_index(page, &index) ||
-	    (prev != NULL && !page_pointer_index(prev, NULL))) {
+	if (prev != NULL && !vm_page_known(prev)) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		guard_page_pool[index].object_prev = prev;
+		return true;
+	}
+	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
 
@@ -560,8 +746,14 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 {
 	uint64_t index;
 
-	if (!page_pointer_index(page, &index) ||
-	    (next != NULL && !page_pointer_index(next, NULL))) {
+	if (next != NULL && !vm_page_known(next)) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		guard_page_pool[index].object_next = next;
+		return true;
+	}
+	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
 
@@ -574,8 +766,14 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 {
 	uint64_t index;
 
-	if (!page_pointer_index(page, &index) ||
-	    (next != NULL && !page_pointer_index(next, NULL))) {
+	if (next != NULL && !vm_page_known(next)) {
+		return false;
+	}
+	if (guard_page_index(page, &index)) {
+		guard_page_pool[index].object_hash_next = next;
+		return true;
+	}
+	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
 
@@ -587,6 +785,10 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		guard_page_pool[index].object_tabled = tabled;
+		return true;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
@@ -599,6 +801,10 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 {
 	uint64_t index;
 
+	if (guard_page_index(page, &index)) {
+		guard_page_pool[index].object_hashed = hashed;
+		return true;
+	}
 	if (!page_pointer_index(page, &index)) {
 		return false;
 	}
@@ -760,6 +966,7 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 	tracked_page_count = 0;
 	page_pool = NULL;
 	free_queue_reset();
+	reset_guard_page_pool();
 	metadata_phys_base = 0;
 	metadata_page_count = 0;
 	pmm_stats = (struct plane_pmm_stats){0};

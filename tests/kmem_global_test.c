@@ -15,6 +15,7 @@
 #define TEST_KMEM_PAGES 16
 #define TEST_KMEM_SIZE (TEST_KMEM_PAGES * PAGE_SIZE)
 #define TEST_PAGE_COUNT 16
+#define TEST_GUARD_PAGE_COUNT 8
 #define TEST_MAP_COUNT 16
 
 struct plane_page {
@@ -28,6 +29,7 @@ struct plane_page {
 	bool object_tabled;
 	bool object_hashed;
 	bool allocated;
+	bool guard;
 };
 
 struct test_mapping {
@@ -37,7 +39,27 @@ struct test_mapping {
 };
 
 static struct plane_page test_pages[TEST_PAGE_COUNT];
+static struct plane_page test_guard_pages[TEST_GUARD_PAGE_COUNT];
 static struct test_mapping test_mappings[TEST_MAP_COUNT];
+
+static bool is_test_page(const struct plane_page *page)
+{
+	return page != NULL &&
+	       page >= &test_pages[0] &&
+	       page < &test_pages[TEST_PAGE_COUNT];
+}
+
+static bool is_test_guard_page(const struct plane_page *page)
+{
+	return page != NULL &&
+	       page >= &test_guard_pages[0] &&
+	       page < &test_guard_pages[TEST_GUARD_PAGE_COUNT];
+}
+
+static bool is_test_vm_page(const struct plane_page *page)
+{
+	return is_test_page(page) || is_test_guard_page(page);
+}
 
 static uint64_t allocated_page_count(void)
 {
@@ -190,9 +212,7 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 
 bool plane_vm_page_wire(struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	if (!is_test_page(page) ||
 	    !page->allocated ||
 	    page->wire_count == UINT64_MAX) {
 		return false;
@@ -204,9 +224,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 
 bool plane_vm_page_unwire(struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	if (!is_test_page(page) ||
 	    !page->allocated ||
 	    page->wire_count == 0) {
 		return false;
@@ -230,9 +248,10 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 
 uint64_t plane_vm_page_phys(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (is_test_guard_page(page)) {
+		return UINT64_MAX;
+	}
+	if (!is_test_page(page)) {
 		return UINT64_MAX;
 	}
 
@@ -241,20 +260,24 @@ uint64_t plane_vm_page_phys(const struct plane_page *page)
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (is_test_guard_page(page)) {
+		return page->guard ? PLANE_VM_PAGE_GUARD : PLANE_VM_PAGE_INVALID;
+	}
+	if (!is_test_page(page)) {
 		return PLANE_VM_PAGE_INVALID;
 	}
 
 	return page->allocated ? PLANE_VM_PAGE_ALLOCATED : PLANE_VM_PAGE_FREE;
 }
 
+bool plane_vm_page_is_guard(const struct plane_page *page)
+{
+	return plane_vm_page_state(page) == PLANE_VM_PAGE_GUARD;
+}
+
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return NULL;
 	}
 
@@ -265,9 +288,7 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
-	    page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	    !is_test_vm_page(page) ||
 	    page->object == NULL) {
 		return false;
 	}
@@ -280,11 +301,9 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	if (!is_test_vm_page(page) ||
 	    object == NULL ||
-	    !page->allocated ||
+	    (!page->allocated && !page->guard) ||
 	    page->object != NULL) {
 		return false;
 	}
@@ -298,11 +317,9 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT] ||
+	if (!is_test_vm_page(page) ||
 	    object == NULL ||
-	    !page->allocated ||
+	    (!page->allocated && !page->guard) ||
 	    page->object != object ||
 	    page->object_offset != offset) {
 		return false;
@@ -315,9 +332,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return NULL;
 	}
 
@@ -326,9 +341,7 @@ struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return NULL;
 	}
 
@@ -337,9 +350,7 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return NULL;
 	}
 
@@ -348,9 +359,7 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 
 bool plane_vm_page_object_tabled(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return false;
 	}
 
@@ -359,9 +368,7 @@ bool plane_vm_page_object_tabled(const struct plane_page *page)
 
 bool plane_vm_page_object_hashed(const struct plane_page *page)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return false;
 	}
 
@@ -371,9 +378,8 @@ bool plane_vm_page_object_hashed(const struct plane_page *page)
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page) ||
+	    (prev != NULL && !is_test_vm_page(prev))) {
 		return false;
 	}
 
@@ -384,9 +390,8 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 bool plane_vm_page_set_object_next(struct plane_page *page,
 				   struct plane_page *next)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page) ||
+	    (next != NULL && !is_test_vm_page(next))) {
 		return false;
 	}
 
@@ -397,9 +402,8 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 					struct plane_page *next)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page) ||
+	    (next != NULL && !is_test_vm_page(next))) {
 		return false;
 	}
 
@@ -409,9 +413,7 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 
 bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return false;
 	}
 
@@ -421,9 +423,7 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 
 bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 {
-	if (page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	if (!is_test_vm_page(page)) {
 		return false;
 	}
 
@@ -434,13 +434,43 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
-	    page == NULL ||
-	    page < &test_pages[0] ||
-	    page >= &test_pages[TEST_PAGE_COUNT]) {
+	    !is_test_vm_page(page)) {
 		return false;
 	}
 
 	*wire_count = page->wire_count;
+	return true;
+}
+
+struct plane_page *plane_vm_page_create_guard(void)
+{
+	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
+		if (!test_guard_pages[i].guard) {
+			test_guard_pages[i] = (struct plane_page){0};
+			test_guard_pages[i].phys_addr = UINT64_MAX;
+			test_guard_pages[i].guard = true;
+			return &test_guard_pages[i];
+		}
+	}
+
+	return NULL;
+}
+
+bool plane_vm_page_release_guard(struct plane_page *page)
+{
+	if (!is_test_guard_page(page) ||
+	    !page->guard ||
+	    page->wire_count != 0 ||
+	    page->object != NULL ||
+	    page->object_prev != NULL ||
+	    page->object_next != NULL ||
+	    page->object_hash_next != NULL ||
+	    page->object_tabled ||
+	    page->object_hashed) {
+		return false;
+	}
+
+	page->guard = false;
 	return true;
 }
 

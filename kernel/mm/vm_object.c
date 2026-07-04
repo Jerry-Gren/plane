@@ -342,13 +342,17 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 				 uint64_t offset,
 				 struct plane_page *page)
 {
+	enum plane_vm_page_state page_state;
 	uint64_t wire_count;
 
+	page_state = plane_vm_page_state(page);
 	if (!offset_valid(object, offset) ||
 	    page == NULL ||
-	    plane_vm_page_state(page) != PLANE_VM_PAGE_ALLOCATED ||
+	    (page_state != PLANE_VM_PAGE_ALLOCATED &&
+	     page_state != PLANE_VM_PAGE_GUARD) ||
 	    plane_vm_page_object(page) != NULL ||
 	    !plane_vm_page_wire_count(page, &wire_count) ||
+	    (page_state == PLANE_VM_PAGE_GUARD && wire_count != 0) ||
 	    object->resident_page_count == UINT64_MAX ||
 	    (wire_count != 0 && object->wired_page_count == UINT64_MAX) ||
 	    find_page(object, offset) != NULL) {
