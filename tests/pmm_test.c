@@ -423,7 +423,7 @@ static int test_wire_rejects_invalid_pages(void)
 static int test_page_object_identity_blocks_free(void)
 {
 	struct plane_mem_info mem = {0};
-	struct plane_vm_object_page object_pages[1];
+	struct plane_vm_object_page object_pages[1] = {0};
 	struct plane_vm_object object = {0};
 	struct plane_page *page;
 	uint64_t offset = 0;
@@ -449,6 +449,12 @@ static int test_page_object_identity_blocks_free(void)
 				     plane_vm_object_insert_page(&object,
 								 0x4000, page),
 				     true);
+	failures += test_expect_u64("object identity resident count",
+				    plane_vm_object_resident_page_count(&object),
+				    1);
+	failures += test_expect_u64("object identity wired count",
+				    plane_vm_object_wired_page_count(&object),
+				    0);
 	failures += test_expect_ptr("object identity object",
 				    plane_vm_page_object(page), &object);
 	failures += test_expect_bool("object identity offset query",
@@ -457,9 +463,35 @@ static int test_page_object_identity_blocks_free(void)
 	failures += test_expect_u64("object identity offset", offset, 0x4000);
 	failures += test_expect_bool("object identity free rejected",
 				     plane_pmm_free_page_phys(phys), false);
+	failures += test_expect_bool("object identity wire",
+				     plane_vm_page_wire(page), true);
+	failures += test_expect_u64("object identity wired once",
+				    plane_vm_object_wired_page_count(&object),
+				    1);
+	failures += test_expect_bool("object identity wire twice",
+				     plane_vm_page_wire(page), true);
+	failures += test_expect_u64("object identity wired count stable",
+				    plane_vm_object_wired_page_count(&object),
+				    1);
+	failures += test_expect_bool("object identity unwire once",
+				     plane_vm_page_unwire(page), true);
+	failures += test_expect_u64("object identity still wired",
+				    plane_vm_object_wired_page_count(&object),
+				    1);
+	failures += test_expect_bool("object identity unwire twice",
+				     plane_vm_page_unwire(page), true);
+	failures += test_expect_u64("object identity unwired",
+				    plane_vm_object_wired_page_count(&object),
+				    0);
 	failures += test_expect_ptr("object identity remove",
 				    plane_vm_object_remove_page(&object, 0x4000),
 				    page);
+	failures += test_expect_u64("object identity resident removed",
+				    plane_vm_object_resident_page_count(&object),
+				    0);
+	failures += test_expect_u64("object identity wired removed",
+				    plane_vm_object_wired_page_count(&object),
+				    0);
 	failures += test_expect_null("object identity cleared object",
 				     plane_vm_page_object(page));
 	failures += test_expect_bool("object identity cleared offset",

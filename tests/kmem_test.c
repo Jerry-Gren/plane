@@ -450,6 +450,14 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("alloc pmm pages", allocated_page_count(), 2);
 	failures += test_expect_u64("alloc wired pages", wired_page_count(), 2);
 	failures += test_expect_u64("alloc object pages", object_page_count(), 2);
+	failures += test_expect_u64("alloc object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    2);
+	failures += test_expect_u64("alloc object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    2);
 	failures += test_expect_u64("alloc mappings", mapping_count(), 2);
 	failures += test_expect_bool("alloc lookup",
 				     plane_vm_map_lookup_allocation(&test_map,
@@ -487,6 +495,14 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("free pmm pages", allocated_page_count(), 0);
 	failures += test_expect_u64("free wired pages", wired_page_count(), 0);
 	failures += test_expect_u64("free object pages", object_page_count(), 0);
+	failures += test_expect_u64("free object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("free object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_null("free page object cleared",
 				     plane_vm_page_object(&test_pages[0]));
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
@@ -728,6 +744,14 @@ static int test_guard_alloc_and_free_pages(void)
 				    allocated_page_count(), 2);
 	failures += test_expect_u64("guard wired pages", wired_page_count(), 2);
 	failures += test_expect_u64("guard object pages", object_page_count(), 2);
+	failures += test_expect_u64("guard object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    2);
+	failures += test_expect_u64("guard object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    2);
 	failures += test_expect_u64("guard mappings", mapping_count(), 2);
 	failures += test_expect_null("guard object left absent",
 				     plane_vm_object_lookup_page(&test_object,
@@ -763,6 +787,14 @@ static int test_guard_alloc_and_free_pages(void)
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard free object pages",
 				    object_page_count(), 0);
+	failures += test_expect_u64("guard free object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("guard free object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_u64("guard free mappings", mapping_count(), 0);
 	failures += test_expect_bool("guard hole reuse",
 				     plane_kmem_alloc_pages_in_map(&test_map, &test_object, 4, 0, &addr),
@@ -1008,6 +1040,14 @@ static int test_pmm_failure_rolls_back_vaddr(void)
 				    wired_page_count(), 0);
 	failures += test_expect_u64("pmm fail object pages",
 				    object_page_count(), 0);
+	failures += test_expect_u64("pmm fail object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("pmm fail object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_u64("pmm fail mappings", mapping_count(), 0);
 	pmm_force_fail = false;
 	failures += test_expect_bool("pmm fail reuse alloc",
@@ -1033,6 +1073,14 @@ static int test_map_failure_rolls_back_pages(void)
 				    wired_page_count(), 0);
 	failures += test_expect_u64("map fail object pages",
 				    object_page_count(), 0);
+	failures += test_expect_u64("map fail object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("map fail object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_u64("map fail mappings", mapping_count(), 0);
 	map_fail_after = UINT64_MAX;
 	failures += test_expect_bool("map fail reuse alloc",
@@ -1058,6 +1106,14 @@ static int test_guard_failures_roll_back_vaddr(void)
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard pmm fail object pages",
 				    object_page_count(), 0);
+	failures += test_expect_u64("guard pmm fail object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("guard pmm fail object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_u64("guard pmm fail mappings",
 				    mapping_count(), 0);
 	pmm_force_fail = false;
@@ -1072,6 +1128,14 @@ static int test_guard_failures_roll_back_vaddr(void)
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard map fail object pages",
 				    object_page_count(), 0);
+	failures += test_expect_u64("guard map fail object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("guard map fail object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    0);
 	failures += test_expect_u64("guard map fail mappings",
 				    mapping_count(), 0);
 	map_fail_after = UINT64_MAX;

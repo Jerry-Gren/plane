@@ -42,6 +42,33 @@ static int64_t find_free_page_index(struct plane_vm_object *object)
 	return -1;
 }
 
+static bool object_count_valid(const struct plane_vm_object *object)
+{
+	return object != NULL && object->initialized;
+}
+
+bool plane_vm_object_page_became_wired(struct plane_vm_object *object)
+{
+	if (!object_count_valid(object) ||
+	    object->wired_page_count == UINT64_MAX) {
+		return false;
+	}
+
+	object->wired_page_count++;
+	return true;
+}
+
+bool plane_vm_object_page_became_unwired(struct plane_vm_object *object)
+{
+	if (!object_count_valid(object) ||
+	    object->wired_page_count == 0) {
+		return false;
+	}
+
+	object->wired_page_count--;
+	return true;
+}
+
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  struct plane_vm_object_page *pages,
 			  uint64_t page_capacity,
@@ -63,6 +90,8 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 	*object = (struct plane_vm_object){
 		.offset_limit = offset_limit,
 		.page_capacity = page_capacity,
+		.resident_page_count = 0,
+		.wired_page_count = 0,
 		.pages = pages,
 		.initialized = true,
 	};
@@ -73,12 +102,16 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 				 uint64_t offset,
 				 struct plane_page *page)
 {
+	uint64_t wire_count;
 	int64_t index;
 
 	if (!offset_valid(object, offset) ||
 	    page == NULL ||
 	    plane_vm_page_state(page) != PLANE_VM_PAGE_ALLOCATED ||
 	    plane_vm_page_object(page) != NULL ||
+	    !plane_vm_page_wire_count(page, &wire_count) ||
+	    object->resident_page_count == UINT64_MAX ||
+	    (wire_count != 0 && object->wired_page_count == UINT64_MAX) ||
 	    find_page_index(object, offset) >= 0) {
 		return false;
 	}
@@ -94,6 +127,10 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	object->pages[index].offset = offset;
 	object->pages[index].page = page;
 	object->pages[index].used = true;
+	object->resident_page_count++;
+	if (wire_count != 0) {
+		object->wired_page_count++;
+	}
 	return true;
 }
 
@@ -118,6 +155,7 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 					       uint64_t offset)
 {
 	struct plane_page *page;
+	uint64_t wire_count;
 	int64_t index;
 
 	if (!offset_valid(object, offset)) {
@@ -130,9 +168,38 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	}
 
 	page = object->pages[index].page;
+	if (object->resident_page_count == 0 ||
+	    !plane_vm_page_wire_count(page, &wire_count) ||
+	    (wire_count != 0 && object->wired_page_count == 0)) {
+		return NULL;
+	}
 	if (!plane_vm_page_detach_object(page, object, offset)) {
 		return NULL;
 	}
 	object->pages[index] = (struct plane_vm_object_page){0};
+	object->resident_page_count--;
+	if (wire_count != 0) {
+		object->wired_page_count--;
+	}
 	return page;
+}
+
+uint64_t plane_vm_object_resident_page_count(
+	const struct plane_vm_object *object)
+{
+	if (!object_count_valid(object)) {
+		return 0;
+	}
+
+	return object->resident_page_count;
+}
+
+uint64_t plane_vm_object_wired_page_count(
+	const struct plane_vm_object *object)
+{
+	if (!object_count_valid(object)) {
+		return 0;
+	}
+
+	return object->wired_page_count;
 }

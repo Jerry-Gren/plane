@@ -1020,6 +1020,11 @@ bool plane_vm_page_wire(struct plane_page *page)
 		return false;
 	}
 
+	if (page->vm_object != NULL &&
+	    page->wire_count == 0 &&
+	    !plane_vm_object_page_became_wired(page->vm_object)) {
+		return false;
+	}
 	page->wire_count++;
 	return true;
 }
@@ -1032,6 +1037,11 @@ bool plane_vm_page_unwire(struct plane_page *page)
 		return false;
 	}
 
+	if (page->vm_object != NULL &&
+	    page->wire_count == 1 &&
+	    !plane_vm_object_page_became_unwired(page->vm_object)) {
+		return false;
+	}
 	page->wire_count--;
 	return true;
 }

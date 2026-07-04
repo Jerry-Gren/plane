@@ -19,5 +19,7 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset);
+bool plane_vm_object_page_became_wired(struct plane_vm_object *object);
+bool plane_vm_object_page_became_unwired(struct plane_vm_object *object);
 
 #endif /* PLANE_VM_PAGE_INTERNAL_H */
