@@ -16,6 +16,83 @@ static struct plane_vm_map_entry test_entries[TEST_MAP_ENTRIES];
 static struct plane_vm_map test_map;
 static struct plane_vm_object test_object;
 
+bool plane_vm_object_init(struct plane_vm_object *object,
+			  uint64_t offset_limit)
+{
+	if (object == NULL ||
+	    object->initialized ||
+	    offset_limit == 0 ||
+	    !plane_is_page_aligned(offset_limit)) {
+		return false;
+	}
+
+	*object = (struct plane_vm_object){
+		.offset_limit = offset_limit,
+		.ref_count = 1,
+		.alive = true,
+		.internal = true,
+		.initialized = true,
+	};
+	return true;
+}
+
+bool plane_vm_object_reference(struct plane_vm_object *object)
+{
+	if (object == NULL ||
+	    !object->initialized ||
+	    !object->alive ||
+	    object->ref_count == UINT64_MAX) {
+		return false;
+	}
+
+	object->ref_count++;
+	return true;
+}
+
+bool plane_vm_object_deallocate(struct plane_vm_object *object)
+{
+	if (object == NULL ||
+	    !object->initialized ||
+	    !object->alive ||
+	    object->ref_count == 0) {
+		return false;
+	}
+
+	if (object->ref_count > 1) {
+		object->ref_count--;
+		return true;
+	}
+
+	if (object->resident_page_count != 0 ||
+	    object->wired_page_count != 0) {
+		return false;
+	}
+
+	object->ref_count = 0;
+	object->alive = false;
+	return true;
+}
+
+uint64_t plane_vm_object_ref_count(const struct plane_vm_object *object)
+{
+	if (object == NULL || !object->initialized) {
+		return 0;
+	}
+
+	return object->ref_count;
+}
+
+uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object)
+{
+	if (object == NULL ||
+	    !object->initialized ||
+	    !object->alive) {
+		return 0;
+	}
+
+	return object->offset_limit;
+}
+
 static void reset_vm_map_test(void)
 {
 	test_map = (struct plane_vm_map){0};
@@ -722,6 +799,11 @@ static int test_object_allocation_records_object_and_offset(void)
 				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_BASE +
+							  TEST_KERNEL_MAP_SIZE),
+				     true);
 	failures += test_expect_bool("object alloc",
 				     plane_vm_map_alloc_pages_object(
 					     &test_map, 2, 0, &test_object,
@@ -731,14 +813,23 @@ static int test_object_allocation_records_object_and_offset(void)
 				     true);
 	failures += test_expect_u64("object alloc vaddr", vaddr,
 				    TEST_KERNEL_MAP_BASE);
+	failures += test_expect_u64("object alloc ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("object alloc lookup",
 				     plane_vm_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
+	failures += test_expect_u64("object lookup ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_ptr("object alloc object",
 				    info.object, &test_object);
 	failures += test_expect_u64("object alloc offset",
 				    info.object_offset, 4 * PAGE_SIZE);
+	failures += test_expect_bool("object alloc free",
+				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     true);
+	failures += test_expect_u64("object free ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	return failures;
 }
 
@@ -751,6 +842,11 @@ static int test_object_auto_offset_uses_user_range(void)
 	failures += test_expect_bool("object auto init",
 				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_BASE +
+							  TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object auto alloc",
 				     plane_vm_map_alloc_pages_object(
@@ -771,6 +867,8 @@ static int test_object_auto_offset_uses_user_range(void)
 				    info.object_offset, page_vaddr(1));
 	failures += test_expect_u64("object auto reserved",
 				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+	failures += test_expect_u64("object auto ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
 	return failures;
 }
 
@@ -800,6 +898,11 @@ static int test_object_auto_offset_uses_user_va_across_maps(void)
 						       TEST_MAP_ENTRIES,
 						       other_base,
 						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  other_base +
+							  TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object first map alloc",
 				     plane_vm_map_alloc_pages_object(
@@ -833,6 +936,18 @@ static int test_object_auto_offset_uses_user_va_across_maps(void)
 				     first_info.object_offset !=
 				     second_info.object_offset,
 				     true);
+	failures += test_expect_u64("object two map ref count",
+				    plane_vm_object_ref_count(&test_object), 3);
+	failures += test_expect_bool("object first map free",
+				     plane_vm_map_free_pages(&test_map,
+							     first_vaddr, 1),
+				     true);
+	failures += test_expect_bool("object second map free",
+				     plane_vm_map_free_pages(&other_map,
+							     second_vaddr, 1),
+				     true);
+	failures += test_expect_u64("object two map ref count freed",
+				    plane_vm_object_ref_count(&test_object), 1);
 	return failures;
 }
 
@@ -846,6 +961,10 @@ static int test_object_allocation_rejects_invalid_offset(void)
 	failures += test_expect_bool("object reject init",
 				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_SIZE),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("object reject null with offset",
@@ -866,6 +985,219 @@ static int test_object_allocation_rejects_invalid_offset(void)
 	failures += test_expect_u64("object reject allocations unchanged",
 				    after.allocation_count,
 				    before.allocation_count);
+	failures += test_expect_u64("object reject ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	return failures;
+}
+
+static int test_object_allocation_validates_object_range(void)
+{
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object range init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object range object init",
+				     plane_vm_object_init(&test_object,
+							  4 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("object range exact end",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 2, 0, &test_object,
+					     2 * PAGE_SIZE,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("object range exact ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool("object range exact free",
+				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("object range past end",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 2, 0, &test_object,
+					     3 * PAGE_SIZE,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("object range ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_u64("object range free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("object range allocations unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	return failures;
+}
+
+static int test_object_auto_offset_validates_object_range(void)
+{
+	struct plane_vm_map_entry high_entries[TEST_MAP_ENTRIES];
+	struct plane_vm_map high_map = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t high_base = TEST_KERNEL_MAP_BASE;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
+		high_entries[i] = (struct plane_vm_map_entry){0};
+	}
+
+	failures += test_expect_bool("object auto range init",
+				     plane_vm_map_init(&high_map, high_entries,
+						       TEST_MAP_ENTRIES,
+						       high_base,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object auto range object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_vm_map_get_stats(&high_map);
+	failures += test_expect_bool("object auto range high rejected",
+				     plane_vm_map_alloc_pages_object(
+					     &high_map, 1, 0, &test_object,
+					     PLANE_VM_MAP_OBJECT_OFFSET_AUTO,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	after = plane_vm_map_get_stats(&high_map);
+	failures += test_expect_u64("object auto range ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_u64("object auto range free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("object auto range allocations unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	return failures;
+}
+
+static int test_object_allocation_rejects_offset_overflow(void)
+{
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object overflow init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object overflow object init",
+				     plane_vm_object_init(&test_object,
+							  UINT64_MAX & ~(PAGE_SIZE - 1)),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("object offset overflow rejected",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 2, 0, &test_object,
+					     UINT64_MAX - PAGE_SIZE + 1,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("object overflow ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_u64("object overflow free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("object overflow allocations unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	return failures;
+}
+
+static int test_object_allocation_rejects_invalid_lifetime(void)
+{
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("object lifetime map init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object lifetime uninit rejected",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 1, 0, &test_object, 0,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_bool("object lifetime init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object lifetime deallocate",
+				     plane_vm_object_deallocate(&test_object),
+				     true);
+	failures += test_expect_bool("object lifetime dead rejected",
+				     plane_vm_map_alloc_pages_object(
+					     &test_map, 1, 0, &test_object, 0,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_u64("object lifetime ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 0);
+	return failures;
+}
+
+static int test_object_allocation_failures_keep_ref_count(void)
+{
+	struct plane_vm_map_entry small_entries[1];
+	struct plane_vm_map small_map = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	small_entries[0] = (struct plane_vm_map_entry){0};
+	failures += test_expect_bool("object failure map init",
+				     plane_vm_map_init(&small_map, small_entries,
+						       TEST_ARRAY_SIZE(small_entries),
+						       TEST_KERNEL_MAP_BASE,
+						       PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("object failure init",
+				     plane_vm_object_init(&test_object,
+							  TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("object failure no space",
+				     plane_vm_map_alloc_pages_object(
+					     &small_map, 2, 0, &test_object, 0,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_bool("object failure bad prot",
+				     plane_vm_map_alloc_pages_object(
+					     &small_map, 1, 0, &test_object, 0,
+					     PLANE_VM_PROT_NONE,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_bool("object failure first alloc",
+				     plane_vm_map_alloc_pages_object(
+					     &small_map, 1, 0, &test_object, 0,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("object failure allocated ref",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool("object failure exhausted entries",
+				     plane_vm_map_alloc_pages_object(
+					     &small_map, 1, 0, &test_object,
+					     PAGE_SIZE, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     false);
+	failures += test_expect_u64("object failure ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 2);
 	return failures;
 }
 
@@ -981,6 +1313,11 @@ int main(void)
 		TEST_CASE(test_object_auto_offset_uses_user_range),
 		TEST_CASE(test_object_auto_offset_uses_user_va_across_maps),
 		TEST_CASE(test_object_allocation_rejects_invalid_offset),
+		TEST_CASE(test_object_allocation_validates_object_range),
+		TEST_CASE(test_object_auto_offset_validates_object_range),
+		TEST_CASE(test_object_allocation_rejects_offset_overflow),
+		TEST_CASE(test_object_allocation_rejects_invalid_lifetime),
+		TEST_CASE(test_object_allocation_failures_keep_ref_count),
 		TEST_CASE(test_protected_max_allocation_records_explicit_max),
 		TEST_CASE(test_protected_max_allocation_rejects_invalid_pairs),
 	};

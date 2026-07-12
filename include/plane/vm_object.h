@@ -11,8 +11,10 @@
  * resident physical page metadata. It does not own page lifetime and does
  * not allocate or free PMM pages.
  * Resident insert/remove maintains each page's object/offset identity.
- * Resident and wired counts are early accounting only; they are not object
- * references, pager accounting, ledgers, or pageout state.
+ * ref_count is object lifetime ownership only. Resident and wired counts are
+ * early page accounting only; they are not object references, pager
+ * accounting, ledgers, or pageout state.
+ * internal is reserved for the later internal-vs-external object split.
  *
  * A plane_vm_object must be zero-initialized before its first init call.
  */
@@ -21,16 +23,21 @@ struct plane_page;
 
 struct plane_vm_object {
 	uint64_t offset_limit;
+	uint64_t ref_count;
 	uint64_t resident_page_count;
 	uint64_t wired_page_count;
 	struct plane_page *resident_head;
 	struct plane_page *resident_tail;
 	struct plane_page *resident_hint;
+	bool alive;
+	bool internal;
 	bool initialized;
 };
 
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit);
+bool plane_vm_object_reference(struct plane_vm_object *object);
+bool plane_vm_object_deallocate(struct plane_vm_object *object);
 bool plane_vm_object_insert_page(struct plane_vm_object *object,
 				 uint64_t offset,
 				 struct plane_page *page);
@@ -42,5 +49,8 @@ uint64_t plane_vm_object_resident_page_count(
 	const struct plane_vm_object *object);
 uint64_t plane_vm_object_wired_page_count(
 	const struct plane_vm_object *object);
+uint64_t plane_vm_object_ref_count(const struct plane_vm_object *object);
+uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object);
+bool plane_vm_object_is_alive(const struct plane_vm_object *object);
 
 #endif /* PLANE_VM_OBJECT_H */

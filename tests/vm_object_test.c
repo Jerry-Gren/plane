@@ -6,6 +6,7 @@
 #include <plane/vm_object.h>
 
 #include "support/test.h"
+#include "../kernel/mm/vm_object_internal.h"
 #include "../kernel/mm/vm_page_internal.h"
 
 #define TEST_OBJECT_PAGES 16
@@ -269,6 +270,12 @@ static int test_init_rejects_invalid_inputs(void)
 				    0);
 	failures += test_expect_u64("invalid wired count",
 				    plane_vm_object_wired_page_count(NULL), 0);
+	failures += test_expect_u64("invalid ref count",
+				    plane_vm_object_ref_count(NULL), 0);
+	failures += test_expect_bool("invalid alive",
+				     plane_vm_object_is_alive(NULL), false);
+	failures += test_expect_u64("invalid offset limit",
+				    plane_vm_object_offset_limit(NULL), 0);
 	return failures;
 }
 
@@ -280,10 +287,157 @@ static int test_init_is_one_shot(void)
 				     plane_vm_object_init(&test_object,
 							  TEST_OBJECT_SIZE),
 				     true);
+	failures += test_expect_u64("object init ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_bool("object init alive",
+				     plane_vm_object_is_alive(&test_object),
+				     true);
+	failures += test_expect_bool("object init internal",
+				     test_object.internal, true);
+	failures += test_expect_u64("object init offset limit",
+				    plane_vm_object_offset_limit(&test_object),
+				    TEST_OBJECT_SIZE);
 	failures += test_expect_bool("object repeat init",
 				     plane_vm_object_init(&test_object,
 							  TEST_OBJECT_SIZE),
 				     false);
+	return failures;
+}
+
+static int test_reference_rejects_invalid_objects(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("reference null",
+				     plane_vm_object_reference(NULL), false);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object reference",
+				     plane_vm_object_reference(&test_object),
+				     true);
+	failures += test_expect_u64("object ref count incremented",
+				    plane_vm_object_ref_count(&test_object), 2);
+	test_object.ref_count = UINT64_MAX;
+	failures += test_expect_bool("object reference overflow",
+				     plane_vm_object_reference(&test_object),
+				     false);
+	failures += test_expect_u64("object overflow ref unchanged",
+				    plane_vm_object_ref_count(&test_object),
+				    UINT64_MAX);
+	return failures;
+}
+
+static int test_deallocate_nonfinal_reference(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object reference",
+				     plane_vm_object_reference(&test_object),
+				     true);
+	failures += test_expect_bool("object deallocate nonfinal",
+				     plane_vm_object_deallocate(&test_object),
+				     true);
+	failures += test_expect_u64("object nonfinal ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_bool("object nonfinal alive",
+				     plane_vm_object_is_alive(&test_object),
+				     true);
+	return failures;
+}
+
+static int test_deallocate_final_empty_object(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object deallocate final",
+				     plane_vm_object_deallocate(&test_object),
+				     true);
+	failures += test_expect_u64("object final ref count",
+				    plane_vm_object_ref_count(&test_object), 0);
+	failures += test_expect_bool("object final dead",
+				     plane_vm_object_is_alive(&test_object),
+				     false);
+	failures += test_expect_u64("object final offset limit hidden",
+				    plane_vm_object_offset_limit(&test_object), 0);
+	failures += test_expect_bool("object final repeat deallocate",
+				     plane_vm_object_deallocate(&test_object),
+				     false);
+	failures += test_expect_bool("object final reference rejected",
+				     plane_vm_object_reference(&test_object),
+				     false);
+	failures += test_expect_bool("object final reinit rejected",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     false);
+	failures += test_expect_bool("object final insert rejected",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &allocated_page),
+				     false);
+	failures += test_expect_null("object final lookup rejected",
+				     plane_vm_object_lookup_page(&test_object, 0));
+	failures += test_expect_null("object final remove rejected",
+				     plane_vm_object_remove_page(&test_object, 0));
+	failures += test_expect_bool("object final wire accounting rejected",
+				     plane_vm_object_page_became_wired(
+					     &test_object),
+				     false);
+	failures += test_expect_bool("object final unwire accounting rejected",
+				     plane_vm_object_page_became_unwired(
+					     &test_object),
+				     false);
+	return failures;
+}
+
+static int test_deallocate_final_rejects_resident_pages(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("object insert",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &allocated_page),
+				     true);
+	failures += test_expect_bool("object deallocate resident rejected",
+				     plane_vm_object_deallocate(&test_object),
+				     false);
+	failures += test_expect_u64("object resident ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_bool("object resident alive unchanged",
+				     plane_vm_object_is_alive(&test_object),
+				     true);
+	failures += test_expect_ptr("object resident still lookup",
+				    plane_vm_object_lookup_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_ptr("object resident remove",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+	allocated_page.wire_count = 1;
+	failures += test_expect_bool("object insert wired",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &allocated_page),
+				     true);
+	failures += test_expect_bool("object deallocate wired rejected",
+				     plane_vm_object_deallocate(&test_object),
+				     false);
+	failures += test_expect_u64("object wired ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+	failures += test_expect_u64("object wired count unchanged",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    1);
 	return failures;
 }
 
@@ -759,6 +913,10 @@ int main(void)
 	const struct test_case cases[] = {
 		TEST_CASE(test_init_rejects_invalid_inputs),
 		TEST_CASE(test_init_is_one_shot),
+		TEST_CASE(test_reference_rejects_invalid_objects),
+		TEST_CASE(test_deallocate_nonfinal_reference),
+		TEST_CASE(test_deallocate_final_empty_object),
+		TEST_CASE(test_deallocate_final_rejects_resident_pages),
 		TEST_CASE(test_lookup_empty_object_returns_null),
 		TEST_CASE(test_insert_lookup_and_remove_page),
 		TEST_CASE(test_lookup_small_object_scans_resident_list),

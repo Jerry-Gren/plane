@@ -639,6 +639,8 @@ static int test_alloc_and_free_pages(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    2);
+	failures += test_expect_u64("alloc object ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_u64("alloc mappings", mapping_count(), 2);
 	failures += test_expect_bool("alloc lookup",
 				     plane_vm_map_lookup_allocation(&test_map,
@@ -684,6 +686,8 @@ static int test_alloc_and_free_pages(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("free object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_null("free page object cleared",
 				     plane_vm_page_object(&test_pages[0]));
 	failures += test_expect_u64("free mappings", mapping_count(), 0);
@@ -934,6 +938,8 @@ static int test_guard_alloc_and_free_pages(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    2);
+	failures += test_expect_u64("guard object ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_u64("guard mappings", mapping_count(), 2);
 	failures += test_expect_null("guard object left absent",
 				     plane_vm_object_lookup_page(&test_object,
@@ -982,6 +988,8 @@ static int test_guard_alloc_and_free_pages(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("guard free object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_u64("guard free mappings", mapping_count(), 0);
 	failures += test_expect_bool("guard hole reuse",
 				     plane_kmem_alloc_pages_in_map(&test_map, &test_object, 4, 0, &addr),
@@ -1259,6 +1267,8 @@ static int test_grab_failure_rolls_back_vaddr(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("grab fail object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_u64("grab fail mappings", mapping_count(), 0);
 	grab_force_fail = false;
 	failures += test_expect_bool("grab fail reuse alloc",
@@ -1292,6 +1302,8 @@ static int test_map_failure_rolls_back_pages(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("map fail object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_u64("map fail mappings", mapping_count(), 0);
 	map_fail_after = UINT64_MAX;
 	failures += test_expect_bool("map fail reuse alloc",
@@ -1325,6 +1337,8 @@ static int test_guard_failures_roll_back_vaddr(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("guard grab fail object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_u64("guard grab fail mappings",
 				    mapping_count(), 0);
 	grab_force_fail = false;
@@ -1347,6 +1361,8 @@ static int test_guard_failures_roll_back_vaddr(void)
 				    plane_vm_object_wired_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("guard map fail object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_u64("guard map fail mappings",
 				    mapping_count(), 0);
 	map_fail_after = UINT64_MAX;
@@ -1356,6 +1372,41 @@ static int test_guard_failures_roll_back_vaddr(void)
 				     true);
 	failures += test_expect_ptr("guard fail reused addr",
 				    addr, (void *)kmem_page_vaddr(1));
+	return failures;
+}
+
+static int test_alloc_rejects_object_too_small_for_auto_offset(void)
+{
+	struct plane_vm_object small_object = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("small object init",
+				     plane_vm_object_init(&small_object,
+							  PAGE_SIZE),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("small object alloc rejected",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &small_object, 1, 0,
+					     &addr),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("small object ref unchanged",
+				    plane_vm_object_ref_count(&small_object), 1);
+	failures += test_expect_u64("small object backing pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("small object wired pages",
+				    wired_page_count(), 0);
+	failures += test_expect_u64("small object mappings",
+				    mapping_count(), 0);
+	failures += test_expect_u64("small object free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("small object allocations unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
 	return failures;
 }
 
@@ -1406,8 +1457,12 @@ static int test_rejects_invalid_inputs(void)
 				     true);
 	failures += test_expect_bool("partial free rejected",
 				     plane_kmem_free_pages_in_map(&test_map, &test_object, addr, 1), false);
+	failures += test_expect_u64("partial free ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("exact free accepted",
 				     plane_kmem_free_pages_in_map(&test_map, &test_object, addr, 2), true);
+	failures += test_expect_u64("exact free ref restored",
+				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_bool("double free rejected",
 				     plane_kmem_free_pages_in_map(&test_map, &test_object, addr, 2), false);
 	return failures;
@@ -1445,9 +1500,15 @@ static int test_rejects_exhausted_records(void)
 					     plane_kmem_alloc_pages_in_map(&test_map, &test_object, 1, 0, &addr),
 					     true);
 	}
+	failures += test_expect_u64("record ref count full",
+				    plane_vm_object_ref_count(&test_object),
+				    TEST_ALLOCATION_RECORDS + 1);
 	failures += test_expect_bool("record exhausted",
 				     plane_kmem_alloc_pages_in_map(&test_map, &test_object, 1, 0, &addr),
 				     false);
+	failures += test_expect_u64("record exhausted ref unchanged",
+				    plane_vm_object_ref_count(&test_object),
+				    TEST_ALLOCATION_RECORDS + 1);
 	return failures;
 }
 
@@ -1474,6 +1535,7 @@ int main(void)
 		TEST_CASE(test_grab_failure_rolls_back_vaddr),
 		TEST_CASE(test_map_failure_rolls_back_pages),
 		TEST_CASE(test_guard_failures_roll_back_vaddr),
+		TEST_CASE(test_alloc_rejects_object_too_small_for_auto_offset),
 		TEST_CASE(test_rejects_invalid_inputs),
 		TEST_CASE(test_byte_free_size_mismatch_does_not_unmap),
 		TEST_CASE(test_rejects_exhausted_records),

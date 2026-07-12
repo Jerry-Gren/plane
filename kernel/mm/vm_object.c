@@ -27,6 +27,7 @@ static bool offset_valid(const struct plane_vm_object *object, uint64_t offset)
 {
 	return object != NULL &&
 	       object->initialized &&
+	       object->alive &&
 	       plane_is_page_aligned(offset) &&
 	       offset < object->offset_limit;
 }
@@ -282,7 +283,7 @@ static void remove_resident_page(struct plane_vm_object *object,
 
 static bool object_count_valid(const struct plane_vm_object *object)
 {
-	return object != NULL && object->initialized;
+	return object != NULL && object->initialized && object->alive;
 }
 
 bool plane_vm_object_page_became_wired(struct plane_vm_object *object)
@@ -323,13 +324,52 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 
 	*object = (struct plane_vm_object){
 		.offset_limit = offset_limit,
+		.ref_count = 1,
 		.resident_page_count = 0,
 		.wired_page_count = 0,
 		.resident_head = NULL,
 		.resident_tail = NULL,
 		.resident_hint = NULL,
+		.alive = true,
+		.internal = true,
 		.initialized = true,
 	};
+	return true;
+}
+
+bool plane_vm_object_reference(struct plane_vm_object *object)
+{
+	if (!object_count_valid(object) ||
+	    object->ref_count == UINT64_MAX) {
+		return false;
+	}
+
+	object->ref_count++;
+	return true;
+}
+
+bool plane_vm_object_deallocate(struct plane_vm_object *object)
+{
+	if (!object_count_valid(object) ||
+	    object->ref_count == 0) {
+		return false;
+	}
+
+	if (object->ref_count > 1) {
+		object->ref_count--;
+		return true;
+	}
+
+	if (object->resident_page_count != 0 ||
+	    object->wired_page_count != 0 ||
+	    object->resident_head != NULL ||
+	    object->resident_tail != NULL ||
+	    object->resident_hint != NULL) {
+		return false;
+	}
+
+	object->ref_count = 0;
+	object->alive = false;
 	return true;
 }
 
@@ -420,4 +460,27 @@ uint64_t plane_vm_object_wired_page_count(
 	}
 
 	return object->wired_page_count;
+}
+
+uint64_t plane_vm_object_ref_count(const struct plane_vm_object *object)
+{
+	if (object == NULL || !object->initialized) {
+		return 0;
+	}
+
+	return object->ref_count;
+}
+
+uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object)
+{
+	if (!object_count_valid(object)) {
+		return 0;
+	}
+
+	return object->offset_limit;
+}
+
+bool plane_vm_object_is_alive(const struct plane_vm_object *object)
+{
+	return object_count_valid(object);
 }

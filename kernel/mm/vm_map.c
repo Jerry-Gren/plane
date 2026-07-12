@@ -3,6 +3,7 @@
 #include <plane/mm.h>
 #include <plane/util.h>
 #include <plane/vm_map.h>
+#include <plane/vm_object.h>
 
 #define VM_MAP_ENTRY_NONE UINT64_MAX
 
@@ -21,6 +22,23 @@ static bool prot_allowed(uint32_t prot, uint32_t max_prot)
 {
 	return prot_valid(prot) && prot_valid(max_prot) &&
 	       (prot & ~max_prot) == 0;
+}
+
+static bool object_range_valid(const struct plane_vm_object *object,
+			       uint64_t object_offset,
+			       uint64_t page_count)
+{
+	uint64_t offset_limit = plane_vm_object_offset_limit(object);
+	uint64_t size;
+	uint64_t end;
+
+	if (offset_limit == 0 ||
+	    !plane_checked_page_offset(page_count, &size) ||
+	    !plane_checked_add_u64(object_offset, size, &end)) {
+		return false;
+	}
+
+	return end <= offset_limit;
 }
 
 static void reset_entries(struct plane_vm_map_entry *entries,
@@ -343,6 +361,15 @@ bool plane_vm_map_alloc_pages_object(struct plane_vm_map *map,
 		entry_object_offset = user_start;
 	}
 
+	if (object != NULL &&
+	    !object_range_valid(object, entry_object_offset, page_count)) {
+		return false;
+	}
+
+	if (object != NULL && !plane_vm_object_reference(object)) {
+		return false;
+	}
+
 	insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,
 		     object, entry_object_offset, prot, max_prot, prev, next);
 	*vaddr = user_start;
@@ -475,6 +502,11 @@ bool plane_vm_map_free_pages(struct plane_vm_map *map,
 	entry_index = find_exact_entry(map, vaddr, page_count);
 	if (entry_index < 0 ||
 	    map->entries[entry_index].wired_count != 0) {
+		return false;
+	}
+
+	if (map->entries[entry_index].object != NULL &&
+	    !plane_vm_object_deallocate(map->entries[entry_index].object)) {
 		return false;
 	}
 
