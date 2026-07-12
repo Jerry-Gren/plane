@@ -38,6 +38,8 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit);
 bool plane_vm_object_reference(struct plane_vm_object *object);
 bool plane_vm_object_deallocate(struct plane_vm_object *object);
+/* Tests whether one lifetime reference can be released. */
+bool plane_vm_object_can_deallocate(const struct plane_vm_object *object);
 bool plane_vm_object_insert_page(struct plane_vm_object *object,
 				 uint64_t offset,
 				 struct plane_page *page);

@@ -71,9 +71,18 @@ static bool reserve_kmem_vaddr(struct plane_vm_map *map,
 		guard_pages = 1;
 	}
 
-	return plane_vm_map_alloc_pages_object(
-		map, page_count, guard_pages, object,
-		PLANE_VM_MAP_OBJECT_OFFSET_AUTO, prot, PLANE_VM_PROT_ALL, base);
+	return plane_vm_map_enter(
+		map,
+		&(struct plane_vm_map_enter_options){
+			.page_count = page_count,
+			.guard_pages = guard_pages,
+			.object = object,
+			.object_offset = PLANE_VM_MAP_OBJECT_OFFSET_AUTO,
+			.prot = prot,
+			.max_prot = PLANE_VM_PROT_ALL,
+			.flags = PLANE_VM_MAP_ENTER_ANYWHERE,
+		},
+		base);
 }
 
 static uint32_t kmem_prot_to_map_flags(uint32_t prot)

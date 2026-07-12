@@ -441,6 +441,52 @@ static int test_deallocate_final_rejects_resident_pages(void)
 	return failures;
 }
 
+static int test_can_deallocate_reports_lifetime_preflight(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("can deallocate null",
+				     plane_vm_object_can_deallocate(NULL),
+				     false);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("can deallocate final empty",
+				     plane_vm_object_can_deallocate(
+					     &test_object),
+				     true);
+	failures += test_expect_bool("object insert resident",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &allocated_page),
+				     true);
+	failures += test_expect_bool("cannot deallocate final resident",
+				     plane_vm_object_can_deallocate(
+					     &test_object),
+				     false);
+	failures += test_expect_bool("object reference resident",
+				     plane_vm_object_reference(&test_object),
+				     true);
+	failures += test_expect_bool("can deallocate nonfinal resident",
+				     plane_vm_object_can_deallocate(
+					     &test_object),
+				     true);
+	failures += test_expect_ptr("object remove resident",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_bool("object deallocate nonfinal",
+				     plane_vm_object_deallocate(&test_object),
+				     true);
+	failures += test_expect_bool("object deallocate final",
+				     plane_vm_object_deallocate(&test_object),
+				     true);
+	failures += test_expect_bool("cannot deallocate dead",
+				     plane_vm_object_can_deallocate(
+					     &test_object),
+				     false);
+	return failures;
+}
+
 static int test_lookup_empty_object_returns_null(void)
 {
 	int failures = 0;
@@ -917,6 +963,7 @@ int main(void)
 		TEST_CASE(test_deallocate_nonfinal_reference),
 		TEST_CASE(test_deallocate_final_empty_object),
 		TEST_CASE(test_deallocate_final_rejects_resident_pages),
+		TEST_CASE(test_can_deallocate_reports_lifetime_preflight),
 		TEST_CASE(test_lookup_empty_object_returns_null),
 		TEST_CASE(test_insert_lookup_and_remove_page),
 		TEST_CASE(test_lookup_small_object_scans_resident_list),

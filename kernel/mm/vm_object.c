@@ -350,8 +350,7 @@ bool plane_vm_object_reference(struct plane_vm_object *object)
 
 bool plane_vm_object_deallocate(struct plane_vm_object *object)
 {
-	if (!object_count_valid(object) ||
-	    object->ref_count == 0) {
+	if (!plane_vm_object_can_deallocate(object)) {
 		return false;
 	}
 
@@ -371,6 +370,24 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	object->ref_count = 0;
 	object->alive = false;
 	return true;
+}
+
+bool plane_vm_object_can_deallocate(const struct plane_vm_object *object)
+{
+	if (!object_count_valid(object) ||
+	    object->ref_count == 0) {
+		return false;
+	}
+
+	if (object->ref_count > 1) {
+		return true;
+	}
+
+	return object->resident_page_count == 0 &&
+	       object->wired_page_count == 0 &&
+	       object->resident_head == NULL &&
+	       object->resident_tail == NULL &&
+	       object->resident_hint == NULL;
 }
 
 bool plane_vm_object_insert_page(struct plane_vm_object *object,
