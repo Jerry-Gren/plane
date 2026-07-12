@@ -31,6 +31,8 @@ override HOSTCFLAGS += \
 	-std=gnu11 \
 	-Wall -Wextra -Werror
 
+override ASFLAGS += -Wa,--divide
+
 -include .config
 
 SRC_DIRS := kernel kernel/mm klib
@@ -90,7 +92,7 @@ $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 
 %.o: %.S
 	@echo "  AS      $<"
-	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+	@$(CC) $(CFLAGS) $(ASFLAGS) -MMD -MP -c $< -o $@
 
 $(AUTOCONF_HEADER): .config
 	@mkdir -p $(GENERATED_DIR)
