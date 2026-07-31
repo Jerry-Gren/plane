@@ -261,3 +261,12 @@ uint64_t plane_vm_zone_capacity(const struct plane_vm_zone *zone)
 
 	return zone->capacity;
 }
+
+bool plane_vm_zone_contains(const struct plane_vm_zone *zone, const void *elem)
+{
+	if (zone == NULL || !zone->initialized || elem == NULL) {
+		return false;
+	}
+
+	return elem_belongs_to_zone(zone, elem);
+}

@@ -10,6 +10,7 @@
 
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
+#include "../kernel/mm/vm_zone_internal.h"
 
 #define TEST_KMEM_PAGES 192
 #define TEST_KMEM_SIZE (TEST_KMEM_PAGES * PAGE_SIZE)
@@ -40,6 +41,8 @@ struct test_mapping {
 
 static struct plane_page test_pages[TEST_PAGE_COUNT];
 static struct plane_page test_guard_pages[TEST_GUARD_PAGE_COUNT];
+static struct plane_page *runtime_guard_pages;
+static uint64_t runtime_guard_page_count;
 static struct test_mapping test_mappings[TEST_MAP_COUNT];
 static uint8_t test_kmem_storage[TEST_KMEM_SIZE] __aligned(PAGE_SIZE);
 
@@ -52,9 +55,16 @@ static bool is_test_page(const struct plane_page *page)
 
 static bool is_test_guard_page(const struct plane_page *page)
 {
-	return page != NULL &&
-	       page >= &test_guard_pages[0] &&
-	       page < &test_guard_pages[TEST_GUARD_PAGE_COUNT];
+	if (page == NULL) {
+		return false;
+	}
+	if (page >= &test_guard_pages[0] &&
+	    page < &test_guard_pages[TEST_GUARD_PAGE_COUNT]) {
+		return true;
+	}
+	return runtime_guard_pages != NULL &&
+	       page >= runtime_guard_pages &&
+	       page < runtime_guard_pages + runtime_guard_page_count;
 }
 
 static bool is_test_active_guard_page(const struct plane_page *page)
@@ -99,6 +109,24 @@ static uint64_t wired_page_count(void)
 
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		if (test_pages[i].wire_count != 0) {
+			count++;
+		}
+	}
+
+	return count;
+}
+
+static uint64_t guard_page_count(void)
+{
+	uint64_t count = 0;
+
+	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
+		if (test_guard_pages[i].guard) {
+			count++;
+		}
+	}
+	for (uint64_t i = 0; i < runtime_guard_page_count; i++) {
+		if (runtime_guard_pages[i].guard) {
 			count++;
 		}
 	}
@@ -446,6 +474,38 @@ bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_coun
 	return true;
 }
 
+bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size)
+{
+	if (size == NULL ||
+	    count == 0 ||
+	    count > UINT64_MAX / sizeof(test_guard_pages[0])) {
+		return false;
+	}
+
+	*size = count * sizeof(test_guard_pages[0]);
+	return true;
+}
+
+bool plane_vm_page_add_guard_storage(void *storage,
+				     uint64_t count,
+				     struct plane_vm_zone_segment *segment)
+{
+	if (storage == NULL ||
+	    count == 0 ||
+	    segment == NULL ||
+	    runtime_guard_pages != NULL) {
+		return false;
+	}
+
+	runtime_guard_pages = storage;
+	runtime_guard_page_count = count;
+	*segment = (struct plane_vm_zone_segment){
+		.storage = storage,
+		.count = count,
+	};
+	return true;
+}
+
 struct plane_page *plane_vm_page_create_guard(void)
 {
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
@@ -454,6 +514,15 @@ struct plane_page *plane_vm_page_create_guard(void)
 			test_guard_pages[i].phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
 			test_guard_pages[i].guard = true;
 			return &test_guard_pages[i];
+		}
+	}
+	for (uint64_t i = 0; i < runtime_guard_page_count; i++) {
+		if (!runtime_guard_pages[i].guard) {
+			runtime_guard_pages[i] = (struct plane_page){0};
+			runtime_guard_pages[i].phys_addr =
+				PLANE_VM_PAGE_GUARD_PHYS;
+			runtime_guard_pages[i].guard = true;
+			return &runtime_guard_pages[i];
 		}
 	}
 
@@ -482,7 +551,9 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 static int test_global_kmem_init_is_one_shot(void)
 {
 	void *small_allocs[TEST_SMALL_ALLOC_COUNT];
+	struct plane_page *guards[TEST_GUARD_PAGE_COUNT + 1];
 	void *addr = NULL;
+	void *guarded_addr = NULL;
 	uint64_t init_allocated;
 	uint64_t init_mappings;
 	uint64_t init_wired;
@@ -491,11 +562,35 @@ static int test_global_kmem_init_is_one_shot(void)
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		small_allocs[i] = NULL;
 	}
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(guards); i++) {
+		guards[i] = NULL;
+	}
 
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
 	init_allocated = allocated_page_count();
 	init_mappings = mapping_count();
 	init_wired = wired_page_count();
+	failures += test_expect_bool("global guard storage expanded",
+				     runtime_guard_page_count >
+					     TEST_GUARD_PAGE_COUNT,
+				     true);
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(guards); i++) {
+		guards[i] = plane_vm_page_create_guard();
+		failures += test_expect_not_null("global expanded guard create",
+						 guards[i]);
+	}
+	failures += test_expect_u64("global expanded guard count",
+				    guard_page_count(),
+				    TEST_ARRAY_SIZE(guards));
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(guards); i++) {
+		failures += test_expect_bool("global expanded guard release",
+					     plane_vm_page_release_guard(
+						     guards[i]),
+					     true);
+	}
+	failures += test_expect_u64("global expanded guard count released",
+				    guard_page_count(), 0);
+
 	failures += test_expect_bool("global alloc",
 				     plane_kmem_alloc_pages(2, 0, &addr),
 				     true);
@@ -511,6 +606,18 @@ static int test_global_kmem_init_is_one_shot(void)
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global free mappings",
 				    mapping_count(), init_mappings);
+	failures += test_expect_bool("global guarded alloc",
+				     plane_kmem_alloc_pages(
+					     2, PLANE_KMEM_ALLOC_GUARD,
+					     &guarded_addr),
+				     true);
+	failures += test_expect_u64("global guarded no resident guards",
+				    guard_page_count(), 0);
+	failures += test_expect_bool("global guarded free",
+				     plane_kmem_free_pages(guarded_addr, 2),
+				     true);
+	failures += test_expect_u64("global guarded free guards",
+				    guard_page_count(), 0);
 
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		failures += test_expect_bool("global small alloc",

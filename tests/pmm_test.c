@@ -11,12 +11,17 @@
 
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
+#include "../kernel/mm/vm_zone_internal.h"
 
 static bool direct_map_available = true;
 #define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
+#define TEST_GUARD_BOOTSTRAP_COUNT 64
+#define TEST_GUARD_EXTRA_COUNT 4
 static uint64_t direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
 static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
 	__aligned(PAGE_SIZE);
+static uint8_t extra_guard_storage[PAGE_SIZE] __aligned(PAGE_SIZE);
+static struct plane_vm_zone_segment extra_guard_segment;
 
 void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
 {
@@ -41,6 +46,8 @@ static void reset_direct_map_stub(void)
 	direct_map_available = true;
 	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
 	memset(direct_map_storage, 0, sizeof(direct_map_storage));
+	memset(extra_guard_storage, 0, sizeof(extra_guard_storage));
+	extra_guard_segment = (struct plane_vm_zone_segment){0};
 }
 
 static int check_page_state(const char *name,
@@ -465,6 +472,16 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	failures += test_expect_u64("guard wire count", wire_count, 0);
 	failures += test_expect_bool("guard pmm free rejected",
 				     plane_vm_page_release(guard), false);
+	failures += test_expect_bool("guard attach",
+				     plane_vm_page_attach_object(guard,
+								 &object, 0),
+				     true);
+	failures += test_expect_bool("guard attached release rejected",
+				     plane_vm_page_release_guard(guard), false);
+	failures += test_expect_bool("guard detach",
+				     plane_vm_page_detach_object(guard,
+								 &object, 0),
+				     true);
 	failures += test_expect_bool("guard release",
 				     plane_vm_page_release_guard(guard), true);
 	failures += check_page_state("guard released state",
@@ -493,6 +510,112 @@ static int test_guard_pages_are_not_pmm_managed(void)
 				    after.allocator.free_pages,
 				    before.allocator.free_pages);
 	failures += test_expect_u64("guard wired unchanged",
+				    after.allocator.wired_pages,
+				    before.allocator.wired_pages);
+	return failures;
+}
+
+static int test_guard_page_zone_extends_bootstrap_storage(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats before;
+	struct plane_pmm_stats after;
+	struct plane_page *guards[TEST_GUARD_BOOTSTRAP_COUNT +
+				 TEST_GUARD_EXTRA_COUNT];
+	struct plane_page *reused;
+	struct plane_page *extra;
+	uint64_t storage_size = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(guards); i++) {
+		guards[i] = NULL;
+	}
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("guard zone pmm init",
+				     plane_pmm_init(&mem), true);
+	before = plane_pmm_get_stats();
+
+	for (uint64_t i = 0; i < TEST_GUARD_BOOTSTRAP_COUNT; i++) {
+		guards[i] = plane_vm_page_create_guard();
+		if (guards[i] == NULL) {
+			test_fail("bootstrap guard alloc %llu",
+				  (unsigned long long)i);
+			failures++;
+		}
+	}
+
+	failures += test_expect_null("bootstrap guard exhausted",
+				     plane_vm_page_create_guard());
+	failures += test_expect_bool("release bootstrap guard",
+				     plane_vm_page_release_guard(guards[0]),
+				     true);
+	reused = plane_vm_page_create_guard();
+	failures += test_expect_ptr("bootstrap guard reuses slot",
+				    reused, guards[0]);
+	guards[0] = reused;
+	failures += test_expect_null("bootstrap guard exhausted again",
+				     plane_vm_page_create_guard());
+
+	failures += test_expect_bool("guard storage size",
+				     plane_vm_page_guard_storage_size(
+					     TEST_GUARD_EXTRA_COUNT,
+					     &storage_size),
+				     true);
+	failures += test_expect_bool("guard storage fits test page",
+				     storage_size <= sizeof(extra_guard_storage),
+				     true);
+	failures += test_expect_bool("add guard storage",
+				     plane_vm_page_add_guard_storage(
+					     extra_guard_storage,
+					     TEST_GUARD_EXTRA_COUNT,
+					     &extra_guard_segment),
+				     true);
+
+	for (uint64_t i = 0; i < TEST_GUARD_EXTRA_COUNT; i++) {
+		extra = plane_vm_page_create_guard();
+		guards[TEST_GUARD_BOOTSTRAP_COUNT + i] = extra;
+		if (extra == NULL) {
+			test_fail("extra guard alloc %llu",
+				  (unsigned long long)i);
+			failures++;
+		}
+	}
+
+	failures += test_expect_null("expanded guard exhausted",
+				     plane_vm_page_create_guard());
+	failures += test_expect_bool("reject duplicate storage segment",
+				     plane_vm_page_add_guard_storage(
+					     extra_guard_storage,
+					     TEST_GUARD_EXTRA_COUNT,
+					     &extra_guard_segment),
+				     false);
+	failures += test_expect_bool("reject zero guard storage size",
+				     plane_vm_page_guard_storage_size(
+					     0, &storage_size),
+				     false);
+	failures += test_expect_bool("reject null guard storage out",
+				     plane_vm_page_guard_storage_size(
+					     TEST_GUARD_EXTRA_COUNT, NULL),
+				     false);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(guards); i++) {
+		if (guards[i] != NULL &&
+		    !plane_vm_page_release_guard(guards[i])) {
+			test_fail("guard release %llu",
+				  (unsigned long long)i);
+			failures++;
+		}
+	}
+
+	after = plane_pmm_get_stats();
+	failures += test_expect_u64("expanded guard managed unchanged",
+				    after.allocator.managed_pages,
+				    before.allocator.managed_pages);
+	failures += test_expect_u64("expanded guard free unchanged",
+				    after.allocator.free_pages,
+				    before.allocator.free_pages);
+	failures += test_expect_u64("expanded guard wired unchanged",
 				    after.allocator.wired_pages,
 				    before.allocator.wired_pages);
 	return failures;
@@ -1058,6 +1181,7 @@ int main(void)
 		TEST_CASE(test_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_wire_rejects_invalid_pages),
 		TEST_CASE(test_guard_pages_are_not_pmm_managed),
+		TEST_CASE(test_guard_page_zone_extends_bootstrap_storage),
 		TEST_CASE(test_page_object_identity_blocks_free),
 		TEST_CASE(test_grub_like_reservations_are_counted),
 		TEST_CASE(test_limine_like_rich_memmap_is_counted),

@@ -10,6 +10,7 @@
 
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
+#include "../kernel/mm/vm_zone_internal.h"
 
 #define TEST_KMEM_BASE 0xffff900000000000ull
 #define TEST_KMEM_PAGES 256
@@ -581,6 +582,33 @@ bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_coun
 	}
 
 	*wire_count = page->wire_count;
+	return true;
+}
+
+bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size)
+{
+	if (size == NULL ||
+	    count == 0 ||
+	    count > UINT64_MAX / sizeof(test_guard_pages[0])) {
+		return false;
+	}
+
+	*size = count * sizeof(test_guard_pages[0]);
+	return true;
+}
+
+bool plane_vm_page_add_guard_storage(void *storage,
+				     uint64_t count,
+				     struct plane_vm_zone_segment *segment)
+{
+	if (storage == NULL || count == 0 || segment == NULL) {
+		return false;
+	}
+
+	*segment = (struct plane_vm_zone_segment){
+		.storage = storage,
+		.count = count,
+	};
 	return true;
 }
 

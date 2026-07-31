@@ -40,6 +40,7 @@ bool plane_vm_zone_add_storage(struct plane_vm_zone *zone,
 			       struct plane_vm_zone_segment *segment);
 void *plane_vm_zone_alloc(struct plane_vm_zone *zone);
 bool plane_vm_zone_free(struct plane_vm_zone *zone, void *elem);
+bool plane_vm_zone_contains(const struct plane_vm_zone *zone, const void *elem);
 uint64_t plane_vm_zone_capacity(const struct plane_vm_zone *zone);
 
 #endif /* PLANE_VM_ZONE_INTERNAL_H */

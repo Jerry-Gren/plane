@@ -6,6 +6,7 @@
 
 struct plane_page;
 struct plane_vm_object;
+struct plane_vm_zone_segment;
 
 /*
  * VM page resident metadata mutation helpers.
@@ -14,6 +15,10 @@ struct plane_vm_object;
  */
 struct plane_page *plane_vm_page_create_guard(void);
 bool plane_vm_page_release_guard(struct plane_page *page);
+bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size);
+bool plane_vm_page_add_guard_storage(void *storage,
+				     uint64_t count,
+				     struct plane_vm_zone_segment *segment);
 bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset);

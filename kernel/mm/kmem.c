@@ -11,17 +11,20 @@
 #include <plane/vm_object.h>
 
 #include "vm_object_internal.h"
+#include "vm_page_internal.h"
 #include "vm_zone_internal.h"
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
 #define PLANE_KERNEL_MAP_RUNTIME_ENTRIES 256
 #define PLANE_VM_OBJECT_RUNTIME_POOL_SIZE 512
 #define PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS 512
+#define PLANE_VM_GUARD_PAGE_RUNTIME_POOL_SIZE 256
 
 static struct plane_vm_map_entry kernel_map_entries[PLANE_KERNEL_MAP_MAX_ENTRIES];
 static struct plane_vm_map kernel_map;
 static struct plane_vm_object kernel_object;
 static struct plane_vm_zone_segment kernel_object_runtime_segment;
+static struct plane_vm_zone_segment kernel_guard_runtime_segment;
 static bool kmem_initialized;
 
 static bool kmem_size_to_pages(uint64_t size, uint64_t *page_count)
@@ -108,6 +111,8 @@ static bool expand_kmem_metadata(void)
 	struct plane_vm_map_entry *runtime_entries;
 	struct plane_vm_object *runtime_objects;
 	struct plane_page **runtime_hash;
+	void *runtime_guards;
+	uint64_t runtime_guard_size;
 
 	BUILD_BUG_ON(PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS == 0);
 	BUILD_BUG_ON((PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS &
@@ -142,8 +147,23 @@ static bool expand_kmem_metadata(void)
 			      (void **)&runtime_hash)) {
 		return false;
 	}
-	return plane_vm_object_rehome_resident_hash(
-		runtime_hash, PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS);
+	if (!plane_vm_object_rehome_resident_hash(
+		    runtime_hash, PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS)) {
+		return false;
+	}
+
+	if (!plane_vm_page_guard_storage_size(
+		    PLANE_VM_GUARD_PAGE_RUNTIME_POOL_SIZE,
+		    &runtime_guard_size) ||
+	    !plane_kmem_alloc(runtime_guard_size,
+			      PLANE_KMEM_ALLOC_ZERO,
+			      &runtime_guards)) {
+		return false;
+	}
+	return plane_vm_page_add_guard_storage(
+		runtime_guards,
+		PLANE_VM_GUARD_PAGE_RUNTIME_POOL_SIZE,
+		&kernel_guard_runtime_segment);
 }
 
 static bool release_mapped_page(struct plane_vm_object *object,
