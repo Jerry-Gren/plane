@@ -396,6 +396,62 @@ static bool plan_protect_user_range(struct plane_vm_map *map,
 	return true;
 }
 
+static bool plan_wire_user_range(struct plane_vm_map *map,
+				 uint64_t start,
+				 uint64_t end,
+				 bool wire,
+				 struct vm_map_range_plan *plan)
+{
+	uint64_t cursor = start;
+	uint64_t split_count = 0;
+
+	*plan = (struct vm_map_range_plan){
+		.first = VM_MAP_ENTRY_NONE,
+		.split_count = 0,
+	};
+
+	while (cursor < end) {
+		int64_t entry_index = find_user_entry(map, cursor);
+		struct plane_vm_map_entry *entry;
+		uint64_t segment_end;
+
+		if (entry_index < 0) {
+			return false;
+		}
+
+		entry = &map->entries[entry_index];
+		if (cursor < entry->user_start ||
+		    (wire && entry->wired_count == UINT64_MAX) ||
+		    (!wire && entry->wired_count == 0)) {
+			return false;
+		}
+
+		if (plan->first == VM_MAP_ENTRY_NONE) {
+			plan->first = (uint64_t)entry_index;
+		}
+
+		if (cursor > entry->user_start &&
+		    !account_split_ref(entry, &split_count)) {
+			return false;
+		}
+
+		segment_end = end < entry->user_end ? end : entry->user_end;
+		if (segment_end < entry->user_end &&
+		    !account_split_ref(entry, &split_count)) {
+			return false;
+		}
+
+		cursor = segment_end;
+	}
+
+	if (split_count > available_entry_count(map)) {
+		return false;
+	}
+
+	plan->split_count = split_count;
+	return true;
+}
+
 static bool plan_delete_reserved_range(struct plane_vm_map *map,
 				       uint64_t start,
 				       uint64_t end,
@@ -532,6 +588,47 @@ static bool apply_protect_user_range(struct plane_vm_map *map,
 				entry->prot &= prot;
 			} else {
 				entry->prot = prot;
+			}
+		}
+		if (entry->user_end >= end) {
+			break;
+		}
+		next = entry->next;
+		current = next;
+	}
+
+	return true;
+}
+
+static bool apply_wire_user_range(struct plane_vm_map *map,
+				  uint64_t start,
+				  uint64_t end,
+				  const struct vm_map_range_plan *plan,
+				  bool wire)
+{
+	uint64_t current = plan->first;
+
+	while (current != VM_MAP_ENTRY_NONE) {
+		uint64_t next;
+		struct plane_vm_map_entry *entry = &map->entries[current];
+
+		if (start > entry->user_start && start < entry->user_end &&
+		    !clip_entry_start(map, current, start)) {
+			return false;
+		}
+
+		entry = &map->entries[current];
+		if (end > entry->user_start && end < entry->user_end &&
+		    !clip_entry_end(map, current, end)) {
+			return false;
+		}
+
+		entry = &map->entries[current];
+		if (entry->user_start >= start && entry->user_end <= end) {
+			if (wire) {
+				entry->wired_count++;
+			} else {
+				entry->wired_count--;
 			}
 		}
 		if (entry->user_end >= end) {
@@ -1035,46 +1132,44 @@ bool plane_vm_map_wire_pages(struct plane_vm_map *map,
 			     uint64_t vaddr,
 			     uint64_t page_count)
 {
-	int64_t entry_index;
+	struct vm_map_range_plan plan;
+	uint64_t size;
+	uint64_t end;
 
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !plane_is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr) ||
+	    !plane_checked_page_offset(page_count, &size) ||
+	    !plane_checked_add_u64(vaddr, size, &end) ||
+	    !map_range_contains(map, vaddr, end) ||
+	    !plan_wire_user_range(map, vaddr, end, true, &plan)) {
 		return false;
 	}
 
-	entry_index = find_exact_entry(map, vaddr, page_count);
-	if (entry_index < 0 ||
-	    map->entries[entry_index].wired_count == UINT64_MAX) {
-		return false;
-	}
-
-	map->entries[entry_index].wired_count++;
-	return true;
+	return apply_wire_user_range(map, vaddr, end, &plan, true);
 }
 
 bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
 			       uint64_t vaddr,
 			       uint64_t page_count)
 {
-	int64_t entry_index;
+	struct vm_map_range_plan plan;
+	uint64_t size;
+	uint64_t end;
 
 	if (map == NULL ||
 	    !map->initialized ||
 	    page_count == 0 ||
-	    !plane_is_page_aligned(vaddr)) {
+	    !plane_is_page_aligned(vaddr) ||
+	    !plane_checked_page_offset(page_count, &size) ||
+	    !plane_checked_add_u64(vaddr, size, &end) ||
+	    !map_range_contains(map, vaddr, end) ||
+	    !plan_wire_user_range(map, vaddr, end, false, &plan)) {
 		return false;
 	}
 
-	entry_index = find_exact_entry(map, vaddr, page_count);
-	if (entry_index < 0 ||
-	    map->entries[entry_index].wired_count == 0) {
-		return false;
-	}
-
-	map->entries[entry_index].wired_count--;
-	return true;
+	return apply_wire_user_range(map, vaddr, end, &plan, false);
 }
 
 bool plane_vm_map_free_pages(struct plane_vm_map *map,

@@ -2568,9 +2568,361 @@ static int test_wire_pages_updates_exact_allocation(void)
 	return failures;
 }
 
+static int test_wire_pages_clips_middle_fragment(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"wire middle init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("wire middle object init",
+				     plane_vm_object_init(&test_object,
+							  4 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"wire middle enter",
+		test_map_enter_pages_object(&test_map, 3, 0, &test_object, 0,
+					    PLANE_VM_PROT_DEFAULT,
+					    PLANE_VM_PROT_ALL, &vaddr),
+		true);
+	failures += test_expect_bool("wire middle page",
+				     plane_vm_map_wire_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1),
+				     true);
+	failures += test_expect_u64("wire middle ref count",
+				    plane_vm_object_ref_count(&test_object), 4);
+	failures += test_expect_bool("wire middle original absent",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 3, NULL),
+				     false);
+	failures += test_expect_bool("wire middle left lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 1, &info),
+				     true);
+	failures += test_expect_ptr("wire middle left object",
+				    info.object, &test_object);
+	failures += test_expect_u64("wire middle left offset",
+				    info.object_offset, 0);
+	failures += test_expect_u64("wire middle left count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("wire middle target lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_ptr("wire middle target object",
+				    info.object, &test_object);
+	failures += test_expect_u64("wire middle target offset",
+				    info.object_offset, PAGE_SIZE);
+	failures += test_expect_u64("wire middle target count",
+				    info.wired_count, 1);
+	failures += test_expect_bool("wire middle right lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_ptr("wire middle right object",
+				    info.object, &test_object);
+	failures += test_expect_u64("wire middle right offset",
+				    info.object_offset, 2 * PAGE_SIZE);
+	failures += test_expect_u64("wire middle right count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("wire middle free rejected",
+				     plane_vm_map_free_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1),
+				     false);
+	failures += check_stats("wire middle stats",
+				TEST_KERNEL_MAP_PAGES - 3, 3, 3, 1, 3);
+	return failures;
+}
+
+static int test_unwire_pages_clips_middle_fragment(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"unwire middle init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("unwire middle object init",
+				     plane_vm_object_init(&test_object,
+							  4 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"unwire middle enter",
+		test_map_enter_pages_object(&test_map, 3, 0, &test_object, 0,
+					    PLANE_VM_PROT_DEFAULT,
+					    PLANE_VM_PROT_ALL, &vaddr),
+		true);
+	failures += test_expect_bool("unwire middle wire all",
+				     plane_vm_map_wire_pages(&test_map, vaddr,
+							     3),
+				     true);
+	failures += test_expect_bool("unwire middle page",
+				     plane_vm_map_unwire_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1),
+				     true);
+	failures += test_expect_u64("unwire middle ref count",
+				    plane_vm_object_ref_count(&test_object), 4);
+	failures += test_expect_bool("unwire middle left lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 1, &info),
+				     true);
+	failures += test_expect_u64("unwire middle left count",
+				    info.wired_count, 1);
+	failures += test_expect_bool("unwire middle target lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_u64("unwire middle target count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("unwire middle right lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_u64("unwire middle right count",
+				    info.wired_count, 1);
+	failures += test_expect_bool("unwire middle left free rejected",
+				     plane_vm_map_free_pages(&test_map, vaddr,
+							     1),
+				     false);
+	failures += test_expect_bool("unwire middle target free",
+				     plane_vm_map_free_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1),
+				     true);
+	failures += check_stats("unwire middle free stats",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 2, 2);
+	return failures;
+}
+
+static int test_wire_pages_updates_contiguous_entries(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"wire contiguous init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool(
+		"wire contiguous first",
+		test_map_enter_fixed(page_vaddr(0), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &first),
+		true);
+	failures += test_expect_bool(
+		"wire contiguous second",
+		test_map_enter_fixed(page_vaddr(1), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &second),
+		true);
+	failures += test_expect_bool("wire contiguous range",
+				     plane_vm_map_wire_pages(&test_map, first,
+							     2),
+				     true);
+	failures += test_expect_bool("wire contiguous first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, &info),
+				     true);
+	failures += test_expect_u64("wire contiguous first count",
+				    info.wired_count, 1);
+	failures += test_expect_bool("wire contiguous second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, &info),
+				     true);
+	failures += test_expect_u64("wire contiguous second count",
+				    info.wired_count, 1);
+	failures += test_expect_bool("unwire contiguous range",
+				     plane_vm_map_unwire_pages(&test_map, first,
+							       2),
+				     true);
+	failures += test_expect_bool("unwire contiguous first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, &info),
+				     true);
+	failures += test_expect_u64("unwire contiguous first count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("unwire contiguous second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, &info),
+				     true);
+	failures += test_expect_u64("unwire contiguous second count",
+				    info.wired_count, 0);
+	return failures;
+}
+
+static int test_wire_pages_guarded_range_uses_user_pages(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"wire guarded init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool(
+		"wire guarded alloc",
+		test_map_enter_pages_protected(&test_map, 2, 1,
+					       PLANE_VM_PROT_DEFAULT, &vaddr),
+		true);
+	failures += test_expect_u64("wire guarded user addr",
+				    vaddr, page_vaddr(1));
+	failures += test_expect_bool(
+		"wire guarded left guard absent",
+		plane_vm_map_lookup_allocation(&test_map, page_vaddr(0), 1,
+					       NULL),
+		false);
+	failures += test_expect_bool("wire guarded user pages",
+				     plane_vm_map_wire_pages(&test_map, vaddr,
+							     2),
+				     true);
+	failures += test_expect_bool(
+		"wire guarded lookup",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		true);
+	failures += test_expect_u64("wire guarded count",
+				    info.wired_count, 1);
+	failures += test_expect_u64("wire guarded reserved pages",
+				    info.reserved_pages, 4);
+	failures += test_expect_bool(
+		"wire guarded left guard still absent",
+		plane_vm_map_lookup_allocation(&test_map, page_vaddr(0), 1,
+					       NULL),
+		false);
+	failures += test_expect_bool("unwire guarded user pages",
+				     plane_vm_map_unwire_pages(&test_map,
+							       vaddr, 2),
+				     true);
+	failures += test_expect_bool(
+		"unwire guarded lookup",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		true);
+	failures += test_expect_u64("unwire guarded count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("wire guarded free",
+				     plane_vm_map_free_pages(&test_map, vaddr,
+							     2),
+				     true);
+	return failures;
+}
+
+static int test_wire_pages_rejects_hole_in_range(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"wire hole init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool(
+		"wire hole first",
+		test_map_enter_fixed(page_vaddr(0), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &first),
+		true);
+	failures += test_expect_bool(
+		"wire hole second",
+		test_map_enter_fixed(page_vaddr(2), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &second),
+		true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("wire hole rejected",
+				     plane_vm_map_wire_pages(&test_map, first,
+							     3),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("wire hole free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("wire hole count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool("wire hole first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, &info),
+				     true);
+	failures += test_expect_u64("wire hole first count",
+				    info.wired_count, 0);
+	failures += test_expect_bool("wire hole second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, &info),
+				     true);
+	failures += test_expect_u64("wire hole second count",
+				    info.wired_count, 0);
+	return failures;
+}
+
+static int test_wire_pages_rejects_exhausted_split_entries(void)
+{
+	struct plane_vm_map_entry small_entries[2];
+	struct plane_vm_map small_map = {0};
+	struct plane_vm_map_allocation_info info = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	struct plane_vm_object *object = NULL;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(small_entries); i++) {
+		small_entries[i] = (struct plane_vm_map_entry){0};
+	}
+	failures += test_expect_bool(
+		"wire split exhausted init",
+		plane_vm_map_init(&small_map, small_entries,
+				  TEST_ARRAY_SIZE(small_entries),
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("wire split exhausted alloc",
+				     test_map_enter_pages(&small_map, 3,
+							  &vaddr),
+				     true);
+	failures += test_expect_bool(
+		"wire split exhausted lookup",
+		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		true);
+	object = info.object;
+	before = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_bool("wire split exhausted rejected",
+				     plane_vm_map_wire_pages(
+					     &small_map, vaddr + PAGE_SIZE, 1),
+				     false);
+	after = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_u64("wire split free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("wire split count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool("wire split preserved",
+				     plane_vm_map_lookup_allocation(
+					     &small_map, vaddr, 3, &info),
+				     true);
+	failures += test_expect_u64("wire split wired unchanged",
+				    info.wired_count, 0);
+	failures += test_expect_u64("wire split ref unchanged",
+				    plane_vm_object_ref_count(object), 1);
+	return failures;
+}
+
 static int test_wire_pages_rejects_invalid_ranges(void)
 {
 	struct plane_vm_map_allocation_info info = {0};
+	uint64_t overflow_addr = UINT64_MAX - PAGE_SIZE + 1;
 	uint64_t vaddr = 0;
 	int failures = 0;
 
@@ -2584,8 +2936,13 @@ static int test_wire_pages_rejects_invalid_ranges(void)
 	failures += test_expect_bool("wire reject zero pages",
 				     plane_vm_map_wire_pages(&test_map, vaddr, 0),
 				     false);
-	failures += test_expect_bool("wire reject partial",
-				     plane_vm_map_wire_pages(&test_map, vaddr, 1),
+	failures += test_expect_bool("wire reject unaligned",
+				     plane_vm_map_wire_pages(&test_map,
+							     vaddr + 1, 1),
+				     false);
+	failures += test_expect_bool("wire reject overflow",
+				     plane_vm_map_wire_pages(&test_map,
+							     overflow_addr, 2),
 				     false);
 	failures += test_expect_bool("wire reject absent",
 				     plane_vm_map_wire_pages(&test_map, page_vaddr(10),
@@ -2594,8 +2951,18 @@ static int test_wire_pages_rejects_invalid_ranges(void)
 	failures += test_expect_bool("unwire reject zero pages",
 				     plane_vm_map_unwire_pages(&test_map, vaddr, 0),
 				     false);
-	failures += test_expect_bool("unwire reject partial",
-				     plane_vm_map_unwire_pages(&test_map, vaddr, 1),
+	failures += test_expect_bool("unwire reject unaligned",
+				     plane_vm_map_unwire_pages(&test_map,
+							       vaddr + 1, 1),
+				     false);
+	failures += test_expect_bool("unwire reject overflow",
+				     plane_vm_map_unwire_pages(&test_map,
+							       overflow_addr,
+							       2),
+				     false);
+	failures += test_expect_bool("unwire reject unwired",
+				     plane_vm_map_unwire_pages(&test_map,
+							       vaddr, 2),
 				     false);
 	failures += test_expect_bool("unwire reject absent",
 				     plane_vm_map_unwire_pages(&test_map,
@@ -3166,6 +3533,12 @@ int main(void)
 		TEST_CASE(test_protect_max_pages_rejects_exhausted_split_entries),
 		TEST_CASE(test_protect_max_pages_rejects_invalid_ranges),
 		TEST_CASE(test_wire_pages_updates_exact_allocation),
+		TEST_CASE(test_wire_pages_clips_middle_fragment),
+		TEST_CASE(test_unwire_pages_clips_middle_fragment),
+		TEST_CASE(test_wire_pages_updates_contiguous_entries),
+		TEST_CASE(test_wire_pages_guarded_range_uses_user_pages),
+		TEST_CASE(test_wire_pages_rejects_hole_in_range),
+		TEST_CASE(test_wire_pages_rejects_exhausted_split_entries),
 		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
 		TEST_CASE(test_object_allocation_records_object_and_offset),
 		TEST_CASE(test_object_auto_offset_uses_user_range),
