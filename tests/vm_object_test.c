@@ -8,10 +8,14 @@
 #include "support/test.h"
 #include "../kernel/mm/vm_object_internal.h"
 #include "../kernel/mm/vm_page_internal.h"
+#include "../kernel/mm/vm_zone_internal.h"
 
 #define TEST_OBJECT_PAGES 16
 #define TEST_OBJECT_SIZE (TEST_OBJECT_PAGES * PAGE_SIZE)
 #define TEST_HASH_PAGE_COUNT 12
+#define TEST_BOOTSTRAP_OBJECT_POOL_SIZE 256
+#define TEST_OBJECT_EXTRA_POOL_SIZE 4
+#define TEST_REHASH_BUCKETS 512
 
 struct plane_page {
 	struct plane_vm_object *object;
@@ -34,6 +38,9 @@ static struct plane_page third_allocated_page;
 static struct plane_page hash_pages[TEST_HASH_PAGE_COUNT];
 static struct plane_page guard_page;
 static struct plane_page free_page;
+static struct plane_vm_object extra_object_pool[TEST_OBJECT_EXTRA_POOL_SIZE];
+static struct plane_vm_zone_segment extra_object_segment;
+static struct plane_page *rehash_buckets[TEST_REHASH_BUCKETS + 1];
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
@@ -231,6 +238,7 @@ static void reset_vm_object_test(void)
 {
 	cleanup_vm_object(&test_object);
 	cleanup_vm_object(&second_object);
+	plane_vm_object_reset_bootstrap_for_tests();
 	test_object = (struct plane_vm_object){0};
 	second_object = (struct plane_vm_object){0};
 	allocated_page = (struct plane_page){0};
@@ -240,6 +248,13 @@ static void reset_vm_object_test(void)
 	for (size_t i = 0; i < TEST_HASH_PAGE_COUNT; i++) {
 		hash_pages[i] = (struct plane_page){0};
 		hash_pages[i].state = PLANE_VM_PAGE_ALLOCATED;
+	}
+	for (uint64_t i = 0; i < TEST_OBJECT_EXTRA_POOL_SIZE; i++) {
+		extra_object_pool[i] = (struct plane_vm_object){0};
+	}
+	extra_object_segment = (struct plane_vm_zone_segment){0};
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(rehash_buckets); i++) {
+		rehash_buckets[i] = NULL;
 	}
 	free_page = (struct plane_page){0};
 	allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
@@ -377,6 +392,61 @@ static int test_allocate_final_deallocate_releases_pool_slot(void)
 				     second->allocated, true);
 	failures += test_expect_bool("object allocate second release",
 				     plane_vm_object_deallocate(second), true);
+	return failures;
+}
+
+static int test_allocate_uses_added_zone_storage_after_bootstrap_pool(void)
+{
+	struct plane_vm_object *objects[TEST_BOOTSTRAP_OBJECT_POOL_SIZE +
+				       TEST_OBJECT_EXTRA_POOL_SIZE];
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(objects); i++) {
+		objects[i] = NULL;
+	}
+
+	for (uint64_t i = 0; i < TEST_BOOTSTRAP_OBJECT_POOL_SIZE; i++) {
+		failures += test_expect_bool(
+			"bootstrap object allocate",
+			plane_vm_object_allocate(TEST_OBJECT_SIZE, &objects[i]),
+			true);
+	}
+	failures += test_expect_bool("bootstrap pool exhausted",
+				     plane_vm_object_allocate(
+					     TEST_OBJECT_SIZE,
+					     &objects[TEST_BOOTSTRAP_OBJECT_POOL_SIZE]),
+				     false);
+	failures += test_expect_bool("add object zone storage",
+				     plane_vm_object_add_zone_storage(
+					     extra_object_pool,
+					     TEST_OBJECT_EXTRA_POOL_SIZE,
+					     &extra_object_segment),
+				     true);
+	for (uint64_t i = TEST_BOOTSTRAP_OBJECT_POOL_SIZE;
+	     i < TEST_ARRAY_SIZE(objects);
+	     i++) {
+		failures += test_expect_bool(
+			"expanded object allocate",
+			plane_vm_object_allocate(TEST_OBJECT_SIZE, &objects[i]),
+			true);
+		failures += test_expect_bool("expanded object allocated flag",
+					     objects[i]->allocated, true);
+	}
+	failures += test_expect_bool("expanded object pool exhausted",
+				     plane_vm_object_allocate(
+					     TEST_OBJECT_SIZE,
+					     &objects[0]),
+				     false);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(objects); i++) {
+		if (objects[i] != NULL) {
+			failures += test_expect_bool("object deallocate",
+						     plane_vm_object_deallocate(
+							     objects[i]),
+						     true);
+		}
+	}
+
 	return failures;
 }
 
@@ -775,6 +845,97 @@ static int test_lookup_large_object_uses_hash(void)
 	return failures;
 }
 
+static int test_resident_hash_rehome_preserves_existing_pages(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("insert first page",
+				     plane_vm_object_insert_page(
+					     &test_object, 0,
+					     &allocated_page),
+				     true);
+	failures += test_expect_bool("insert second page",
+				     plane_vm_object_insert_page(
+					     &test_object, PAGE_SIZE,
+					     &second_allocated_page),
+				     true);
+	failures += test_expect_bool("rehome resident hash",
+				     plane_vm_object_rehome_resident_hash(
+					     rehash_buckets,
+					     TEST_REHASH_BUCKETS),
+				     true);
+	failures += test_expect_ptr("lookup first after rehash",
+				    plane_vm_object_lookup_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_ptr("lookup second after rehash",
+				    plane_vm_object_lookup_page(&test_object,
+								PAGE_SIZE),
+				    &second_allocated_page);
+	failures += test_expect_bool("insert third after rehash",
+				     plane_vm_object_insert_page(
+					     &test_object, 2 * PAGE_SIZE,
+					     &third_allocated_page),
+				     true);
+	failures += test_expect_ptr("lookup third after rehash",
+				    plane_vm_object_lookup_page(&test_object,
+								2 * PAGE_SIZE),
+				    &third_allocated_page);
+	failures += test_expect_ptr("remove first after rehash",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+	failures += test_expect_ptr("remove third after rehash",
+				    plane_vm_object_remove_page(&test_object,
+								2 * PAGE_SIZE),
+				    &third_allocated_page);
+	return failures;
+}
+
+static int test_resident_hash_rehome_rejects_invalid_buckets(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("rehome null buckets",
+				     plane_vm_object_rehome_resident_hash(
+					     NULL, TEST_REHASH_BUCKETS),
+				     false);
+	failures += test_expect_bool("rehome zero buckets",
+				     plane_vm_object_rehome_resident_hash(
+					     rehash_buckets, 0),
+				     false);
+	failures += test_expect_bool("rehome non power two buckets",
+				     plane_vm_object_rehome_resident_hash(
+					     rehash_buckets,
+					     TEST_REHASH_BUCKETS - 1),
+				     false);
+	failures += test_expect_bool("object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("insert page before overlap",
+				     plane_vm_object_insert_page(
+					     &test_object, 0,
+					     &allocated_page),
+				     true);
+	failures += test_expect_bool("rehome valid buckets",
+				     plane_vm_object_rehome_resident_hash(
+					     rehash_buckets,
+					     TEST_REHASH_BUCKETS),
+				     true);
+	failures += test_expect_bool("rehome overlapping buckets",
+				     plane_vm_object_rehome_resident_hash(
+					     &rehash_buckets[1],
+					     TEST_REHASH_BUCKETS / 2),
+				     false);
+	failures += test_expect_ptr("overlap rejection preserved lookup",
+				    plane_vm_object_lookup_page(&test_object, 0),
+				    &allocated_page);
+	return failures;
+}
+
 static int test_insert_tracks_wired_page_count(void)
 {
 	int failures = 0;
@@ -1102,6 +1263,7 @@ int main(void)
 		TEST_CASE(test_allocate_rejects_invalid_inputs),
 		TEST_CASE(test_allocate_initializes_internal_object),
 		TEST_CASE(test_allocate_final_deallocate_releases_pool_slot),
+		TEST_CASE(test_allocate_uses_added_zone_storage_after_bootstrap_pool),
 		TEST_CASE(test_allocate_deallocate_nonfinal_reference),
 		TEST_CASE(test_allocate_final_deallocate_rejects_resident_pages),
 		TEST_CASE(test_reference_rejects_invalid_objects),
@@ -1113,6 +1275,8 @@ int main(void)
 		TEST_CASE(test_insert_lookup_and_remove_page),
 		TEST_CASE(test_lookup_small_object_scans_resident_list),
 		TEST_CASE(test_lookup_large_object_uses_hash),
+		TEST_CASE(test_resident_hash_rehome_preserves_existing_pages),
+		TEST_CASE(test_resident_hash_rehome_rejects_invalid_buckets),
 		TEST_CASE(test_insert_tracks_wired_page_count),
 		TEST_CASE(test_guard_page_insert_lookup_and_remove),
 		TEST_CASE(test_guard_page_rejects_wire_backed_assumptions),

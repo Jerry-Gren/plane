@@ -10,11 +10,18 @@
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
+#include "vm_object_internal.h"
+#include "vm_zone_internal.h"
+
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
+#define PLANE_KERNEL_MAP_RUNTIME_ENTRIES 256
+#define PLANE_VM_OBJECT_RUNTIME_POOL_SIZE 512
+#define PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS 512
 
 static struct plane_vm_map_entry kernel_map_entries[PLANE_KERNEL_MAP_MAX_ENTRIES];
 static struct plane_vm_map kernel_map;
 static struct plane_vm_object kernel_object;
+static struct plane_vm_zone_segment kernel_object_runtime_segment;
 static bool kmem_initialized;
 
 static bool kmem_size_to_pages(uint64_t size, uint64_t *page_count)
@@ -94,6 +101,49 @@ static uint32_t kmem_prot_to_map_flags(uint32_t prot)
 	}
 
 	return map_flags;
+}
+
+static bool expand_kmem_metadata(void)
+{
+	struct plane_vm_map_entry *runtime_entries;
+	struct plane_vm_object *runtime_objects;
+	struct plane_page **runtime_hash;
+
+	BUILD_BUG_ON(PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS == 0);
+	BUILD_BUG_ON((PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS &
+		      (PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS - 1)) != 0);
+
+	if (!plane_kmem_alloc(sizeof(runtime_entries[0]) *
+			      PLANE_KERNEL_MAP_RUNTIME_ENTRIES,
+			      PLANE_KMEM_ALLOC_ZERO,
+			      (void **)&runtime_entries)) {
+		return false;
+	}
+	if (!plane_vm_map_rehome_entries(&kernel_map, runtime_entries,
+					 PLANE_KERNEL_MAP_RUNTIME_ENTRIES)) {
+		return false;
+	}
+
+	if (!plane_kmem_alloc(sizeof(runtime_objects[0]) *
+			      PLANE_VM_OBJECT_RUNTIME_POOL_SIZE,
+			      PLANE_KMEM_ALLOC_ZERO,
+			      (void **)&runtime_objects)) {
+		return false;
+	}
+	if (!plane_vm_object_add_zone_storage(runtime_objects,
+					      PLANE_VM_OBJECT_RUNTIME_POOL_SIZE,
+					      &kernel_object_runtime_segment)) {
+		return false;
+	}
+
+	if (!plane_kmem_alloc(sizeof(runtime_hash[0]) *
+			      PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS,
+			      PLANE_KMEM_ALLOC_ZERO,
+			      (void **)&runtime_hash)) {
+		return false;
+	}
+	return plane_vm_object_rehome_resident_hash(
+		runtime_hash, PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS);
 }
 
 static bool release_mapped_page(struct plane_vm_object *object,
@@ -311,6 +361,10 @@ bool plane_kmem_init(void)
 		   "failed to initialize kernel object");
 
 	kmem_initialized = true;
+	if (!expand_kmem_metadata()) {
+		kmem_initialized = false;
+		return false;
+	}
 	return true;
 }
 

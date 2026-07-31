@@ -8,6 +8,7 @@
 
 #include "vm_object_internal.h"
 #include "vm_page_internal.h"
+#include "vm_zone_internal.h"
 
 /*
  * Early fixed-size resident hash. XNU sizes vm_page_buckets from managed
@@ -22,8 +23,65 @@
 #define PLANE_VM_OBJECT_HASH_LOOKUP_THRESHOLD 10
 #define PLANE_VM_OBJECT_POOL_SIZE 256
 
-static struct plane_page *resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
-static struct plane_vm_object object_pool[PLANE_VM_OBJECT_POOL_SIZE];
+static struct plane_page *bootstrap_resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
+static struct plane_page **resident_hash = bootstrap_resident_hash;
+static uint64_t resident_hash_bucket_count = PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS;
+static struct plane_vm_object bootstrap_object_pool[PLANE_VM_OBJECT_POOL_SIZE];
+static struct plane_vm_zone_segment bootstrap_object_segment;
+static struct plane_vm_zone object_zone;
+
+static bool ensure_object_zone(void)
+{
+	if (object_zone.initialized) {
+		return true;
+	}
+
+	return plane_vm_zone_init(&object_zone, sizeof(bootstrap_object_pool[0]),
+				  bootstrap_object_pool,
+				  PLANE_VM_OBJECT_POOL_SIZE,
+				  &bootstrap_object_segment);
+}
+
+static bool pointer_array_range(struct plane_page **buckets,
+				uint64_t bucket_count,
+				uintptr_t *start,
+				uintptr_t *end)
+{
+	uint64_t bytes;
+	uintptr_t base = (uintptr_t)buckets;
+
+	if (buckets == NULL ||
+	    start == NULL ||
+	    end == NULL ||
+	    !plane_checked_mul_u64((uint64_t)sizeof(buckets[0]),
+				   bucket_count, &bytes) ||
+	    bytes > UINTPTR_MAX - base) {
+		return false;
+	}
+
+	*start = base;
+	*end = base + (uintptr_t)bytes;
+	return true;
+}
+
+static bool pointer_array_ranges_overlap(struct plane_page **first,
+					 uint64_t first_count,
+					 struct plane_page **second,
+					 uint64_t second_count)
+{
+	uintptr_t first_start;
+	uintptr_t first_end;
+	uintptr_t second_start;
+	uintptr_t second_end;
+
+	if (!pointer_array_range(first, first_count, &first_start, &first_end) ||
+	    !pointer_array_range(second, second_count,
+				 &second_start, &second_end)) {
+		return true;
+	}
+
+	return first_start < second_end && second_start < first_end;
+}
 
 static bool offset_valid(const struct plane_vm_object *object, uint64_t offset)
 {
@@ -49,7 +107,7 @@ static uint64_t resident_hash_index(const struct plane_vm_object *object,
 	uint64_t page_key = offset / PAGE_SIZE;
 
 	return (object_key ^ page_key ^ (page_key >> 8)) &
-	       (PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS - 1);
+	       (resident_hash_bucket_count - 1);
 }
 
 static struct plane_page *find_page_in_hash(struct plane_vm_object *object,
@@ -310,6 +368,79 @@ bool plane_vm_object_page_became_unwired(struct plane_vm_object *object)
 	return true;
 }
 
+bool plane_vm_object_add_zone_storage(struct plane_vm_object *storage,
+				      uint64_t count,
+				      struct plane_vm_zone_segment *segment)
+{
+	return ensure_object_zone() &&
+	       plane_vm_zone_add_storage(&object_zone, storage, count, segment);
+}
+
+bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
+					  uint64_t bucket_count)
+{
+	struct plane_page **old_hash = resident_hash;
+	uint64_t old_bucket_count = resident_hash_bucket_count;
+
+	if (buckets == NULL || !plane_is_power_of_two_u64(bucket_count)) {
+		return false;
+	}
+	if (buckets == resident_hash) {
+		return bucket_count == resident_hash_bucket_count;
+	}
+	if (pointer_array_ranges_overlap(resident_hash,
+					 resident_hash_bucket_count,
+					 buckets, bucket_count)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < bucket_count; i++) {
+		buckets[i] = NULL;
+	}
+
+	resident_hash = buckets;
+	resident_hash_bucket_count = bucket_count;
+
+	for (uint64_t i = 0; i < old_bucket_count; i++) {
+		struct plane_page *page = old_hash[i];
+
+		while (page != NULL) {
+			struct plane_page *next =
+				plane_vm_page_object_hash_next(page);
+			struct plane_vm_object *object =
+				plane_vm_page_object(page);
+			uint64_t offset;
+			uint64_t index;
+
+			BUG_ON_MSG(!plane_vm_page_object_offset(page, &offset),
+				   "hashed resident page missing object offset");
+			index = resident_hash_index(object, offset);
+			BUG_ON_MSG(!plane_vm_page_set_object_hash_next(
+					   page, resident_hash[index]),
+				   "failed to rehash resident page");
+			resident_hash[index] = page;
+			page = next;
+		}
+		old_hash[i] = NULL;
+	}
+
+	return true;
+}
+
+void plane_vm_object_reset_bootstrap_for_tests(void)
+{
+	object_zone = (struct plane_vm_zone){0};
+	bootstrap_object_segment = (struct plane_vm_zone_segment){0};
+	for (uint64_t i = 0; i < PLANE_VM_OBJECT_POOL_SIZE; i++) {
+		bootstrap_object_pool[i] = (struct plane_vm_object){0};
+	}
+	for (uint64_t i = 0; i < PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS; i++) {
+		bootstrap_resident_hash[i] = NULL;
+	}
+	resident_hash = bootstrap_resident_hash;
+	resident_hash_bucket_count = PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS;
+}
+
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit)
 {
@@ -343,39 +474,35 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 bool plane_vm_object_allocate(uint64_t offset_limit,
 			      struct plane_vm_object **object)
 {
-	BUILD_BUG_ON(PLANE_VM_OBJECT_POOL_SIZE == 0);
+	struct plane_vm_object *candidate;
 
 	if (object == NULL ||
 	    offset_limit == 0 ||
-	    !plane_is_page_aligned(offset_limit)) {
+	    !plane_is_page_aligned(offset_limit) ||
+	    !ensure_object_zone()) {
 		return false;
 	}
 
-	for (uint64_t i = 0; i < PLANE_VM_OBJECT_POOL_SIZE; i++) {
-		struct plane_vm_object *candidate = &object_pool[i];
-
-		if (candidate->initialized) {
-			continue;
-		}
-
-		*candidate = (struct plane_vm_object){
-			.offset_limit = offset_limit,
-			.ref_count = 1,
-			.resident_page_count = 0,
-			.wired_page_count = 0,
-			.resident_head = NULL,
-			.resident_tail = NULL,
-			.resident_hint = NULL,
-			.alive = true,
-			.internal = true,
-			.allocated = true,
-			.initialized = true,
-		};
-		*object = candidate;
-		return true;
+	candidate = plane_vm_zone_alloc(&object_zone);
+	if (candidate == NULL) {
+		return false;
 	}
 
-	return false;
+	*candidate = (struct plane_vm_object){
+		.offset_limit = offset_limit,
+		.ref_count = 1,
+		.resident_page_count = 0,
+		.wired_page_count = 0,
+		.resident_head = NULL,
+		.resident_tail = NULL,
+		.resident_hint = NULL,
+		.alive = true,
+		.internal = true,
+		.allocated = true,
+		.initialized = true,
+	};
+	*object = candidate;
+	return true;
 }
 
 bool plane_vm_object_reference(struct plane_vm_object *object)
@@ -409,8 +536,7 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	}
 
 	if (object->allocated) {
-		*object = (struct plane_vm_object){0};
-		return true;
+		return plane_vm_zone_free(&object_zone, object);
 	}
 
 	object->ref_count = 0;

@@ -11,9 +11,11 @@
 #define TEST_KERNEL_MAP_PAGES 256
 #define TEST_KERNEL_MAP_SIZE (TEST_KERNEL_MAP_PAGES * PAGE_SIZE)
 #define TEST_MAP_ENTRIES 128
+#define TEST_REHOME_MAP_ENTRIES 160
 #define TEST_VM_OBJECT_POOL_SIZE 256
 
 static struct plane_vm_map_entry test_entries[TEST_MAP_ENTRIES];
+static struct plane_vm_map_entry rehome_entries[TEST_REHOME_MAP_ENTRIES];
 static struct plane_vm_map test_map;
 static struct plane_vm_object test_object;
 static struct plane_vm_object second_test_object;
@@ -157,6 +159,9 @@ static void reset_vm_map_test(void)
 	}
 	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
 		test_entries[i] = (struct plane_vm_map_entry){0};
+	}
+	for (uint64_t i = 0; i < TEST_REHOME_MAP_ENTRIES; i++) {
+		rehome_entries[i] = (struct plane_vm_map_entry){0};
 	}
 }
 
@@ -378,6 +383,109 @@ static int test_init_is_one_shot_in_production_mode(void)
 	failures += check_stats("oneshot stats preserved",
 				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
 
+	return failures;
+}
+
+static int test_rehome_entries_rejects_invalid_inputs(void)
+{
+	struct plane_vm_map_stats before;
+	int failures = 0;
+
+	failures += test_expect_bool("rehome null map",
+				     plane_vm_map_rehome_entries(
+					     NULL, rehome_entries,
+					     TEST_REHOME_MAP_ENTRIES),
+				     false);
+	failures += test_expect_bool("rehome uninitialized map",
+				     plane_vm_map_rehome_entries(
+					     &test_map, rehome_entries,
+					     TEST_REHOME_MAP_ENTRIES),
+				     false);
+	failures += test_expect_bool("rehome init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("rehome null entries",
+				     plane_vm_map_rehome_entries(
+					     &test_map, NULL,
+					     TEST_REHOME_MAP_ENTRIES),
+				     false);
+	failures += test_expect_bool("rehome shrink capacity",
+				     plane_vm_map_rehome_entries(
+					     &test_map, rehome_entries,
+					     TEST_MAP_ENTRIES - 1),
+				     false);
+	failures += test_expect_bool("rehome same storage no-op",
+				     plane_vm_map_rehome_entries(
+					     &test_map, test_entries,
+					     TEST_MAP_ENTRIES),
+				     true);
+	failures += test_expect_bool("rehome overlapping storage",
+				     plane_vm_map_rehome_entries(
+					     &test_map, &test_entries[1],
+					     TEST_MAP_ENTRIES),
+				     false);
+	failures += test_expect_u64("rehome invalid free unchanged",
+				    plane_vm_map_get_stats(&test_map).free_pages,
+				    before.free_pages);
+	return failures;
+}
+
+static int test_rehome_entries_preserves_map_behavior(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	struct plane_vm_map_stats before;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("rehome behavior init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("rehome behavior enter first",
+				     test_map_enter_pages(&test_map, 4, &first),
+				     true);
+	failures += test_expect_bool("rehome behavior enter second",
+				     test_map_enter_pages(&test_map, 2, &second),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("rehome behavior move",
+				     plane_vm_map_rehome_entries(
+					     &test_map, rehome_entries,
+					     TEST_REHOME_MAP_ENTRIES),
+				     true);
+	failures += test_expect_bool("rehome lookup first",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 4, &info),
+				     true);
+	failures += test_expect_u64("rehome first object ref",
+				    plane_vm_object_ref_count(info.object), 1);
+	failures += test_expect_bool("rehome protect clipped middle",
+				     plane_vm_map_protect_pages(
+					     &test_map, first + PAGE_SIZE, 2,
+					     PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_bool("rehome wire clipped middle",
+				     plane_vm_map_wire_pages(
+					     &test_map, first + PAGE_SIZE, 1),
+				     true);
+	failures += test_expect_bool("rehome unwire clipped middle",
+				     plane_vm_map_unwire_pages(
+					     &test_map, first + PAGE_SIZE, 1),
+				     true);
+	failures += test_expect_bool("rehome free second",
+				     plane_vm_map_free_pages(&test_map,
+							     second, 2),
+				     true);
+	failures += test_expect_u64("rehome reserved after free",
+				    plane_vm_map_get_stats(&test_map).reserved_pages,
+				    before.reserved_pages - 2);
 	return failures;
 }
 
@@ -3483,6 +3591,8 @@ int main(void)
 		TEST_CASE(test_rejects_invalid_init),
 		TEST_CASE(test_init_stats),
 		TEST_CASE(test_init_is_one_shot_in_production_mode),
+		TEST_CASE(test_rehome_entries_rejects_invalid_inputs),
+		TEST_CASE(test_rehome_entries_preserves_map_behavior),
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_anywhere_enter_allocates_anonymous_object),
 		TEST_CASE(test_fixed_enter_allocates_anonymous_object),

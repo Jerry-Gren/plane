@@ -98,6 +98,13 @@ bool plane_vm_map_init(struct plane_vm_map *map,
 		       uint64_t base,
 		       uint64_t size);
 /*
+ * Move map-owned entry metadata into caller-provided storage. Existing entry
+ * indices are preserved; the old storage remains caller-owned.
+ */
+bool plane_vm_map_rehome_entries(struct plane_vm_map *map,
+				 struct plane_vm_map_entry *entries,
+				 uint64_t entry_capacity);
+/*
  * Enter stores one object reference in the map entry. A NULL object creates an
  * anonymous internal object and transfers its initial reference to the entry.
  */

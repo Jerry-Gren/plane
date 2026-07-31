@@ -98,6 +98,48 @@ static void reset_map(struct plane_vm_map *map,
 	reset_entries(entries, entry_capacity);
 }
 
+static bool entry_storage_range(const struct plane_vm_map_entry *entries,
+				uint64_t entry_capacity,
+				uintptr_t *start,
+				uintptr_t *end)
+{
+	uint64_t bytes;
+	uintptr_t base = (uintptr_t)entries;
+
+	if (entries == NULL ||
+	    start == NULL ||
+	    end == NULL ||
+	    !plane_checked_mul_u64((uint64_t)sizeof(entries[0]),
+				   entry_capacity, &bytes) ||
+	    bytes > UINTPTR_MAX - base) {
+		return false;
+	}
+
+	*start = base;
+	*end = base + (uintptr_t)bytes;
+	return true;
+}
+
+static bool entry_storage_overlaps(const struct plane_vm_map_entry *first,
+				   uint64_t first_capacity,
+				   const struct plane_vm_map_entry *second,
+				   uint64_t second_capacity)
+{
+	uintptr_t first_start;
+	uintptr_t first_end;
+	uintptr_t second_start;
+	uintptr_t second_end;
+
+	if (!entry_storage_range(first, first_capacity,
+				 &first_start, &first_end) ||
+	    !entry_storage_range(second, second_capacity,
+				 &second_start, &second_end)) {
+		return true;
+	}
+
+	return first_start < second_end && second_start < first_end;
+}
+
 static int64_t alloc_entry_index(struct plane_vm_map *map)
 {
 	for (uint64_t i = 0; i < map->entry_capacity; i++) {
@@ -851,6 +893,36 @@ bool plane_vm_map_init(struct plane_vm_map *map,
 	map->base = base;
 	map->end = end;
 	map->initialized = true;
+	return true;
+}
+
+bool plane_vm_map_rehome_entries(struct plane_vm_map *map,
+				 struct plane_vm_map_entry *entries,
+				 uint64_t entry_capacity)
+{
+	if (map == NULL ||
+	    !map->initialized ||
+	    entries == NULL ||
+	    entry_capacity < map->entry_capacity) {
+		return false;
+	}
+	if (entries == map->entries) {
+		return entry_capacity == map->entry_capacity;
+	}
+	if (entry_storage_overlaps(map->entries, map->entry_capacity,
+				   entries, entry_capacity)) {
+		return false;
+	}
+
+	reset_entries(entries, entry_capacity);
+	for (uint64_t i = 0; i < map->entry_capacity; i++) {
+		if (map->entries[i].used) {
+			entries[i] = map->entries[i];
+		}
+	}
+
+	map->entries = entries;
+	map->entry_capacity = entry_capacity;
 	return true;
 }
 

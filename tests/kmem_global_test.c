@@ -3,6 +3,7 @@
 
 #include <hal/mmu.h>
 #include <plane/kmem.h>
+#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
@@ -10,12 +11,12 @@
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
 
-#define TEST_KMEM_BASE 0xffff900000000000ull
-#define TEST_KMEM_PAGES 16
+#define TEST_KMEM_PAGES 192
 #define TEST_KMEM_SIZE (TEST_KMEM_PAGES * PAGE_SIZE)
-#define TEST_PAGE_COUNT 16
+#define TEST_PAGE_COUNT 192
 #define TEST_GUARD_PAGE_COUNT 8
-#define TEST_MAP_COUNT 16
+#define TEST_MAP_COUNT 192
+#define TEST_SMALL_ALLOC_COUNT 130
 
 struct plane_page {
 	uint64_t phys_addr;
@@ -40,6 +41,7 @@ struct test_mapping {
 static struct plane_page test_pages[TEST_PAGE_COUNT];
 static struct plane_page test_guard_pages[TEST_GUARD_PAGE_COUNT];
 static struct test_mapping test_mappings[TEST_MAP_COUNT];
+static uint8_t test_kmem_storage[TEST_KMEM_SIZE] __aligned(PAGE_SIZE);
 
 static bool is_test_page(const struct plane_page *page)
 {
@@ -121,7 +123,7 @@ bool hal_mmu_kernel_vma_range(uint64_t *base, uint64_t *size)
 		return false;
 	}
 
-	*base = TEST_KMEM_BASE;
+	*base = (uint64_t)(uintptr_t)test_kmem_storage;
 	*size = TEST_KMEM_SIZE;
 	return true;
 }
@@ -479,25 +481,56 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 
 static int test_global_kmem_init_is_one_shot(void)
 {
+	void *small_allocs[TEST_SMALL_ALLOC_COUNT];
 	void *addr = NULL;
+	uint64_t init_allocated;
+	uint64_t init_mappings;
+	uint64_t init_wired;
 	int failures = 0;
 
+	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
+		small_allocs[i] = NULL;
+	}
+
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
+	init_allocated = allocated_page_count();
+	init_mappings = mapping_count();
+	init_wired = wired_page_count();
 	failures += test_expect_bool("global alloc",
 				     plane_kmem_alloc_pages(2, 0, &addr),
 				     true);
 	failures += test_expect_u64("global wired pages",
-				    wired_page_count(), 2);
+				    wired_page_count(), init_wired + 2);
 	failures += test_expect_bool("global repeat init",
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("global preserved free",
 				     plane_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("global free backing pages",
-				    allocated_page_count(), 0);
+				    allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global free wired pages",
-				    wired_page_count(), 0);
+				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global free mappings",
-				    mapping_count(), 0);
+				    mapping_count(), init_mappings);
+
+	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
+		failures += test_expect_bool("global small alloc",
+					     plane_kmem_alloc_pages(
+						     1, 0, &small_allocs[i]),
+					     true);
+	}
+	failures += test_expect_u64("global small allocated pages",
+				    allocated_page_count(),
+				    init_allocated + TEST_SMALL_ALLOC_COUNT);
+	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
+		failures += test_expect_bool("global small free",
+					     plane_kmem_free_pages(
+						     small_allocs[i], 1),
+					     true);
+	}
+	failures += test_expect_u64("global small free backing pages",
+				    allocated_page_count(), init_allocated);
+	failures += test_expect_u64("global small free mappings",
+				    mapping_count(), init_mappings);
 	return failures;
 }
 
