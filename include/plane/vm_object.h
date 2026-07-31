@@ -15,6 +15,9 @@
  * early page accounting only; they are not object references, pager
  * accounting, ledgers, or pageout state.
  * internal is reserved for the later internal-vs-external object split.
+ * allocated marks storage owned by the early fixed object pool. Allocate
+ * returns one lifetime reference, mirroring XNU's object-zone allocation
+ * boundary in a fixed early pool.
  *
  * A plane_vm_object must be zero-initialized before its first init call.
  */
@@ -31,9 +34,12 @@ struct plane_vm_object {
 	struct plane_page *resident_hint;
 	bool alive;
 	bool internal;
+	bool allocated;
 	bool initialized;
 };
 
+bool plane_vm_object_allocate(uint64_t offset_limit,
+			      struct plane_vm_object **object);
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit);
 bool plane_vm_object_reference(struct plane_vm_object *object);

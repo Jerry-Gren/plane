@@ -11,11 +11,13 @@
 #define TEST_KERNEL_MAP_PAGES 256
 #define TEST_KERNEL_MAP_SIZE (TEST_KERNEL_MAP_PAGES * PAGE_SIZE)
 #define TEST_MAP_ENTRIES 128
+#define TEST_VM_OBJECT_POOL_SIZE 256
 
 static struct plane_vm_map_entry test_entries[TEST_MAP_ENTRIES];
 static struct plane_vm_map test_map;
 static struct plane_vm_object test_object;
 static struct plane_vm_object second_test_object;
+static struct plane_vm_object test_object_pool[TEST_VM_OBJECT_POOL_SIZE];
 
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit)
@@ -32,9 +34,41 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 		.ref_count = 1,
 		.alive = true,
 		.internal = true,
+		.allocated = false,
 		.initialized = true,
 	};
 	return true;
+}
+
+bool plane_vm_object_allocate(uint64_t offset_limit,
+			      struct plane_vm_object **object)
+{
+	if (object == NULL ||
+	    offset_limit == 0 ||
+	    !plane_is_page_aligned(offset_limit)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < TEST_VM_OBJECT_POOL_SIZE; i++) {
+		struct plane_vm_object *candidate = &test_object_pool[i];
+
+		if (candidate->initialized) {
+			continue;
+		}
+
+		*candidate = (struct plane_vm_object){
+			.offset_limit = offset_limit,
+			.ref_count = 1,
+			.alive = true,
+			.internal = true,
+			.allocated = true,
+			.initialized = true,
+		};
+		*object = candidate;
+		return true;
+	}
+
+	return false;
 }
 
 bool plane_vm_object_reference(struct plane_vm_object *object)
@@ -64,6 +98,11 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	if (object->resident_page_count != 0 ||
 	    object->wired_page_count != 0) {
 		return false;
+	}
+
+	if (object->allocated) {
+		*object = (struct plane_vm_object){0};
+		return true;
 	}
 
 	object->ref_count = 0;
@@ -113,6 +152,9 @@ static void reset_vm_map_test(void)
 	test_map = (struct plane_vm_map){0};
 	test_object = (struct plane_vm_object){0};
 	second_test_object = (struct plane_vm_object){0};
+	for (uint64_t i = 0; i < TEST_VM_OBJECT_POOL_SIZE; i++) {
+		test_object_pool[i] = (struct plane_vm_object){0};
+	}
 	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
 		test_entries[i] = (struct plane_vm_map_entry){0};
 	}
@@ -233,6 +275,33 @@ static int check_stats(const char *name,
 	return failures;
 }
 
+static int check_anonymous_object(const char *name,
+				  const struct plane_vm_map_allocation_info *info,
+				  uint64_t offset_limit)
+{
+	int failures = 0;
+
+	failures += test_expect_not_null(name, info->object);
+	if (info->object == NULL) {
+		return failures;
+	}
+
+	failures += test_expect_u64("anonymous object offset",
+				    info->object_offset, 0);
+	failures += test_expect_u64("anonymous object ref count",
+				    plane_vm_object_ref_count(info->object), 1);
+	failures += test_expect_u64("anonymous object limit",
+				    plane_vm_object_offset_limit(info->object),
+				    offset_limit);
+	failures += test_expect_bool("anonymous object alive",
+				     info->object->alive, true);
+	failures += test_expect_bool("anonymous object internal",
+				     info->object->internal, true);
+	failures += test_expect_bool("anonymous object allocated",
+				     info->object->allocated, true);
+	return failures;
+}
+
 static int test_init_stats(void)
 {
 	int failures = 0;
@@ -337,6 +406,242 @@ static int test_alloc_and_free_pages(void)
 				     plane_vm_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	failures += check_stats("free stats", TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
+	return failures;
+}
+
+static int test_anywhere_enter_allocates_anonymous_object(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("anonymous anywhere init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("anonymous anywhere enter",
+				     test_map_enter_pages(&test_map, 2, &vaddr),
+				     true);
+	failures += test_expect_bool("anonymous anywhere lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 2, &info),
+				     true);
+	failures += check_anonymous_object("anonymous anywhere object",
+					   &info, 2 * PAGE_SIZE);
+	failures += test_expect_bool("anonymous anywhere free",
+				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     true);
+	return failures;
+}
+
+static int test_fixed_enter_allocates_anonymous_object(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("anonymous fixed init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("anonymous fixed enter",
+				     test_map_enter_fixed(
+					     page_vaddr(4), 3, 1, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &vaddr),
+				     true);
+	failures += test_expect_bool("anonymous fixed lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 3, &info),
+				     true);
+	failures += check_anonymous_object("anonymous fixed object",
+					   &info, 3 * PAGE_SIZE);
+	failures += test_expect_u64("anonymous fixed reserved start",
+				    info.reserved_start, page_vaddr(3));
+	failures += test_expect_bool("anonymous fixed free",
+				     plane_vm_map_free_pages(&test_map, vaddr, 3),
+				     true);
+	return failures;
+}
+
+static int test_free_releases_anonymous_object_slot(void)
+{
+	struct plane_vm_map_allocation_info first_info = {0};
+	struct plane_vm_map_allocation_info second_info = {0};
+	struct plane_vm_object *first_object;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("anonymous free init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("anonymous free first",
+				     test_map_enter_pages(&test_map, 1, &first),
+				     true);
+	failures += test_expect_bool("anonymous free first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, &first_info),
+				     true);
+	first_object = first_info.object;
+	failures += test_expect_bool("anonymous free release",
+				     plane_vm_map_free_pages(&test_map, first, 1),
+				     true);
+	failures += test_expect_bool("anonymous free second",
+				     test_map_enter_pages(&test_map, 1, &second),
+				     true);
+	failures += test_expect_bool("anonymous free second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, &second_info),
+				     true);
+	failures += test_expect_ptr("anonymous free reused object slot",
+				    second_info.object, first_object);
+	failures += test_expect_bool("anonymous free cleanup",
+				     plane_vm_map_free_pages(&test_map,
+							     second, 1),
+				     true);
+	return failures;
+}
+
+static int test_delete_releases_anonymous_object_slot(void)
+{
+	struct plane_vm_map_allocation_info first_info = {0};
+	struct plane_vm_map_allocation_info second_info = {0};
+	struct plane_vm_object *first_object;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("anonymous delete init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("anonymous delete first",
+				     test_map_enter_fixed(
+					     page_vaddr(2), 1, 1, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &first),
+				     true);
+	failures += test_expect_bool("anonymous delete first lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, &first_info),
+				     true);
+	first_object = first_info.object;
+	failures += test_expect_bool("anonymous delete range",
+				     plane_vm_map_delete_range(&test_map,
+							       page_vaddr(1),
+							       3),
+				     true);
+	failures += test_expect_bool("anonymous delete second",
+				     test_map_enter_pages(&test_map, 1, &second),
+				     true);
+	failures += test_expect_bool("anonymous delete second lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, &second_info),
+				     true);
+	failures += test_expect_ptr("anonymous delete reused object slot",
+				    second_info.object, first_object);
+	return failures;
+}
+
+static int test_overwrite_releases_old_anonymous_object_slot(void)
+{
+	struct plane_vm_map_allocation_info old_info = {0};
+	struct plane_vm_map_allocation_info new_info = {0};
+	struct plane_vm_map_allocation_info reuse_info = {0};
+	struct plane_vm_object *old_object;
+	uint64_t old_vaddr = 0;
+	uint64_t new_vaddr = 0;
+	uint64_t reuse_vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("anonymous overwrite init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("anonymous overwrite old",
+				     test_map_enter_fixed(
+					     page_vaddr(2), 1, 0, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &old_vaddr),
+				     true);
+	failures += test_expect_bool("anonymous overwrite old lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, old_vaddr, 1, &old_info),
+				     true);
+	old_object = old_info.object;
+	failures += test_expect_bool("anonymous overwrite new",
+				     test_map_enter_fixed(
+					     page_vaddr(2), 2, 0, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED |
+					     PLANE_VM_MAP_ENTER_OVERWRITE,
+					     &new_vaddr),
+				     true);
+	failures += test_expect_bool("anonymous overwrite new lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, new_vaddr, 2, &new_info),
+				     true);
+	failures += check_anonymous_object("anonymous overwrite new object",
+					   &new_info, 2 * PAGE_SIZE);
+	failures += test_expect_bool("anonymous overwrite reuse enter",
+				     test_map_enter_fixed(
+					     page_vaddr(10), 1, 0, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &reuse_vaddr),
+				     true);
+	failures += test_expect_bool("anonymous overwrite reuse lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, reuse_vaddr, 1,
+					     &reuse_info),
+				     true);
+	failures += test_expect_ptr("anonymous overwrite old slot reused",
+				    reuse_info.object, old_object);
+	return failures;
+}
+
+static int test_anonymous_allocation_failure_keeps_map_state(void)
+{
+	struct plane_vm_object *objects[TEST_VM_OBJECT_POOL_SIZE];
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_VM_OBJECT_POOL_SIZE; i++) {
+		objects[i] = NULL;
+		failures += test_expect_bool("anonymous pool fill",
+					     plane_vm_object_allocate(
+						     PAGE_SIZE, &objects[i]),
+					     true);
+	}
+
+	failures += test_expect_bool("anonymous exhausted init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("anonymous exhausted enter",
+				     test_map_enter_pages(&test_map, 1, &vaddr),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("anonymous exhausted free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("anonymous exhausted count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
 	return failures;
 }
 
@@ -2053,7 +2358,7 @@ static int test_object_allocation_failures_keep_ref_count(void)
 				     plane_vm_map_init(&small_map, small_entries,
 						       TEST_ARRAY_SIZE(small_entries),
 						       TEST_KERNEL_MAP_BASE,
-						       PAGE_SIZE),
+						       2 * PAGE_SIZE),
 				     true);
 	failures += test_expect_bool("object failure init",
 				     plane_vm_object_init(&test_object,
@@ -2061,7 +2366,7 @@ static int test_object_allocation_failures_keep_ref_count(void)
 				     true);
 	failures += test_expect_bool("object failure no space",
 				     test_map_enter_pages_object(
-					     &small_map, 2, 0, &test_object, 0,
+					     &small_map, 3, 0, &test_object, 0,
 					     PLANE_VM_PROT_DEFAULT,
 					     PLANE_VM_PROT_ALL, &vaddr),
 				     false);
@@ -2085,7 +2390,7 @@ static int test_object_allocation_failures_keep_ref_count(void)
 					     PAGE_SIZE, PLANE_VM_PROT_DEFAULT,
 					     PLANE_VM_PROT_ALL, &vaddr),
 				     false);
-	failures += test_expect_u64("object failure ref unchanged",
+	failures += test_expect_u64("object failure ref rollback",
 				    plane_vm_object_ref_count(&test_object), 2);
 	return failures;
 }
@@ -2184,6 +2489,12 @@ int main(void)
 		TEST_CASE(test_init_stats),
 		TEST_CASE(test_init_is_one_shot_in_production_mode),
 		TEST_CASE(test_alloc_and_free_pages),
+		TEST_CASE(test_anywhere_enter_allocates_anonymous_object),
+		TEST_CASE(test_fixed_enter_allocates_anonymous_object),
+		TEST_CASE(test_free_releases_anonymous_object_slot),
+		TEST_CASE(test_delete_releases_anonymous_object_slot),
+		TEST_CASE(test_overwrite_releases_old_anonymous_object_slot),
+		TEST_CASE(test_anonymous_allocation_failure_keeps_map_state),
 		TEST_CASE(test_rejects_invalid_alloc_and_free),
 		TEST_CASE(test_rejects_exhausted_vaddr_space),
 		TEST_CASE(test_rejects_exhausted_entries),

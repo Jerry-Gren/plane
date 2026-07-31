@@ -20,8 +20,10 @@
  * sets, a short object-list scan is cheaper than hash lookup machinery.
  */
 #define PLANE_VM_OBJECT_HASH_LOOKUP_THRESHOLD 10
+#define PLANE_VM_OBJECT_POOL_SIZE 256
 
 static struct plane_page *resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
+static struct plane_vm_object object_pool[PLANE_VM_OBJECT_POOL_SIZE];
 
 static bool offset_valid(const struct plane_vm_object *object, uint64_t offset)
 {
@@ -332,9 +334,48 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 		.resident_hint = NULL,
 		.alive = true,
 		.internal = true,
+		.allocated = false,
 		.initialized = true,
 	};
 	return true;
+}
+
+bool plane_vm_object_allocate(uint64_t offset_limit,
+			      struct plane_vm_object **object)
+{
+	BUILD_BUG_ON(PLANE_VM_OBJECT_POOL_SIZE == 0);
+
+	if (object == NULL ||
+	    offset_limit == 0 ||
+	    !plane_is_page_aligned(offset_limit)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < PLANE_VM_OBJECT_POOL_SIZE; i++) {
+		struct plane_vm_object *candidate = &object_pool[i];
+
+		if (candidate->initialized) {
+			continue;
+		}
+
+		*candidate = (struct plane_vm_object){
+			.offset_limit = offset_limit,
+			.ref_count = 1,
+			.resident_page_count = 0,
+			.wired_page_count = 0,
+			.resident_head = NULL,
+			.resident_tail = NULL,
+			.resident_hint = NULL,
+			.alive = true,
+			.internal = true,
+			.allocated = true,
+			.initialized = true,
+		};
+		*object = candidate;
+		return true;
+	}
+
+	return false;
 }
 
 bool plane_vm_object_reference(struct plane_vm_object *object)
@@ -365,6 +406,11 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	    object->resident_tail != NULL ||
 	    object->resident_hint != NULL) {
 		return false;
+	}
+
+	if (object->allocated) {
+		*object = (struct plane_vm_object){0};
+		return true;
 	}
 
 	object->ref_count = 0;

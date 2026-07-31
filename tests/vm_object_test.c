@@ -294,6 +294,8 @@ static int test_init_is_one_shot(void)
 				     true);
 	failures += test_expect_bool("object init internal",
 				     test_object.internal, true);
+	failures += test_expect_bool("object init caller owned",
+				     test_object.allocated, false);
 	failures += test_expect_u64("object init offset limit",
 				    plane_vm_object_offset_limit(&test_object),
 				    TEST_OBJECT_SIZE);
@@ -301,6 +303,144 @@ static int test_init_is_one_shot(void)
 				     plane_vm_object_init(&test_object,
 							  TEST_OBJECT_SIZE),
 				     false);
+	return failures;
+}
+
+static int test_allocate_rejects_invalid_inputs(void)
+{
+	struct plane_vm_object *object = &test_object;
+	int failures = 0;
+
+	failures += test_expect_bool("object allocate null out",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      NULL),
+				     false);
+	failures += test_expect_bool("object allocate zero size",
+				     plane_vm_object_allocate(0, &object),
+				     false);
+	failures += test_expect_bool("object allocate unaligned size",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE - 1,
+							      &object),
+				     false);
+	failures += test_expect_ptr("object allocate invalid out unchanged",
+				    object, &test_object);
+	return failures;
+}
+
+static int test_allocate_initializes_internal_object(void)
+{
+	struct plane_vm_object *object = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("object allocate",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      &object),
+				     true);
+	failures += test_expect_not_null("object allocated pointer", object);
+	failures += test_expect_u64("object allocated ref count",
+				    plane_vm_object_ref_count(object), 1);
+	failures += test_expect_bool("object allocated alive",
+				     plane_vm_object_is_alive(object), true);
+	failures += test_expect_bool("object allocated internal",
+				     object->internal, true);
+	failures += test_expect_bool("object allocated storage",
+				     object->allocated, true);
+	failures += test_expect_u64("object allocated offset limit",
+				    plane_vm_object_offset_limit(object),
+				    TEST_OBJECT_SIZE);
+	failures += test_expect_bool("object allocated deallocate",
+				     plane_vm_object_deallocate(object), true);
+	return failures;
+}
+
+static int test_allocate_final_deallocate_releases_pool_slot(void)
+{
+	struct plane_vm_object *first = NULL;
+	struct plane_vm_object *second = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("object allocate first",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      &first),
+				     true);
+	failures += test_expect_bool("object allocate first release",
+				     plane_vm_object_deallocate(first), true);
+	failures += test_expect_bool("object allocate second",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      &second),
+				     true);
+	failures += test_expect_ptr("object allocate reused slot",
+				    second, first);
+	failures += test_expect_bool("object allocate second alive",
+				     plane_vm_object_is_alive(second), true);
+	failures += test_expect_bool("object allocate second storage",
+				     second->allocated, true);
+	failures += test_expect_bool("object allocate second release",
+				     plane_vm_object_deallocate(second), true);
+	return failures;
+}
+
+static int test_allocate_deallocate_nonfinal_reference(void)
+{
+	struct plane_vm_object *object = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("object allocate",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      &object),
+				     true);
+	failures += test_expect_bool("object allocated reference",
+				     plane_vm_object_reference(object), true);
+	failures += test_expect_bool("object allocated deallocate nonfinal",
+				     plane_vm_object_deallocate(object), true);
+	failures += test_expect_u64("object allocated nonfinal ref",
+				    plane_vm_object_ref_count(object), 1);
+	failures += test_expect_bool("object allocated nonfinal alive",
+				     plane_vm_object_is_alive(object), true);
+	failures += test_expect_bool("object allocated deallocate final",
+				     plane_vm_object_deallocate(object), true);
+	return failures;
+}
+
+static int test_allocate_final_deallocate_rejects_resident_pages(void)
+{
+	struct plane_vm_object *object = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("object allocate",
+				     plane_vm_object_allocate(TEST_OBJECT_SIZE,
+							      &object),
+				     true);
+	failures += test_expect_bool("object allocated insert",
+				     plane_vm_object_insert_page(object, 0,
+								 &allocated_page),
+				     true);
+	failures += test_expect_bool("object allocated deallocate resident",
+				     plane_vm_object_deallocate(object), false);
+	failures += test_expect_bool("object allocated resident alive",
+				     plane_vm_object_is_alive(object), true);
+	failures += test_expect_bool("object allocated resident storage",
+				     object->allocated, true);
+	failures += test_expect_u64("object allocated resident ref",
+				    plane_vm_object_ref_count(object), 1);
+	failures += test_expect_ptr("object allocated resident remove",
+				    plane_vm_object_remove_page(object, 0),
+				    &allocated_page);
+	allocated_page.wire_count = 1;
+	failures += test_expect_bool("object allocated insert wired",
+				     plane_vm_object_insert_page(object, 0,
+								 &allocated_page),
+				     true);
+	failures += test_expect_bool("object allocated deallocate wired",
+				     plane_vm_object_deallocate(object), false);
+	failures += test_expect_u64("object allocated wired count",
+				    plane_vm_object_wired_page_count(object), 1);
+	failures += test_expect_ptr("object allocated wired remove",
+				    plane_vm_object_remove_page(object, 0),
+				    &allocated_page);
+	allocated_page.wire_count = 0;
+	failures += test_expect_bool("object allocated deallocate final",
+				     plane_vm_object_deallocate(object), true);
 	return failures;
 }
 
@@ -959,6 +1099,11 @@ int main(void)
 	const struct test_case cases[] = {
 		TEST_CASE(test_init_rejects_invalid_inputs),
 		TEST_CASE(test_init_is_one_shot),
+		TEST_CASE(test_allocate_rejects_invalid_inputs),
+		TEST_CASE(test_allocate_initializes_internal_object),
+		TEST_CASE(test_allocate_final_deallocate_releases_pool_slot),
+		TEST_CASE(test_allocate_deallocate_nonfinal_reference),
+		TEST_CASE(test_allocate_final_deallocate_rejects_resident_pages),
 		TEST_CASE(test_reference_rejects_invalid_objects),
 		TEST_CASE(test_deallocate_nonfinal_reference),
 		TEST_CASE(test_deallocate_final_empty_object),

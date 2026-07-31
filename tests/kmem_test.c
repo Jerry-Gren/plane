@@ -648,6 +648,12 @@ static int test_alloc_and_free_pages(void)
 				     true);
 	failures += test_expect_u64("alloc map wired count",
 				    info.wired_count, 1);
+	failures += test_expect_ptr("alloc map explicit object",
+				    info.object, &test_object);
+	failures += test_expect_bool("alloc map object caller owned",
+				     info.object->allocated, false);
+	failures += test_expect_u64("alloc map object offset",
+				    info.object_offset, TEST_KMEM_BASE);
 	failures += test_expect_ptr("alloc object first page",
 				    plane_vm_object_lookup_page(&test_object,
 								TEST_KMEM_BASE),

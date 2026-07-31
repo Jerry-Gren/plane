@@ -332,6 +332,7 @@ static void zap_dispose(struct plane_vm_map *map, struct vm_map_zap *zap)
 {
 	uint64_t current = zap->head;
 
+	/* XNU-like zap disposal: release entry object refs after map unlink. */
 	while (current != VM_MAP_ENTRY_NONE) {
 		uint64_t next = map->entries[current].next;
 
@@ -465,6 +466,7 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 	uint64_t entry_object_offset;
 	struct vm_map_delete_plan delete_plan = {0};
 	struct vm_map_zap zap;
+	struct plane_vm_object *entry_object;
 	bool fixed;
 	bool overwrite;
 
@@ -484,6 +486,7 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 
 	fixed = (options->flags & PLANE_VM_MAP_ENTER_FIXED) != 0;
 	overwrite = (options->flags & PLANE_VM_MAP_ENTER_OVERWRITE) != 0;
+	entry_object = options->object;
 	entry_object_offset = options->object_offset;
 	zap_init(&zap);
 
@@ -531,24 +534,31 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 		}
 	}
 
-	entry_index = alloc_entry_index(map);
-	if ((!overwrite || delete_plan.count == 0) && entry_index < 0) {
-		return false;
-	}
-
-	if (options->object != NULL &&
+	if (entry_object != NULL &&
 	    options->object_offset == PLANE_VM_MAP_OBJECT_OFFSET_AUTO) {
 		entry_object_offset = user_start;
 	}
 
-	if (options->object != NULL &&
-	    !object_range_valid(options->object, entry_object_offset,
+	if (entry_object != NULL &&
+	    !object_range_valid(entry_object, entry_object_offset,
 				options->page_count)) {
 		return false;
 	}
 
-	if (options->object != NULL &&
-	    !plane_vm_object_reference(options->object)) {
+	if (entry_object != NULL &&
+	    !plane_vm_object_reference(entry_object)) {
+		return false;
+	}
+	if (entry_object == NULL) {
+		if (!plane_vm_object_allocate(user_size, &entry_object)) {
+			return false;
+		}
+		entry_object_offset = 0;
+	}
+
+	entry_index = alloc_entry_index(map);
+	if ((!overwrite || delete_plan.count == 0) && entry_index < 0) {
+		plane_vm_object_deallocate(entry_object);
 		return false;
 	}
 
@@ -556,10 +566,14 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 		zap_detach_range(map, &delete_plan, &zap);
 		entry_index = (int64_t)zap.reusable;
 		zap_dispose(map, &zap);
+		if (entry_index < 0) {
+			plane_vm_object_deallocate(entry_object);
+			return false;
+		}
 	}
 
 	insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,
-		     options->object, entry_object_offset, options->prot,
+		     entry_object, entry_object_offset, options->prot,
 		     options->max_prot, prev, next);
 	*vaddr = user_start;
 	return true;
