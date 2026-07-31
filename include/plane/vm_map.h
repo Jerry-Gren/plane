@@ -24,7 +24,8 @@ struct plane_vm_object;
  *
  * Protection and max_protection are entry attribute foundations. Plane
  * supports XNU-like current protection updates and the shrinking subset of
- * vm_map_protect(set_maximum); pmap repair remains the caller's boundary.
+ * vm_map_protect(set_maximum); soft faults consume these attributes when
+ * repairing pmap state.
  */
 
 struct plane_vm_map_stats {
@@ -81,6 +82,15 @@ struct plane_vm_map_allocation_info {
 	uint32_t max_prot;
 };
 
+struct plane_vm_map_page_info {
+	uint64_t page_vaddr;
+	struct plane_vm_object *object;
+	uint64_t object_offset;
+	uint64_t wired_count;
+	uint32_t prot;
+	uint32_t max_prot;
+};
+
 struct plane_vm_map_enter_options {
 	uint64_t address;
 	uint64_t page_count;
@@ -125,6 +135,10 @@ bool plane_vm_map_lookup_allocation(
 	uint64_t vaddr,
 	uint64_t page_count,
 	struct plane_vm_map_allocation_info *info);
+/* Looks up the single user page containing vaddr; guard pages are holes. */
+bool plane_vm_map_lookup_page(struct plane_vm_map *map,
+			      uint64_t vaddr,
+			      struct plane_vm_map_page_info *info);
 /* Updates current protection metadata for a continuous user range. */
 bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 				uint64_t vaddr,

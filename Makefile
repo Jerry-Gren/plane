@@ -66,7 +66,10 @@ TEST_BINS := $(patsubst tests/%.c,build/tests/%,$(TEST_SRCS))
 PUBLIC_HEADERS := include/plane/*.h include/hal/*.h
 ARCH_TEST_HEADERS := include/hal/x86_64/*.h
 TEST_SUPPORT_HEADERS := tests/support/*.h
-INTERNAL_TEST_HEADERS := kernel/mm/vm_page_internal.h
+INTERNAL_TEST_HEADERS := \
+	kernel/mm/vm_object_internal.h \
+	kernel/mm/vm_page_internal.h \
+	kernel/mm/vm_zone_internal.h
 
 -include $(TEST_MKS)
 -include $(DEPS)

@@ -48,12 +48,6 @@ static bool kmem_flags_valid(uint32_t flags)
 			  PLANE_KMEM_ALLOC_READONLY)) == 0;
 }
 
-static bool kmem_prot_valid(uint32_t prot)
-{
-	return prot != PLANE_VM_PROT_NONE &&
-	       (prot & ~PLANE_VM_PROT_ALL) == 0;
-}
-
 static uint32_t kmem_to_vm_page_grab_flags(uint32_t flags)
 {
 	uint32_t grab_flags = 0;
@@ -534,7 +528,7 @@ bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,
 	    vaddr == NULL ||
 	    page_count == 0 ||
 	    !plane_is_page_aligned(addr) ||
-	    !kmem_prot_valid(prot)) {
+	    !plane_vm_prot_valid(prot)) {
 		return false;
 	}
 

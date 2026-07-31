@@ -576,6 +576,123 @@ static int test_fixed_enter_allocates_anonymous_object(void)
 	return failures;
 }
 
+static int test_lookup_page_uses_user_page_semantics(void)
+{
+	struct plane_vm_map_page_info info = {0};
+	uint64_t guarded = 0;
+	uint64_t plain = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("lookup page object init",
+				     plane_vm_object_init(&test_object,
+							  8 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("lookup page init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("lookup guarded enter",
+				     test_map_enter_fixed(
+					     page_vaddr(4), 2, 1,
+					     &test_object, PAGE_SIZE,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &guarded),
+				     true);
+	failures += test_expect_bool("lookup guard before rejected",
+				     plane_vm_map_lookup_page(
+					     &test_map, page_vaddr(3), &info),
+				     false);
+	failures += test_expect_bool("lookup guard after rejected",
+				     plane_vm_map_lookup_page(
+					     &test_map, page_vaddr(6), &info),
+				     false);
+	failures += test_expect_bool("lookup guarded user",
+				     plane_vm_map_lookup_page(
+					     &test_map, guarded + PAGE_SIZE + 17,
+					     &info),
+				     true);
+	failures += test_expect_u64("lookup page vaddr",
+				    info.page_vaddr, guarded + PAGE_SIZE);
+	failures += test_expect_ptr("lookup page object",
+				    info.object, &test_object);
+	failures += test_expect_u64("lookup page object offset",
+				    info.object_offset, 2 * PAGE_SIZE);
+	failures += test_expect_u64("lookup page wired",
+				    info.wired_count, 0);
+	failures += test_expect_u32("lookup page prot",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+
+	failures += test_expect_bool("lookup plain enter",
+				     test_map_enter_pages(&test_map, 1,
+							  &plain),
+				     true);
+	failures += test_expect_bool("lookup null info accepted",
+				     plane_vm_map_lookup_page(
+					     &test_map, plain, NULL),
+				     true);
+	return failures;
+}
+
+static int test_lookup_page_tracks_split_object_offsets(void)
+{
+	struct plane_vm_map_page_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("lookup split object init",
+				     plane_vm_object_init(&test_object,
+							  8 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("lookup split init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("lookup split enter",
+				     test_map_enter_pages_object(
+					     &test_map, 3, 0, &test_object,
+					     PAGE_SIZE, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_bool("lookup split protect middle",
+				     plane_vm_map_protect_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_bool("lookup split left",
+				     plane_vm_map_lookup_page(
+					     &test_map, vaddr + 11, &info),
+				     true);
+	failures += test_expect_u64("lookup split left offset",
+				    info.object_offset, PAGE_SIZE);
+	failures += test_expect_u32("lookup split left prot",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_bool("lookup split middle",
+				     plane_vm_map_lookup_page(
+					     &test_map,
+					     vaddr + PAGE_SIZE + 11,
+					     &info),
+				     true);
+	failures += test_expect_u64("lookup split middle offset",
+				    info.object_offset, 2 * PAGE_SIZE);
+	failures += test_expect_u32("lookup split middle prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool("lookup split right",
+				     plane_vm_map_lookup_page(
+					     &test_map,
+					     vaddr + 2 * PAGE_SIZE + 11,
+					     &info),
+				     true);
+	failures += test_expect_u64("lookup split right offset",
+				    info.object_offset, 3 * PAGE_SIZE);
+	failures += test_expect_u32("lookup split right prot",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	return failures;
+}
+
 static int test_free_releases_anonymous_object_slot(void)
 {
 	struct plane_vm_map_allocation_info first_info = {0};
@@ -3596,6 +3713,8 @@ int main(void)
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_anywhere_enter_allocates_anonymous_object),
 		TEST_CASE(test_fixed_enter_allocates_anonymous_object),
+		TEST_CASE(test_lookup_page_uses_user_page_semantics),
+		TEST_CASE(test_lookup_page_tracks_split_object_offsets),
 		TEST_CASE(test_free_releases_anonymous_object_slot),
 		TEST_CASE(test_delete_releases_anonymous_object_slot),
 		TEST_CASE(test_overwrite_releases_old_anonymous_object_slot),
