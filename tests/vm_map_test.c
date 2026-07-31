@@ -672,19 +672,121 @@ static int test_rejects_invalid_alloc_and_free(void)
 	failures += test_expect_bool("alloc valid",
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
-	failures += test_expect_bool("partial free rejected",
+	failures += test_expect_bool("partial free accepted",
 				     plane_vm_map_free_pages(&test_map, vaddr, 1),
-				     false);
-	failures += test_expect_bool("partial allocation absent",
+				     true);
+	failures += test_expect_bool("partial freed allocation absent",
 				     plane_vm_map_lookup_allocation(&test_map, vaddr, 1,
 									NULL),
 				     false);
-	failures += test_expect_bool("exact free accepted",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+	failures += test_expect_bool("partial remainder present",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     NULL),
+				     true);
+	failures += test_expect_bool("partial remainder free accepted",
+				     plane_vm_map_free_pages(&test_map,
+							     vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_bool("double free rejected",
 				     plane_vm_map_free_pages(&test_map, vaddr, 2),
 				     false);
+	return failures;
+}
+
+static int test_partial_free_clips_object_offsets_and_refs(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("partial object free init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("partial object init",
+				     plane_vm_object_init(&test_object,
+							  4 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("partial object enter",
+				     test_map_enter_pages_object(
+					     &test_map, 3, 0, &test_object, 0,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("partial object ref before",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool("partial object free middle",
+				     plane_vm_map_free_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1),
+				     true);
+	failures += test_expect_u64("partial object ref after",
+				    plane_vm_object_ref_count(&test_object), 3);
+	failures += test_expect_bool("partial object left lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 1, &info),
+				     true);
+	failures += test_expect_ptr("partial object left object",
+				    info.object, &test_object);
+	failures += test_expect_u64("partial object left offset",
+				    info.object_offset, 0);
+	failures += test_expect_bool("partial object middle absent",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     NULL),
+				     false);
+	failures += test_expect_bool("partial object right lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_ptr("partial object right object",
+				    info.object, &test_object);
+	failures += test_expect_u64("partial object right offset",
+				    info.object_offset, 2 * PAGE_SIZE);
+	failures += check_stats("partial object free stats",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 2, 2);
+	return failures;
+}
+
+static int test_partial_free_rejects_exhausted_split_entries(void)
+{
+	struct plane_vm_map_entry small_entries[2];
+	struct plane_vm_map small_map = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(small_entries); i++) {
+		small_entries[i] = (struct plane_vm_map_entry){0};
+	}
+	failures += test_expect_bool("free split exhausted init",
+				     plane_vm_map_init(&small_map, small_entries,
+						       TEST_ARRAY_SIZE(small_entries),
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("free split exhausted alloc",
+				     test_map_enter_pages(&small_map, 3, &vaddr),
+				     true);
+	before = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_bool("free split exhausted rejected",
+				     plane_vm_map_free_pages(
+					     &small_map, vaddr + PAGE_SIZE, 1),
+				     false);
+	after = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_u64("free split exhausted free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("free split exhausted count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool("free split exhausted preserved",
+				     plane_vm_map_lookup_allocation(
+					     &small_map, vaddr, 3, NULL),
+				     true);
 	return failures;
 }
 
@@ -1008,9 +1110,8 @@ static int test_delete_range_rejects_invalid_ranges(void)
 	return failures;
 }
 
-static int test_delete_range_rejects_partial_overlap(void)
+static int test_delete_range_clips_partial_overlap(void)
 {
-	struct plane_vm_map_stats before;
 	struct plane_vm_map_stats after;
 	uint64_t vaddr = 0;
 	int failures = 0;
@@ -1027,19 +1128,57 @@ static int test_delete_range_rejects_partial_overlap(void)
 					     PLANE_VM_MAP_ENTER_FIXED,
 					     &vaddr),
 				     true);
-	before = plane_vm_map_get_stats(&test_map);
-	failures += test_expect_bool("delete partial rejected",
+	failures += test_expect_bool("delete partial accepted",
 				     plane_vm_map_delete_range(&test_map,
 							       page_vaddr(3),
 							       1),
+				     true);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("delete partial free updated",
+				    after.free_pages, TEST_KERNEL_MAP_PAGES - 1);
+	failures += test_expect_u64("delete partial count clipped",
+				    after.allocation_count, 1);
+	failures += test_expect_bool("delete partial old absent",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 2, NULL),
+				     false);
+	failures += test_expect_bool("delete partial remainder preserved",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 1, NULL),
+				     true);
+	return failures;
+}
+
+static int test_delete_range_rejects_guarded_partial_overlap(void)
+{
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("delete guard partial init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("delete guard partial enter",
+				     test_map_enter_pages_protected_max(
+					     &test_map, 2, 1,
+					     PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("delete guard partial rejected",
+				     plane_vm_map_delete_range(&test_map, vaddr, 1),
 				     false);
 	after = plane_vm_map_get_stats(&test_map);
-	failures += test_expect_u64("delete partial free unchanged",
+	failures += test_expect_u64("delete guard partial free unchanged",
 				    after.free_pages, before.free_pages);
-	failures += test_expect_u64("delete partial count unchanged",
+	failures += test_expect_u64("delete guard partial count unchanged",
 				    after.allocation_count,
 				    before.allocation_count);
-	failures += test_expect_bool("delete partial allocation preserved",
+	failures += test_expect_bool("delete guard partial preserved",
 				     plane_vm_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     true);
@@ -1849,6 +1988,144 @@ static int test_protect_pages_updates_exact_allocation(void)
 	return failures;
 }
 
+static int test_protect_pages_clips_middle_fragment(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("protect middle init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("protect middle alloc",
+				     test_map_enter_pages(&test_map, 3, &vaddr),
+				     true);
+	failures += test_expect_bool("protect middle",
+				     plane_vm_map_protect_pages(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_bool("protect left lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 1, &info),
+				     true);
+	failures += test_expect_u32("protect left unchanged",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_bool("protect middle lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_u32("protect middle readonly",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool("protect right lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
+					     &info),
+				     true);
+	failures += test_expect_u32("protect right unchanged",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_bool("protect original absent",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, vaddr, 3, NULL),
+				     false);
+	failures += check_stats("protect middle stats",
+				TEST_KERNEL_MAP_PAGES - 3, 3, 3, 1, 3);
+	return failures;
+}
+
+static int test_protect_pages_rejects_hole_in_range(void)
+{
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("protect hole init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("protect hole first",
+				     test_map_enter_fixed(
+					     page_vaddr(0), 1, 0, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &first),
+				     true);
+	failures += test_expect_bool("protect hole second",
+				     test_map_enter_fixed(
+					     page_vaddr(2), 1, 0, NULL, 0,
+					     PLANE_VM_MAP_ENTER_FIXED,
+					     &second),
+				     true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool("protect hole rejected",
+				     plane_vm_map_protect_pages(
+					     &test_map, first, 3,
+					     PLANE_VM_PROT_READ),
+				     false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("protect hole free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("protect hole count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool("protect hole first preserved",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, first, 1, NULL),
+				     true);
+	failures += test_expect_bool("protect hole second preserved",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, second, 1, NULL),
+				     true);
+	return failures;
+}
+
+static int test_protect_pages_rejects_exhausted_split_entries(void)
+{
+	struct plane_vm_map_entry small_entries[2];
+	struct plane_vm_map small_map = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(small_entries); i++) {
+		small_entries[i] = (struct plane_vm_map_entry){0};
+	}
+	failures += test_expect_bool("protect split exhausted init",
+				     plane_vm_map_init(&small_map, small_entries,
+						       TEST_ARRAY_SIZE(small_entries),
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("protect split exhausted alloc",
+				     test_map_enter_pages(&small_map, 3, &vaddr),
+				     true);
+	before = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_bool("protect split exhausted rejected",
+				     plane_vm_map_protect_pages(
+					     &small_map, vaddr + PAGE_SIZE, 1,
+					     PLANE_VM_PROT_READ),
+				     false);
+	after = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_u64("protect split exhausted free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("protect split exhausted count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool("protect split exhausted preserved",
+				     plane_vm_map_lookup_allocation(
+					     &small_map, vaddr, 3, NULL),
+				     true);
+	return failures;
+}
+
 static int test_protect_pages_rejects_invalid_ranges(void)
 {
 	struct plane_vm_map_allocation_info info = {0};
@@ -1869,24 +2146,36 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 				     plane_vm_map_protect_pages(&test_map, vaddr, 2,
 								    BIT(8)),
 				     false);
-	failures += test_expect_bool("protect rejects partial",
+	failures += test_expect_bool("protect accepts partial",
 				     plane_vm_map_protect_pages(&test_map,
 					     vaddr, 1, PLANE_VM_PROT_READ),
-				     false);
+				     true);
 	failures += test_expect_bool("protect rejects absent",
 				     plane_vm_map_protect_pages(&test_map,
 					     page_vaddr(10), 1,
 					     PLANE_VM_PROT_READ),
 				     false);
-	failures += test_expect_bool("protect unchanged lookup",
+	failures += test_expect_bool("protect old full lookup absent",
 				     plane_vm_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
+				     false);
+	failures += test_expect_bool("protect partial lookup",
+				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+								       1,
+								       &info),
 				     true);
-	failures += test_expect_u32("protect unchanged prot",
+	failures += test_expect_u32("protect partial prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool(
+		"protect remainder lookup",
+		plane_vm_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE, 1,
+					       &info),
+		true);
+	failures += test_expect_u32("protect remainder prot",
 				    info.prot, PLANE_VM_PROT_DEFAULT);
 	failures += check_stats("protect reject stats",
-				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 2);
 	return failures;
 }
 
@@ -2496,6 +2785,8 @@ int main(void)
 		TEST_CASE(test_overwrite_releases_old_anonymous_object_slot),
 		TEST_CASE(test_anonymous_allocation_failure_keeps_map_state),
 		TEST_CASE(test_rejects_invalid_alloc_and_free),
+		TEST_CASE(test_partial_free_clips_object_offsets_and_refs),
+		TEST_CASE(test_partial_free_rejects_exhausted_split_entries),
 		TEST_CASE(test_rejects_exhausted_vaddr_space),
 		TEST_CASE(test_rejects_exhausted_entries),
 		TEST_CASE(test_first_fit_reuses_lowest_hole),
@@ -2505,7 +2796,8 @@ int main(void)
 		TEST_CASE(test_delete_range_removes_guarded_entry),
 		TEST_CASE(test_delete_range_empty_hole_is_noop),
 		TEST_CASE(test_delete_range_rejects_invalid_ranges),
-		TEST_CASE(test_delete_range_rejects_partial_overlap),
+		TEST_CASE(test_delete_range_clips_partial_overlap),
+		TEST_CASE(test_delete_range_rejects_guarded_partial_overlap),
 		TEST_CASE(test_delete_range_rejects_wired_entry),
 		TEST_CASE(test_delete_range_rejects_object_ref_release_failure),
 		TEST_CASE(test_delete_range_releases_object_reference),
@@ -2524,6 +2816,9 @@ int main(void)
 		TEST_CASE(test_protected_alloc_accepts_write_only_protection),
 		TEST_CASE(test_protected_guarded_alloc_keeps_user_range_semantics),
 		TEST_CASE(test_protect_pages_updates_exact_allocation),
+		TEST_CASE(test_protect_pages_clips_middle_fragment),
+		TEST_CASE(test_protect_pages_rejects_hole_in_range),
+		TEST_CASE(test_protect_pages_rejects_exhausted_split_entries),
 		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
 		TEST_CASE(test_wire_pages_updates_exact_allocation),
 		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
