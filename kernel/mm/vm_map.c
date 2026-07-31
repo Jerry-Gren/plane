@@ -501,6 +501,49 @@ static bool find_delete_range(struct plane_vm_map *map,
 	return true;
 }
 
+static bool apply_protect_user_range(struct plane_vm_map *map,
+				     uint64_t start,
+				     uint64_t end,
+				     const struct vm_map_range_plan *plan,
+				     uint32_t prot,
+				     bool set_max)
+{
+	uint64_t current = plan->first;
+
+	while (current != VM_MAP_ENTRY_NONE) {
+		uint64_t next;
+		struct plane_vm_map_entry *entry = &map->entries[current];
+
+		if (start > entry->user_start && start < entry->user_end &&
+		    !clip_entry_start(map, current, start)) {
+			return false;
+		}
+
+		entry = &map->entries[current];
+		if (end > entry->user_start && end < entry->user_end &&
+		    !clip_entry_end(map, current, end)) {
+			return false;
+		}
+
+		entry = &map->entries[current];
+		if (entry->user_start >= start && entry->user_end <= end) {
+			if (set_max) {
+				entry->max_prot = prot;
+				entry->prot &= prot;
+			} else {
+				entry->prot = prot;
+			}
+		}
+		if (entry->user_end >= end) {
+			break;
+		}
+		next = entry->next;
+		current = next;
+	}
+
+	return true;
+}
+
 static bool find_fixed_position(struct plane_vm_map *map,
 				uint64_t start,
 				uint64_t *prev,
@@ -948,7 +991,6 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 	struct vm_map_range_plan plan;
 	uint64_t size;
 	uint64_t end;
-	uint64_t current;
 
 	if (map == NULL ||
 	    !map->initialized ||
@@ -962,34 +1004,31 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	current = plan.first;
-	while (current != VM_MAP_ENTRY_NONE) {
-		uint64_t next;
-		struct plane_vm_map_entry *entry = &map->entries[current];
+	return apply_protect_user_range(map, vaddr, end, &plan, prot, false);
+}
 
-		if (vaddr > entry->user_start && vaddr < entry->user_end &&
-		    !clip_entry_start(map, current, vaddr)) {
-			return false;
-		}
+bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
+				    uint64_t vaddr,
+				    uint64_t page_count,
+				    uint32_t max_prot)
+{
+	struct vm_map_range_plan plan;
+	uint64_t size;
+	uint64_t end;
 
-		entry = &map->entries[current];
-		if (end > entry->user_start && end < entry->user_end &&
-		    !clip_entry_end(map, current, end)) {
-			return false;
-		}
-
-		entry = &map->entries[current];
-		if (entry->user_start >= vaddr && entry->user_end <= end) {
-			entry->prot = prot;
-		}
-		if (entry->user_end >= end) {
-			break;
-		}
-		next = entry->next;
-		current = next;
+	if (map == NULL ||
+	    !map->initialized ||
+	    page_count == 0 ||
+	    !plane_is_page_aligned(vaddr) ||
+	    !prot_valid(max_prot) ||
+	    !plane_checked_page_offset(page_count, &size) ||
+	    !plane_checked_add_u64(vaddr, size, &end) ||
+	    !map_range_contains(map, vaddr, end) ||
+	    !plan_protect_user_range(map, vaddr, end, max_prot, &plan)) {
+		return false;
 	}
 
-	return true;
+	return apply_protect_user_range(map, vaddr, end, &plan, max_prot, true);
 }
 
 bool plane_vm_map_wire_pages(struct plane_vm_map *map,

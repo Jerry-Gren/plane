@@ -2179,6 +2179,345 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 	return failures;
 }
 
+static int test_protect_max_pages_updates_exact_allocation(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"protect max exact init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("protect max exact alloc",
+				     test_map_enter_pages(&test_map, 2, &vaddr),
+				     true);
+	failures += test_expect_bool(
+		"protect max exact readonly",
+		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+					       PLANE_VM_PROT_READ),
+		true);
+	failures += test_expect_bool(
+		"protect max exact lookup",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		true);
+	failures += test_expect_u32("protect max exact current",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect max exact max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool(
+		"protect max rejects current write",
+		plane_vm_map_protect_pages(&test_map, vaddr, 2,
+					   PLANE_VM_PROT_WRITE),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects raise",
+		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+					       PLANE_VM_PROT_ALL),
+		false);
+	failures += test_expect_bool(
+		"protect max exact lookup unchanged",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		true);
+	failures += test_expect_u32("protect max unchanged current",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect max unchanged max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	return failures;
+}
+
+static int test_protect_max_pages_clips_object_offsets_and_refs(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"protect max object init map",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("protect max object init",
+				     plane_vm_object_init(&test_object,
+							  4 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"protect max object enter",
+		test_map_enter_pages_object(&test_map, 3, 0, &test_object, 0,
+					    PLANE_VM_PROT_DEFAULT,
+					    PLANE_VM_PROT_ALL, &vaddr),
+		true);
+	failures += test_expect_u64("protect max object ref before",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool(
+		"protect max object middle",
+		plane_vm_map_protect_max_pages(&test_map, vaddr + PAGE_SIZE,
+					       1, PLANE_VM_PROT_READ),
+		true);
+	failures += test_expect_u64("protect max object ref after",
+				    plane_vm_object_ref_count(&test_object), 4);
+	failures += test_expect_bool(
+		"protect max object full absent",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 3, NULL),
+		false);
+	failures += test_expect_bool(
+		"protect max object left",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 1, &info),
+		true);
+	failures += test_expect_ptr("protect max object left object",
+				    info.object, &test_object);
+	failures += test_expect_u64("protect max object left offset",
+				    info.object_offset, 0);
+	failures += test_expect_u32("protect max object left prot",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_u32("protect max object left max",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	failures += test_expect_bool(
+		"protect max object middle lookup",
+		plane_vm_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE,
+					       1, &info),
+		true);
+	failures += test_expect_ptr("protect max object middle object",
+				    info.object, &test_object);
+	failures += test_expect_u64("protect max object middle offset",
+				    info.object_offset, PAGE_SIZE);
+	failures += test_expect_u32("protect max object middle prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect max object middle max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool(
+		"protect max object right",
+		plane_vm_map_lookup_allocation(&test_map,
+					       vaddr + 2 * PAGE_SIZE, 1,
+					       &info),
+		true);
+	failures += test_expect_ptr("protect max object right object",
+				    info.object, &test_object);
+	failures += test_expect_u64("protect max object right offset",
+				    info.object_offset, 2 * PAGE_SIZE);
+	failures += test_expect_u32("protect max object right prot",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_u32("protect max object right max",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	failures += check_stats("protect max object stats",
+				TEST_KERNEL_MAP_PAGES - 3, 3, 3, 1, 3);
+	return failures;
+}
+
+static int test_protect_max_pages_updates_contiguous_entries(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"protect max contiguous init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool(
+		"protect max contiguous first",
+		test_map_enter_fixed(page_vaddr(0), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &first),
+		true);
+	failures += test_expect_bool(
+		"protect max contiguous second",
+		test_map_enter_fixed(page_vaddr(1), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &second),
+		true);
+	failures += test_expect_bool(
+		"protect max contiguous range",
+		plane_vm_map_protect_max_pages(&test_map, first, 2,
+					       PLANE_VM_PROT_READ),
+		true);
+	failures += test_expect_bool(
+		"protect max contiguous first lookup",
+		plane_vm_map_lookup_allocation(&test_map, first, 1, &info),
+		true);
+	failures += test_expect_u32("protect max contiguous first prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect max contiguous first max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	failures += test_expect_bool(
+		"protect max contiguous second lookup",
+		plane_vm_map_lookup_allocation(&test_map, second, 1, &info),
+		true);
+	failures += test_expect_u32("protect max contiguous second prot",
+				    info.prot, PLANE_VM_PROT_READ);
+	failures += test_expect_u32("protect max contiguous second max",
+				    info.max_prot, PLANE_VM_PROT_READ);
+	failures += check_stats("protect max contiguous stats",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 2);
+	return failures;
+}
+
+static int test_protect_max_pages_rejects_hole_in_range(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"protect max hole init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool(
+		"protect max hole first",
+		test_map_enter_fixed(page_vaddr(0), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &first),
+		true);
+	failures += test_expect_bool(
+		"protect max hole second",
+		test_map_enter_fixed(page_vaddr(2), 1, 0, NULL, 0,
+				     PLANE_VM_MAP_ENTER_FIXED, &second),
+		true);
+	before = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_bool(
+		"protect max hole rejected",
+		plane_vm_map_protect_max_pages(&test_map, first, 3,
+					       PLANE_VM_PROT_READ),
+		false);
+	after = plane_vm_map_get_stats(&test_map);
+	failures += test_expect_u64("protect max hole free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("protect max hole count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool(
+		"protect max hole first preserved",
+		plane_vm_map_lookup_allocation(&test_map, first, 1, &info),
+		true);
+	failures += test_expect_u32("protect max hole first max",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	failures += test_expect_bool(
+		"protect max hole second preserved",
+		plane_vm_map_lookup_allocation(&test_map, second, 1, &info),
+		true);
+	failures += test_expect_u32("protect max hole second max",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	return failures;
+}
+
+static int test_protect_max_pages_rejects_exhausted_split_entries(void)
+{
+	struct plane_vm_map_entry small_entries[2];
+	struct plane_vm_map small_map = {0};
+	struct plane_vm_map_allocation_info info = {0};
+	struct plane_vm_map_stats before;
+	struct plane_vm_map_stats after;
+	struct plane_vm_object *object = NULL;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(small_entries); i++) {
+		small_entries[i] = (struct plane_vm_map_entry){0};
+	}
+	failures += test_expect_bool(
+		"protect max split exhausted init",
+		plane_vm_map_init(&small_map, small_entries,
+				  TEST_ARRAY_SIZE(small_entries),
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("protect max split exhausted alloc",
+				     test_map_enter_pages(&small_map, 3,
+							  &vaddr),
+				     true);
+	failures += test_expect_bool(
+		"protect max split exhausted lookup",
+		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		true);
+	object = info.object;
+	before = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_bool(
+		"protect max split exhausted rejected",
+		plane_vm_map_protect_max_pages(&small_map, vaddr + PAGE_SIZE,
+					       1, PLANE_VM_PROT_READ),
+		false);
+	after = plane_vm_map_get_stats(&small_map);
+	failures += test_expect_u64("protect max split free unchanged",
+				    after.free_pages, before.free_pages);
+	failures += test_expect_u64("protect max split count unchanged",
+				    after.allocation_count,
+				    before.allocation_count);
+	failures += test_expect_bool(
+		"protect max split preserved",
+		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		true);
+	failures += test_expect_u32("protect max split max unchanged",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	failures += test_expect_u64("protect max split ref unchanged",
+				    plane_vm_object_ref_count(object), 1);
+	return failures;
+}
+
+static int test_protect_max_pages_rejects_invalid_ranges(void)
+{
+	struct plane_vm_map_allocation_info info = {0};
+	uint64_t overflow_addr = UINT64_MAX - PAGE_SIZE + 1;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"protect max reject init",
+		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
+		true);
+	failures += test_expect_bool("protect max reject alloc",
+				     test_map_enter_pages(&test_map, 2, &vaddr),
+				     true);
+	failures += test_expect_bool(
+		"protect max rejects null map",
+		plane_vm_map_protect_max_pages(NULL, vaddr, 2,
+					       PLANE_VM_PROT_READ),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects none",
+		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+					       PLANE_VM_PROT_NONE),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects unknown",
+		plane_vm_map_protect_max_pages(&test_map, vaddr, 2, BIT(8)),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects zero pages",
+		plane_vm_map_protect_max_pages(&test_map, vaddr, 0,
+					       PLANE_VM_PROT_READ),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects unaligned",
+		plane_vm_map_protect_max_pages(&test_map, vaddr + 1, 1,
+					       PLANE_VM_PROT_READ),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects overflow",
+		plane_vm_map_protect_max_pages(&test_map, overflow_addr, 2,
+					       PLANE_VM_PROT_READ),
+		false);
+	failures += test_expect_bool(
+		"protect max rejects absent",
+		plane_vm_map_protect_max_pages(&test_map, page_vaddr(10), 1,
+					       PLANE_VM_PROT_READ),
+		false);
+	failures += test_expect_bool(
+		"protect max reject lookup unchanged",
+		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		true);
+	failures += test_expect_u32("protect max reject prot unchanged",
+				    info.prot, PLANE_VM_PROT_DEFAULT);
+	failures += test_expect_u32("protect max reject max unchanged",
+				    info.max_prot, PLANE_VM_PROT_ALL);
+	failures += check_stats("protect max reject stats",
+				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 1, 1);
+	return failures;
+}
+
 static int test_wire_pages_updates_exact_allocation(void)
 {
 	struct plane_vm_map_allocation_info info = {0};
@@ -2820,6 +3159,12 @@ int main(void)
 		TEST_CASE(test_protect_pages_rejects_hole_in_range),
 		TEST_CASE(test_protect_pages_rejects_exhausted_split_entries),
 		TEST_CASE(test_protect_pages_rejects_invalid_ranges),
+		TEST_CASE(test_protect_max_pages_updates_exact_allocation),
+		TEST_CASE(test_protect_max_pages_clips_object_offsets_and_refs),
+		TEST_CASE(test_protect_max_pages_updates_contiguous_entries),
+		TEST_CASE(test_protect_max_pages_rejects_hole_in_range),
+		TEST_CASE(test_protect_max_pages_rejects_exhausted_split_entries),
+		TEST_CASE(test_protect_max_pages_rejects_invalid_ranges),
 		TEST_CASE(test_wire_pages_updates_exact_allocation),
 		TEST_CASE(test_wire_pages_rejects_invalid_ranges),
 		TEST_CASE(test_object_allocation_records_object_and_offset),

@@ -22,9 +22,9 @@ struct plane_vm_object;
  * virtual address ranges; physical backing and page-table mappings belong to
  * PMM and HAL/pmap.
  *
- * Protection and max_protection are entry attribute foundations. Explicit
- * max protection is allocation-time metadata, not a complete
- * vm_map_protect(set_maximum) implementation.
+ * Protection and max_protection are entry attribute foundations. Plane
+ * supports XNU-like current protection updates and the shrinking subset of
+ * vm_map_protect(set_maximum); pmap repair remains the caller's boundary.
  */
 
 struct plane_vm_map_stats {
@@ -118,11 +118,16 @@ bool plane_vm_map_lookup_allocation(
 	uint64_t vaddr,
 	uint64_t page_count,
 	struct plane_vm_map_allocation_info *info);
-/* Updates protection metadata for an exact user allocation range. */
+/* Updates current protection metadata for a continuous user range. */
 bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 				uint64_t vaddr,
 				uint64_t page_count,
 				uint32_t prot);
+/* Shrinks max protection metadata for a continuous user range. */
+bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
+				    uint64_t vaddr,
+				    uint64_t page_count,
+				    uint32_t max_prot);
 bool plane_vm_map_wire_pages(struct plane_vm_map *map,
 			     uint64_t vaddr,
 			     uint64_t page_count);
