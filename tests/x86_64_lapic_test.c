@@ -36,9 +36,9 @@ static uint32_t test_relax_count;
 
 #include "../hal/x86_64/lapic.c"
 
-static uint32_t reg_index(uint32_t offset)
+static uint32_t reg_index(enum x86_64_lapic_reg reg)
 {
-	return offset / sizeof(uint32_t);
+	return x86_64_lapic_mmio_offset(reg) / sizeof(uint32_t);
 }
 
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
@@ -140,13 +140,16 @@ void hal_irq_restore(plane_irq_state_t state)
 void hal_cpu_relax(void)
 {
 	test_relax_count++;
-	test_regs[reg_index(X86_64_LAPIC_ICR_LOW)] &= ~X86_64_LAPIC_ICR_PENDING;
+	test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)] &=
+		~X86_64_LAPIC_ICR_PENDING;
 }
 
 static void reset_lapic_test(void)
 {
 	memset(test_regs, 0, sizeof(test_regs));
 	memset(lapic_id_by_logical_id, 0, sizeof(lapic_id_by_logical_id));
+	test_regs[reg_index(X86_64_LAPIC_REG_VERSION)] =
+		X86_64_LAPIC_MIN_VERSION;
 	test_has_apic = true;
 	test_has_msr = true;
 	test_msr_write_should_fail = false;
@@ -170,6 +173,7 @@ static void reset_lapic_test(void)
 	lapic_mmio_base = plane_vaddr_make(0);
 	lapic_cpu_count = 0;
 	lapic_initialized = false;
+	lapic_write_flush_value = 0;
 }
 
 static bool build_topology(struct plane_smp_info *info)
@@ -288,6 +292,19 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	failures += test_expect_bool("wrong existing mapping rejected",
 				     hal_local_interrupt_init_bsp(&info),
 				     false);
+
+	reset_lapic_test();
+	failures += test_expect_bool("build topology",
+				     build_topology(&info), true);
+	test_regs[reg_index(X86_64_LAPIC_REG_VERSION)] =
+		X86_64_LAPIC_MIN_VERSION - 1;
+	failures += test_expect_bool("old lapic version rejected",
+				     hal_local_interrupt_init_bsp(&info),
+				     false);
+	failures += test_expect_bool("old version leaves uninitialized",
+				     lapic_initialized, false);
+	failures += test_expect_u32("old version does not write msr",
+				    test_msr_write_count, 0);
 	return failures;
 }
 
@@ -331,16 +348,17 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 				    test_msr_write_value,
 				    TEST_APIC_PHYS | X86_64_APIC_BASE_ENABLE);
 	failures += test_expect_u32("tpr accepts all",
-				    test_regs[reg_index(X86_64_LAPIC_TPR)], 0);
+				    test_regs[reg_index(X86_64_LAPIC_REG_TPR)],
+				    0);
 	failures += test_expect_u32("svr enabled",
-				    test_regs[reg_index(X86_64_LAPIC_SVR)],
+				    test_regs[reg_index(X86_64_LAPIC_REG_SVR)],
 				    X86_64_LAPIC_SPURIOUS_VECTOR |
 					    X86_64_LAPIC_SVR_ENABLE);
 	failures += test_expect_u32("timer masked",
-				    test_regs[reg_index(X86_64_LAPIC_LVT_TIMER)],
+				    test_regs[reg_index(X86_64_LAPIC_REG_LVT_TIMER)],
 				    X86_64_LAPIC_LVT_MASKED);
 	failures += test_expect_u32("lint0 masked",
-				    test_regs[reg_index(X86_64_LAPIC_LVT_LINT0)],
+				    test_regs[reg_index(X86_64_LAPIC_REG_LVT_LINT0)],
 				    X86_64_LAPIC_LVT_MASKED);
 	return failures;
 }
@@ -387,13 +405,13 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 	failures += test_expect_bool("bsp lapic init",
 				     hal_local_interrupt_init_bsp(&info),
 				     true);
-	test_regs[reg_index(X86_64_LAPIC_ID)] =
-		ap.physical_id << X86_64_LAPIC_ID_SHIFT;
+	test_regs[reg_index(X86_64_LAPIC_REG_ID)] =
+		(ap.physical_id << X86_64_LAPIC_ID_SHIFT) | 0x00ffffffu;
 	failures += test_expect_bool("ap lapic init",
 				     hal_local_interrupt_init_ap(&ap),
 				     true);
 	failures += test_expect_u32("ap svr configured",
-				    test_regs[reg_index(X86_64_LAPIC_SVR)],
+				    test_regs[reg_index(X86_64_LAPIC_REG_SVR)],
 				    X86_64_LAPIC_SPURIOUS_VECTOR |
 					    X86_64_LAPIC_SVR_ENABLE);
 
@@ -421,10 +439,16 @@ static int test_eoi_requires_initialization(void)
 	failures += test_expect_bool("bsp lapic init",
 				     hal_local_interrupt_init_bsp(&info),
 				     true);
-	test_regs[reg_index(X86_64_LAPIC_EOI)] = 0xfeedface;
+	test_regs[reg_index(X86_64_LAPIC_REG_ID)] =
+		0x22u << X86_64_LAPIC_ID_SHIFT;
+	test_regs[reg_index(X86_64_LAPIC_REG_EOI)] = 0xfeedface;
 	failures += test_expect_bool("eoi succeeds", hal_local_interrupt_eoi(), true);
 	failures += test_expect_u32("eoi written",
-				    test_regs[reg_index(X86_64_LAPIC_EOI)], 0);
+				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
+				    0);
+	failures += test_expect_u32("write flush read-back",
+				    lapic_write_flush_value,
+				    0x22u << X86_64_LAPIC_ID_SHIFT);
 	return failures;
 }
 
@@ -435,30 +459,35 @@ static int test_fixed_ipi_validates_and_writes_icr(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("ipi before init rejected",
-				     hal_local_interrupt_send_fixed_ipi(1, 0xf0), false);
+				     hal_local_interrupt_send_ipi(1, 0xf0),
+				     false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
 				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	failures += test_expect_bool("low vector rejected",
-				     hal_local_interrupt_send_fixed_ipi(1, 31), false);
+				     hal_local_interrupt_send_ipi(1, 31),
+				     false);
 	failures += test_expect_bool("bad cpu rejected",
-				     hal_local_interrupt_send_fixed_ipi(3, 0xf0), false);
+				     hal_local_interrupt_send_ipi(3, 0xf0),
+				     false);
 
-	test_regs[reg_index(X86_64_LAPIC_ICR_LOW)] = X86_64_LAPIC_ICR_PENDING;
+	test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)] =
+		X86_64_LAPIC_ICR_PENDING;
 	failures += test_expect_bool("send fixed ipi",
-				     hal_local_interrupt_send_fixed_ipi(2, 0xf0), true);
+				     hal_local_interrupt_send_ipi(2, 0xf0),
+				     true);
 	failures += test_expect_u32("waits while pending", test_relax_count, 1);
 	failures += test_expect_u32("irq saved", test_irq_save_count, 1);
 	failures += test_expect_u32("irq restored", test_irq_restore_count, 1);
 	failures += test_expect_bool("irq state restored", test_irq_enabled, true);
 	failures += test_expect_u32("icr high destination",
-				    test_regs[reg_index(X86_64_LAPIC_ICR_HIGH)],
-				    3u << X86_64_LAPIC_ICR_DEST_SHIFT);
+				    test_regs[reg_index(X86_64_LAPIC_REG_ICR_HIGH)],
+				    x86_64_lapic_icr_dest_high(3));
 	failures += test_expect_u32("icr low vector",
-				    test_regs[reg_index(X86_64_LAPIC_ICR_LOW)],
-				    0xf0);
+				    test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)],
+				    x86_64_lapic_icr_fixed_low(0xf0));
 	return failures;
 }
 

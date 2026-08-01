@@ -1,16 +1,17 @@
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include <hal/cpu.h>
 #include <hal/irq.h>
 #include <hal/local_interrupt.h>
 #include <hal/mmu.h>
 #include <hal/page.h>
-#include <hal/x86_64/arch_mmu.h>
 #include <hal/x86_64/cpu_features.h>
 #include <plane/address.h>
-#include <plane/bits.h>
 #include <plane/smp.h>
 
+#include "lapic_regs.h"
 #include "msr_internal.h"
 
 /*
@@ -19,60 +20,45 @@
  * later SMP milestones.
  */
 
-#define X86_64_MSR_APIC_BASE 0x1bu
-
-#define X86_64_APIC_BASE_X2APIC BIT_ULL(10)
-#define X86_64_APIC_BASE_ENABLE BIT_ULL(11)
-#define X86_64_APIC_BASE_ADDR   X86_64_PAGE_ENTRY_ADDR_MASK
-
-#define X86_64_LAPIC_ID              0x020u
-#define X86_64_LAPIC_TPR             0x080u
-#define X86_64_LAPIC_EOI             0x0b0u
-#define X86_64_LAPIC_SVR             0x0f0u
-#define X86_64_LAPIC_ICR_LOW         0x300u
-#define X86_64_LAPIC_ICR_HIGH        0x310u
-#define X86_64_LAPIC_LVT_TIMER       0x320u
-#define X86_64_LAPIC_LVT_THERMAL     0x330u
-#define X86_64_LAPIC_LVT_PERFCNT     0x340u
-#define X86_64_LAPIC_LVT_LINT0       0x350u
-#define X86_64_LAPIC_LVT_LINT1       0x360u
-#define X86_64_LAPIC_LVT_ERROR       0x370u
-
-#define X86_64_LAPIC_ID_SHIFT        24u
-#define X86_64_LAPIC_ICR_PENDING     BIT(12)
-#define X86_64_LAPIC_ICR_DM_FIXED    0x000u
-#define X86_64_LAPIC_ICR_DEST_SHIFT  24u
-#define X86_64_LAPIC_LVT_MASKED      BIT(16)
-#define X86_64_LAPIC_SVR_ENABLE      BIT(8)
-#define X86_64_LAPIC_SPURIOUS_VECTOR 0xffu
-#define X86_64_LAPIC_VECTOR_MIN      32u
-
 static plane_vaddr_t lapic_mmio_base;
 static uint32_t lapic_id_by_logical_id[PLANE_MAX_CPUS];
 static uint32_t lapic_cpu_count;
 static bool lapic_initialized;
+static volatile uint32_t lapic_write_flush_value;
 
 static bool lapic_id_valid(uint32_t lapic_id)
 {
-	return lapic_id <= UINT8_MAX;
+	return lapic_id <= X86_64_LAPIC_ID_MASK;
 }
 
-static volatile uint32_t *lapic_reg(uint32_t offset)
+static volatile uint32_t *lapic_reg(plane_vaddr_t base_addr,
+				    enum x86_64_lapic_reg reg)
 {
-	uint64_t base = plane_vaddr_raw(lapic_mmio_base);
+	uint64_t base = plane_vaddr_raw(base_addr);
 
-	return (volatile uint32_t *)(uintptr_t)(base + offset);
+	return (volatile uint32_t *)(uintptr_t)(
+		base + x86_64_lapic_mmio_offset(reg));
 }
 
-static uint32_t lapic_read(uint32_t offset)
+static uint32_t lapic_read_at(plane_vaddr_t base,
+			      enum x86_64_lapic_reg reg)
 {
-	return *lapic_reg(offset);
+	return *lapic_reg(base, reg);
 }
 
-static void lapic_write(uint32_t offset, uint32_t value)
+static uint32_t lapic_read(enum x86_64_lapic_reg reg)
 {
-	*lapic_reg(offset) = value;
-	lapic_read(X86_64_LAPIC_ID);
+	return lapic_read_at(lapic_mmio_base, reg);
+}
+
+static void lapic_write(enum x86_64_lapic_reg reg, uint32_t value)
+{
+	*lapic_reg(lapic_mmio_base, reg) = value;
+	/*
+	 * xAPIC registers are MMIO. Keep a conservative read-back after writes
+	 * so the store is posted before subsequent local-APIC programming.
+	 */
+	lapic_write_flush_value = lapic_read(X86_64_LAPIC_REG_ID);
 }
 
 static bool lapic_map_xapic_mmio(plane_paddr_t phys_base,
@@ -142,6 +128,10 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 	if (!lapic_map_xapic_mmio(phys_base, mmio_base)) {
 		return false;
 	}
+	if (!x86_64_lapic_version_supported(
+		    lapic_read_at(*mmio_base, X86_64_LAPIC_REG_VERSION))) {
+		return false;
+	}
 
 	if ((apic_base & X86_64_APIC_BASE_ENABLE) == 0) {
 		if (!x86_64_msr_write(X86_64_MSR_APIC_BASE,
@@ -155,15 +145,15 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 
 static void lapic_configure_current(void)
 {
-	lapic_write(X86_64_LAPIC_TPR, 0);
-	lapic_write(X86_64_LAPIC_LVT_TIMER, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_LVT_THERMAL, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_LVT_PERFCNT, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_LVT_LINT0, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_LVT_LINT1, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_LVT_ERROR, X86_64_LAPIC_LVT_MASKED);
-	lapic_write(X86_64_LAPIC_SVR,
-		    X86_64_LAPIC_SPURIOUS_VECTOR | X86_64_LAPIC_SVR_ENABLE);
+	lapic_write(X86_64_LAPIC_REG_TPR, 0);
+	lapic_write(X86_64_LAPIC_REG_LVT_TIMER, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_LVT_THERMAL, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_LVT_PERFCNT, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_LVT_LINT0, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_LVT_LINT1, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_LVT_ERROR, X86_64_LAPIC_LVT_MASKED);
+	lapic_write(X86_64_LAPIC_REG_SVR,
+		    x86_64_lapic_svr_enable(X86_64_LAPIC_SPURIOUS_VECTOR));
 }
 
 bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
@@ -213,7 +203,8 @@ bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 		return false;
 	}
 
-	local_lapic_id = lapic_read(X86_64_LAPIC_ID) >> X86_64_LAPIC_ID_SHIFT;
+	local_lapic_id =
+		x86_64_lapic_xapic_id(lapic_read(X86_64_LAPIC_REG_ID));
 	if (local_lapic_id != expected_lapic_id) {
 		return false;
 	}
@@ -228,31 +219,35 @@ bool hal_local_interrupt_eoi(void)
 		return false;
 	}
 
-	lapic_write(X86_64_LAPIC_EOI, 0);
+	lapic_write(X86_64_LAPIC_REG_EOI, 0);
 	return true;
 }
 
-bool hal_local_interrupt_send_fixed_ipi(uint32_t logical_id, uint8_t vector)
+bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 {
 	plane_irq_state_t irq_state;
 	uint32_t lapic_id;
 
 	if (!lapic_initialized || logical_id >= lapic_cpu_count ||
-	    vector < X86_64_LAPIC_VECTOR_MIN) {
+	    !x86_64_lapic_external_vector_valid(vector)) {
 		return false;
 	}
 
+	/*
+	 * The generic HAL exposes "send local interrupt". The current x86_64
+	 * backend implements that as a physical-destination fixed IPI.
+	 */
 	lapic_id = lapic_id_by_logical_id[logical_id];
 	irq_state = hal_irq_save();
-	while ((lapic_read(X86_64_LAPIC_ICR_LOW) &
+	while ((lapic_read(X86_64_LAPIC_REG_ICR_LOW) &
 		X86_64_LAPIC_ICR_PENDING) != 0) {
 		hal_cpu_relax();
 	}
 
-	lapic_write(X86_64_LAPIC_ICR_HIGH,
-		    lapic_id << X86_64_LAPIC_ICR_DEST_SHIFT);
-	lapic_write(X86_64_LAPIC_ICR_LOW,
-		    vector | X86_64_LAPIC_ICR_DM_FIXED);
+	lapic_write(X86_64_LAPIC_REG_ICR_HIGH,
+		    x86_64_lapic_icr_dest_high(lapic_id));
+	lapic_write(X86_64_LAPIC_REG_ICR_LOW,
+		    x86_64_lapic_icr_fixed_low(vector));
 	hal_irq_restore(irq_state);
 	return true;
 }
