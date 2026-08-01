@@ -2,7 +2,11 @@
 
 #include <plane/smp.h>
 
-static struct plane_smp_info smp_state;
+#define CPU_INVALID_ID UINT32_MAX
+
+static struct plane_cpu_data cpu_data[PLANE_MAX_CPUS];
+static struct plane_cpu_data *current_cpu_data;
+static uint32_t runtime_cpu_count;
 static bool smp_initialized;
 
 bool plane_smp_info_init(struct plane_smp_info *info)
@@ -12,7 +16,7 @@ bool plane_smp_info_init(struct plane_smp_info *info)
 	}
 
 	*info = (struct plane_smp_info){
-		.bsp_logical_id = PLANE_CPU_INVALID_ID
+		.bsp_logical_id = CPU_INVALID_ID
 	};
 	return true;
 }
@@ -28,7 +32,7 @@ bool plane_smp_info_record_cpu(struct plane_smp_info *info,
 	}
 
 	info->discovered_cpu_count++;
-	if (is_bsp && info->bsp_logical_id != PLANE_CPU_INVALID_ID) {
+	if (is_bsp && info->bsp_logical_id != CPU_INVALID_ID) {
 		return false;
 	}
 
@@ -83,6 +87,13 @@ static bool smp_info_validate(const struct plane_smp_info *info)
 			return false;
 		}
 
+		for (uint32_t j = i + 1; j < info->cpu_count; j++) {
+			if (info->cpus[j].present &&
+			    info->cpus[j].lapic_id == cpu->lapic_id) {
+				return false;
+			}
+		}
+
 		if (cpu->is_bsp) {
 			bsp_count++;
 			if (info->bsp_logical_id != i) {
@@ -100,11 +111,21 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 		return false;
 	}
 
-	smp_state = *info;
-	for (uint32_t i = 0; i < smp_state.cpu_count; i++) {
-		smp_state.cpus[i].online = false;
+	for (uint32_t i = 0; i < info->cpu_count; i++) {
+		const struct plane_cpu_info *src = &info->cpus[i];
+
+		cpu_data[i] = (struct plane_cpu_data){
+			.logical_id = src->logical_id,
+			.lapic_id = src->lapic_id,
+			.is_bsp = src->is_bsp,
+			.present = src->present,
+			.online = false
+		};
 	}
-	smp_state.cpus[smp_state.bsp_logical_id].online = true;
+
+	runtime_cpu_count = info->cpu_count;
+	current_cpu_data = &cpu_data[info->bsp_logical_id];
+	current_cpu_data->online = true;
 	smp_initialized = true;
 	return true;
 }
@@ -116,24 +137,29 @@ bool plane_smp_is_initialized(void)
 
 uint32_t plane_cpu_count(void)
 {
-	return smp_initialized ? smp_state.cpu_count : 1;
+	return smp_initialized ? runtime_cpu_count : 1;
 }
 
 uint32_t plane_cpu_current_id(void)
 {
-	return 0;
+	return current_cpu_data != NULL ? current_cpu_data->logical_id : 0;
 }
 
 bool plane_cpu_is_bsp(void)
 {
-	return plane_cpu_current_id() == 0;
+	return current_cpu_data != NULL && current_cpu_data->is_bsp;
 }
 
-const struct plane_cpu_info *plane_cpu_get(uint32_t logical_id)
+const struct plane_cpu_data *plane_cpu_current_data(void)
 {
-	if (!smp_initialized || logical_id >= smp_state.cpu_count) {
+	return current_cpu_data;
+}
+
+const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id)
+{
+	if (!smp_initialized || logical_id >= runtime_cpu_count) {
 		return NULL;
 	}
 
-	return &smp_state.cpus[logical_id];
+	return &cpu_data[logical_id];
 }

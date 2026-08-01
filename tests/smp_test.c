@@ -50,15 +50,28 @@ static int test_runtime_rejects_invalid_before_init(void)
 {
 	int failures = 0;
 	struct plane_smp_info invalid = {0};
+	struct plane_smp_info duplicate;
 
 	failures += test_expect_bool("invalid init rejected",
 				     plane_smp_init_bsp(&invalid), false);
+	failures += test_expect_bool("duplicate init bsp",
+				     plane_smp_info_init_bsp(&duplicate, 1),
+				     true);
+	failures += test_expect_bool("duplicate record ap",
+				     plane_smp_info_record_cpu(&duplicate, 2,
+							       false),
+				     true);
+	duplicate.cpus[1].lapic_id = duplicate.cpus[0].lapic_id;
+	failures += test_expect_bool("duplicate lapic init rejected",
+				     plane_smp_init_bsp(&duplicate), false);
 	failures += test_expect_bool("still uninitialized",
 				     plane_smp_is_initialized(), false);
 	failures += test_expect_u32("uninitialized cpu count",
 				    plane_cpu_count(), 1);
-	failures += test_expect_ptr("uninitialized cpu get",
-				    plane_cpu_get(0), NULL);
+	failures += test_expect_ptr("uninitialized current cpu data",
+				    plane_cpu_current_data(), NULL);
+	failures += test_expect_ptr("uninitialized cpu data get",
+				    plane_cpu_data_get(0), NULL);
 	return failures;
 }
 
@@ -87,21 +100,29 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	failures += test_expect_bool("current is bsp",
 				     plane_cpu_is_bsp(), true);
 
-	const struct plane_cpu_info *bsp = plane_cpu_get(0);
-	const struct plane_cpu_info *ap = plane_cpu_get(1);
+	const struct plane_cpu_data *current = plane_cpu_current_data();
+	const struct plane_cpu_data *bsp = plane_cpu_data_get(0);
+	const struct plane_cpu_data *ap = plane_cpu_data_get(1);
 
+	failures += test_expect_ptr("current is bsp data", current, bsp);
 	failures += test_expect_not_null("bsp info", bsp);
 	failures += test_expect_not_null("ap info", ap);
 	if (bsp != NULL) {
 		failures += test_expect_u32("bsp lapic", bsp->lapic_id, 7);
+		failures += test_expect_u32("bsp logical id", bsp->logical_id, 0);
+		failures += test_expect_bool("bsp marked", bsp->is_bsp, true);
+		failures += test_expect_bool("bsp present", bsp->present, true);
 		failures += test_expect_bool("bsp online", bsp->online, true);
 	}
 	if (ap != NULL) {
 		failures += test_expect_u32("ap lapic", ap->lapic_id, 8);
+		failures += test_expect_u32("ap logical id", ap->logical_id, 1);
+		failures += test_expect_bool("ap not bsp", ap->is_bsp, false);
+		failures += test_expect_bool("ap present", ap->present, true);
 		failures += test_expect_bool("ap offline", ap->online, false);
 	}
-	failures += test_expect_ptr("out of range cpu get",
-				    plane_cpu_get(3), NULL);
+	failures += test_expect_ptr("out of range cpu data get",
+				    plane_cpu_data_get(3), NULL);
 	return failures;
 }
 
@@ -117,7 +138,7 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 	failures += test_expect_u32("old cpu count kept",
 				    plane_cpu_count(), 3);
 
-	const struct plane_cpu_info *bsp = plane_cpu_get(0);
+	const struct plane_cpu_data *bsp = plane_cpu_data_get(0);
 
 	failures += test_expect_not_null("old bsp still present", bsp);
 	if (bsp != NULL) {
