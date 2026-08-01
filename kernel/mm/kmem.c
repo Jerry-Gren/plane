@@ -6,6 +6,7 @@
 #include <plane/mm.h>
 #include <plane/printk.h>
 #include <plane/util.h>
+#include <plane/vm_fault.h>
 #include <plane/vm_map.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
@@ -514,6 +515,16 @@ bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot)
 	}
 
 	return plane_kmem_protect_pages_in_map(&kernel_map, vaddr, page_count, prot);
+}
+
+bool plane_kmem_fault_page(void *vaddr, uint32_t fault_type)
+{
+	if (!kmem_initialized || vaddr == NULL) {
+		return false;
+	}
+
+	return plane_vm_fault_page(&kernel_map, (uint64_t)(uintptr_t)vaddr,
+				   fault_type);
 }
 
 bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,

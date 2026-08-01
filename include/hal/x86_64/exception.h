@@ -2,6 +2,7 @@
 #define HAL_ARCH_EXCEPTION_H
 
 #ifndef __ASSEMBLER__
+#include <stdbool.h>
 #include <stdint.h>
 #include <plane/compiler.h>
 
@@ -35,6 +36,9 @@ struct interrupt_frame {
 	uint64_t ss;
 } __packed;
 
+bool x86_64_try_handle_page_fault(uint64_t int_no,
+				  uint64_t fault_addr,
+				  uint64_t error_code);
 void x86_64_exception_handler(struct interrupt_frame *frame);
 
 #endif /* __ASSEMBLER__ */

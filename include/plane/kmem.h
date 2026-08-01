@@ -24,6 +24,8 @@ struct plane_vm_object;
  * PLANE_KMEM_ALLOC_READONLY records read-only entry protection in the kernel
  * map; kmem consumes that protection when creating and protecting mappings.
  * Protect APIs only support exact allocation ranges in this early layer.
+ * Page faults are routed through the private kernel map only; generic map
+ * fault handling lives in the VM fault layer.
  */
 
 enum plane_kmem_alloc_flags {
@@ -39,6 +41,7 @@ bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot);
 bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr);
 bool plane_kmem_free_pages(void *vaddr, uint64_t page_count);
 bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot);
+bool plane_kmem_fault_page(void *vaddr, uint32_t fault_type);
 
 /*
  * The in-map APIs are still kernel virtual allocation APIs. The supplied map

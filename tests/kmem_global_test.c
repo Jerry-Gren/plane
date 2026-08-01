@@ -36,6 +36,7 @@ struct plane_page {
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
+	uint32_t flags;
 	bool used;
 };
 
@@ -166,6 +167,7 @@ bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
 		if (!test_mappings[i].used) {
 			test_mappings[i].vaddr = vaddr;
 			test_mappings[i].phys_addr = phys_addr;
+			test_mappings[i].flags = flags;
 			test_mappings[i].used = true;
 			return true;
 		}
@@ -188,7 +190,14 @@ bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
 
 bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
 {
-	return (flags & ~HAL_MMU_MAP_WRITE) == 0 && find_mapping(vaddr) != NULL;
+	struct test_mapping *mapping = find_mapping(vaddr);
+
+	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 || mapping == NULL) {
+		return false;
+	}
+
+	mapping->flags = flags;
+	return true;
 }
 
 bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
@@ -554,6 +563,9 @@ static int test_global_kmem_init_is_one_shot(void)
 	struct plane_page *guards[TEST_GUARD_PAGE_COUNT + 1];
 	void *addr = NULL;
 	void *guarded_addr = NULL;
+	void *readonly_addr = NULL;
+	struct test_mapping *mapping;
+	uint64_t mapped_phys;
 	uint64_t init_allocated;
 	uint64_t init_mappings;
 	uint64_t init_wired;
@@ -566,6 +578,11 @@ static int test_global_kmem_init_is_one_shot(void)
 		guards[i] = NULL;
 	}
 
+	failures += test_expect_bool("global fault before init",
+				     plane_kmem_fault_page(
+					     test_kmem_storage,
+					     PLANE_VM_PROT_READ),
+				     false);
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
 	init_allocated = allocated_page_count();
 	init_mappings = mapping_count();
@@ -596,6 +613,43 @@ static int test_global_kmem_init_is_one_shot(void)
 				     true);
 	failures += test_expect_u64("global wired pages",
 				    wired_page_count(), init_wired + 2);
+	mapping = find_mapping((uint64_t)(uintptr_t)addr);
+	failures += test_expect_not_null("global fault mapping", mapping);
+	if (mapping != NULL) {
+		mapped_phys = mapping->phys_addr;
+		failures += test_expect_u32("global fault starts writable",
+					    mapping->flags,
+					    HAL_MMU_MAP_WRITE);
+		failures += test_expect_bool("global fault unmap",
+					     hal_mmu_unmap_kernel_page(
+						     (uint64_t)(uintptr_t)addr),
+					     true);
+		failures += test_expect_u64("global fault mapping removed",
+					    mapping_count(),
+					    init_mappings + 1);
+		failures += test_expect_bool("global fault repairs pmap",
+					     plane_kmem_fault_page(
+						     addr,
+						     PLANE_VM_PROT_READ),
+					     true);
+		mapping = find_mapping((uint64_t)(uintptr_t)addr);
+		failures += test_expect_not_null("global fault remapped",
+						 mapping);
+		if (mapping != NULL) {
+			failures += test_expect_u64("global fault remap phys",
+						    mapping->phys_addr,
+						    mapped_phys);
+			failures += test_expect_u32("global fault remap flags",
+						    mapping->flags,
+						    HAL_MMU_MAP_WRITE);
+		}
+	}
+	failures += test_expect_u64("global fault mapped count",
+				    mapping_count(), init_mappings + 2);
+	failures += test_expect_u64("global fault allocated stable",
+				    allocated_page_count(), init_allocated + 2);
+	failures += test_expect_u64("global fault wired stable",
+				    wired_page_count(), init_wired + 2);
 	failures += test_expect_bool("global repeat init",
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("global preserved free",
@@ -618,6 +672,43 @@ static int test_global_kmem_init_is_one_shot(void)
 				     true);
 	failures += test_expect_u64("global guarded free guards",
 				    guard_page_count(), 0);
+
+	failures += test_expect_bool("global readonly alloc",
+				     plane_kmem_alloc_pages(
+					     1, PLANE_KMEM_ALLOC_READONLY,
+					     &readonly_addr),
+				     true);
+	mapping = find_mapping((uint64_t)(uintptr_t)readonly_addr);
+	failures += test_expect_not_null("global readonly mapping", mapping);
+	if (mapping != NULL) {
+		mapped_phys = mapping->phys_addr;
+		failures += test_expect_u32("global readonly starts ro",
+					    mapping->flags, 0);
+		failures += test_expect_bool("global readonly write fault",
+					     plane_kmem_fault_page(
+						     readonly_addr,
+						     PLANE_VM_PROT_READ |
+							     PLANE_VM_PROT_WRITE),
+					     false);
+		mapping = find_mapping((uint64_t)(uintptr_t)readonly_addr);
+		failures += test_expect_not_null("global readonly unchanged",
+						 mapping);
+		if (mapping != NULL) {
+			failures += test_expect_u64(
+				"global readonly phys unchanged",
+				mapping->phys_addr, mapped_phys);
+			failures += test_expect_u32(
+				"global readonly flags unchanged",
+				mapping->flags, 0);
+		}
+	}
+	failures += test_expect_bool("global readonly free",
+				     plane_kmem_free_pages(readonly_addr, 1),
+				     true);
+	failures += test_expect_u64("global readonly free backing pages",
+				    allocated_page_count(), init_allocated);
+	failures += test_expect_u64("global readonly free mappings",
+				    mapping_count(), init_mappings);
 
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		failures += test_expect_bool("global small alloc",

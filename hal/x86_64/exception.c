@@ -1,10 +1,21 @@
 #include <hal/x86_64/exception.h>
 #include <hal/x86_64/linkage.h>
+#include <plane/bits.h>
+#include <plane/kmem.h>
 #include <plane/printk.h>
+#include <plane/vm_prot.h>
 
 #define X86_EXCEPTION_BP 3
 #define X86_EXCEPTION_PF 14
 #define CODE_DUMP_BYTES 16
+#define X86_PF_ERROR_PRESENT BIT(0)
+#define X86_PF_ERROR_WRITE BIT(1)
+#define X86_PF_ERROR_USER BIT(2)
+#define X86_PF_ERROR_RSVD BIT(3)
+#define X86_PF_ERROR_EXECUTE BIT(4)
+#define X86_PF_ERROR_SUPPORTED \
+	(X86_PF_ERROR_PRESENT | X86_PF_ERROR_WRITE | X86_PF_ERROR_USER | \
+	 X86_PF_ERROR_RSVD | X86_PF_ERROR_EXECUTE)
 
 static const char *exception_names[32] = {
     "Divide Error (#DE)",                       /* 0 */
@@ -83,11 +94,48 @@ static void dump_code(uint64_t rip, uint64_t int_no)
 	printk("\n");
 }
 
+bool x86_64_try_handle_page_fault(uint64_t int_no,
+				  uint64_t fault_addr,
+				  uint64_t error_code)
+{
+	uint32_t fault_type = PLANE_VM_PROT_READ;
+
+	if (int_no != X86_EXCEPTION_PF ||
+	    (error_code & ~X86_PF_ERROR_SUPPORTED) != 0 ||
+	    (error_code & (X86_PF_ERROR_USER |
+			   X86_PF_ERROR_RSVD |
+			   X86_PF_ERROR_EXECUTE)) != 0) {
+		return false;
+	}
+
+	/*
+	 * Match XNU's early trap direction: the architecture error code is
+	 * translated into VM protection bits, then VM decides whether the
+	 * kernel-map fault can be satisfied.
+	 */
+	if ((error_code & X86_PF_ERROR_WRITE) != 0) {
+		fault_type |= PLANE_VM_PROT_WRITE;
+	}
+
+	return plane_kmem_fault_page((void *)(uintptr_t)fault_addr, fault_type);
+}
+
 void x86_64_exception_handler(struct interrupt_frame *frame)
 {
+	uint64_t cr2 = 0;
+
 	if (frame->int_no >= 32) {
 		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
 		return;
+	}
+
+	if (frame->int_no == X86_EXCEPTION_PF) {
+		cr2 = read_cr2();
+		if (x86_64_try_handle_page_fault(frame->int_no,
+						 cr2,
+						 frame->error_code)) {
+			return;
+		}
 	}
 
 	printk(" error code : 0x%016llx\n", frame->error_code);
@@ -105,7 +153,7 @@ void x86_64_exception_handler(struct interrupt_frame *frame)
 	printk(" r15: 0x%016llx\n", frame->r15);
 
 	if (frame->int_no == X86_EXCEPTION_PF) {
-		printk(" cr2: 0x%016llx\n", read_cr2());
+		printk(" cr2: 0x%016llx\n", cr2);
 	}
 
 	dump_code(frame->rip, frame->int_no);
