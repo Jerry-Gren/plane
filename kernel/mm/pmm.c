@@ -341,7 +341,8 @@ static void reset_guard_page_zone(void)
 {
 	guard_page_zone = (struct plane_vm_zone){0};
 	guard_page_bootstrap_segment = (struct plane_vm_zone_segment){0};
-	(void)ensure_guard_page_zone();
+	BUG_ON_MSG(!ensure_guard_page_zone(),
+		   "failed to reset guard page zone");
 }
 
 struct plane_page *plane_vm_page_create_guard(void)
