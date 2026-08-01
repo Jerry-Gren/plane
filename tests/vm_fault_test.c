@@ -57,6 +57,16 @@ static uint64_t page_vaddr(uint64_t page)
 	return TEST_MAP_BASE + page * PAGE_SIZE;
 }
 
+static plane_vaddr_t test_vaddr(uint64_t raw)
+{
+	return plane_vaddr_make(raw);
+}
+
+static uint64_t test_paddr_raw(plane_paddr_t addr)
+{
+	return plane_paddr_raw(addr);
+}
+
 static uint64_t test_page_phys(uint64_t page)
 {
 	return 0x100000 + page * PAGE_SIZE;
@@ -171,19 +181,31 @@ static bool enter_object(uint64_t address,
 		vaddr);
 }
 
-bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
+static bool test_fault_page(struct plane_vm_map *map,
+			    uint64_t vaddr,
+			    uint32_t fault_type)
 {
+	return plane_vm_fault_page(map, test_vaddr(vaddr), fault_type);
+}
+
+bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+			     plane_paddr_t phys_addr,
+			     uint32_t flags)
+{
+	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
+
 	if (map_force_fail ||
 	    (flags & ~HAL_MMU_MAP_WRITE) != 0 ||
-	    find_mapping(vaddr) != NULL) {
+	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
 
 	for (uint64_t i = 0; i < TEST_MAPPING_COUNT; i++) {
 		if (!test_mappings[i].used) {
 			test_mappings[i] = (struct test_mapping){
-				.vaddr = vaddr,
-				.phys_addr = phys_addr,
+				.vaddr = raw_vaddr,
+				.phys_addr = raw_phys,
 				.flags = flags,
 				.used = true,
 			};
@@ -195,7 +217,8 @@ bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
 	return false;
 }
 
-bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
+bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
+				   plane_paddr_t *phys_addr)
 {
 	struct test_mapping *mapping;
 
@@ -203,16 +226,16 @@ bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 		return false;
 	}
 
-	mapping = find_mapping(vaddr);
+	mapping = find_mapping(plane_vaddr_raw(vaddr));
 	if (mapping == NULL) {
 		return false;
 	}
 
-	*phys_addr = mapping->phys_addr;
+	*phys_addr = plane_paddr_make(mapping->phys_addr);
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 {
 	struct test_mapping *mapping;
 
@@ -220,7 +243,7 @@ bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
 		return false;
 	}
 
-	mapping = find_mapping(vaddr);
+	mapping = find_mapping(plane_vaddr_raw(vaddr));
 	if (mapping == NULL) {
 		return false;
 	}
@@ -264,13 +287,13 @@ bool plane_vm_page_release(struct plane_page *page)
 	return true;
 }
 
-uint64_t plane_vm_page_phys(const struct plane_page *page)
+plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (!is_test_page(page) || !page->allocated) {
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
-	return page->phys_addr;
+	return plane_paddr_make(page->phys_addr);
 }
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -487,24 +510,24 @@ static int test_fault_rejects_invalid_or_unmapped_access(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault null map",
-				     plane_vm_fault_page(NULL, vaddr,
+				     test_fault_page(NULL, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("fault none",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_NONE),
 				     false);
 	failures += test_expect_bool("fault unknown prot",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 BIT(7)),
 				     false);
 	failures += test_expect_bool("fault hole",
-				     plane_vm_fault_page(&test_map,
+				     test_fault_page(&test_map,
 							 page_vaddr(3),
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("fault write denied",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("fault invalid allocated",
@@ -533,7 +556,7 @@ static int test_fault_miss_allocates_zero_page_and_maps(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault miss page",
-				     plane_vm_fault_page(&test_map,
+				     test_fault_page(&test_map,
 							 vaddr + 123,
 							 PLANE_VM_PROT_READ),
 				     true);
@@ -552,7 +575,8 @@ static int test_fault_miss_allocates_zero_page_and_maps(void)
 	if (page != NULL && mapping != NULL) {
 		failures += test_expect_u64("fault miss mapped phys",
 					    mapping->phys_addr,
-					    plane_vm_page_phys(page));
+					    test_paddr_raw(
+						    plane_vm_page_phys(page)));
 		failures += test_expect_u32("fault miss map flags",
 					    mapping->flags,
 					    HAL_MMU_MAP_WRITE);
@@ -575,7 +599,7 @@ static int test_fault_unaligned_address_uses_page_object_offset(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault offset page",
-				     plane_vm_fault_page(
+				     test_fault_page(
 					     &test_map, vaddr + PAGE_SIZE + 19,
 					     PLANE_VM_PROT_WRITE),
 				     true);
@@ -612,7 +636,7 @@ static int test_fault_resident_hit_repairs_absent_pmap(void)
 				     true);
 	last_grab_flags = 0;
 	failures += test_expect_bool("fault hit page",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     true);
 	mapping = find_mapping(vaddr);
@@ -651,11 +675,12 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 				     true);
 	failures += test_expect_bool("fault protect premap",
 				     hal_mmu_map_kernel_page(
-					     vaddr, plane_vm_page_phys(page),
+					     test_vaddr(vaddr),
+					     plane_vm_page_phys(page),
 					     HAL_MMU_MAP_WRITE),
 				     true);
 	failures += test_expect_bool("fault protect page",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     true);
 	mapping = find_mapping(vaddr);
@@ -691,11 +716,12 @@ static int test_fault_resident_hit_rejects_wrong_pmap_phys(void)
 				     true);
 	test_mappings[0] = (struct test_mapping){
 		.vaddr = vaddr,
-		.phys_addr = plane_vm_page_phys(page) + PAGE_SIZE,
+		.phys_addr = test_paddr_raw(plane_vm_page_phys(page)) +
+			     PAGE_SIZE,
 		.used = true,
 	};
 	failures += test_expect_bool("fault wrong phys",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault wrong resident unchanged",
@@ -726,7 +752,7 @@ static int test_fault_wired_entry_wires_new_page(void)
 							     vaddr, 1),
 				     true);
 	failures += test_expect_bool("fault wire page",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     true);
 	page = plane_vm_object_lookup_page(&test_object, 0);
@@ -764,7 +790,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 
 	grab_force_fail = true;
 	failures += test_expect_bool("fault grab fail",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault grab fail allocated",
@@ -773,7 +799,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 
 	wire_force_fail = true;
 	failures += test_expect_bool("fault wire fail",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault wire fail allocated",
@@ -782,7 +808,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 
 	attach_force_fail = true;
 	failures += test_expect_bool("fault insert fail",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault insert fail allocated",
@@ -795,7 +821,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 
 	map_force_fail = true;
 	failures += test_expect_bool("fault map fail",
-				     plane_vm_fault_page(&test_map, vaddr,
+				     test_fault_page(&test_map, vaddr,
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault map fail allocated",

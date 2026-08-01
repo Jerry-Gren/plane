@@ -23,20 +23,37 @@ static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
 static uint8_t extra_guard_storage[PAGE_SIZE] __aligned(PAGE_SIZE);
 static struct plane_vm_zone_segment extra_guard_segment;
 
-void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
+static plane_paddr_t test_paddr(uint64_t raw)
 {
+	return plane_paddr_make(raw);
+}
+
+static uint64_t test_paddr_raw(plane_paddr_t addr)
+{
+	return plane_paddr_raw(addr);
+}
+
+static uint64_t test_page_phys_raw(const struct plane_page *page)
+{
+	return plane_paddr_raw(plane_vm_page_phys(page));
+}
+
+void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
+{
+	uint64_t raw = plane_paddr_raw(phys_addr);
+
 	if (!direct_map_available || size == 0 ||
-	    phys_addr > direct_map_limit ||
-	    size > direct_map_limit - phys_addr ||
-	    phys_addr > DIRECT_MAP_STORAGE_SIZE ||
-	    size > DIRECT_MAP_STORAGE_SIZE - phys_addr) {
+	    raw > direct_map_limit ||
+	    size > direct_map_limit - raw ||
+	    raw > DIRECT_MAP_STORAGE_SIZE ||
+	    size > DIRECT_MAP_STORAGE_SIZE - raw) {
 		return NULL;
 	}
 
-	return &direct_map_storage[phys_addr];
+	return &direct_map_storage[raw];
 }
 
-void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
@@ -214,32 +231,32 @@ static int test_phys_to_page_metadata(void)
 	add_region(&mem, 0x8000, 0x1000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("metadata init", plane_pmm_init(&mem), true);
 
-	page = plane_vm_page_from_phys(0x1000);
+	page = plane_vm_page_from_phys(test_paddr(0x1000));
 	failures += test_expect_not_null("metadata page 0x1000", page);
 	failures += test_expect_u64("metadata phys 0x1000",
-			       plane_vm_page_phys(page), 0x1000);
+				    test_page_phys_raw(page), 0x1000);
 	failures += check_page_state("metadata state",
 				      plane_vm_page_state(page),
 				      PLANE_VM_PAGE_METADATA);
 
-	page = plane_vm_page_from_phys(0x8000);
+	page = plane_vm_page_from_phys(test_paddr(0x8000));
 	failures += test_expect_not_null("metadata non-contig page", page);
 	failures += test_expect_u64("metadata non-contig phys",
-			       plane_vm_page_phys(page), 0x8000);
+				    test_page_phys_raw(page), 0x8000);
 	failures += check_page_state("metadata non-contig state",
 				      plane_vm_page_state(page),
 				      PLANE_VM_PAGE_FREE);
 
 	failures += test_expect_null("metadata reject unaligned",
-				    plane_vm_page_from_phys(0x1001));
+				    plane_vm_page_from_phys(test_paddr(0x1001)));
 	failures += test_expect_null("metadata reject unmanaged",
-				    plane_vm_page_from_phys(0x4000));
+				    plane_vm_page_from_phys(test_paddr(0x4000)));
 	failures += check_page_state("metadata null state",
 				      plane_vm_page_state(NULL),
 				      PLANE_VM_PAGE_INVALID);
 	failures += test_expect_u64("metadata null phys",
-				    plane_vm_page_phys(NULL),
-				    PLANE_VM_PAGE_NO_PHYS);
+				    test_page_phys_raw(NULL),
+				    PLANE_VM_PAGE_NO_PHYS_RAW);
 
 	return failures;
 }
@@ -288,7 +305,7 @@ static int test_vm_page_grab_allocates_and_releases_metadata(void)
 				plane_vm_page_grab(0, &page), true);
 	failures += test_expect_not_null("grabbed vm page", page);
 	failures += test_expect_u64("grabbed vm page phys",
-			       plane_vm_page_phys(page), 0x2000);
+				    test_page_phys_raw(page), 0x2000);
 	failures += check_page_state("grabbed vm page state",
 				      plane_vm_page_state(page),
 				      PLANE_VM_PAGE_ALLOCATED);
@@ -321,7 +338,7 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
 	struct plane_page *page;
-	uint64_t phys;
+	plane_paddr_t phys;
 	uint64_t wire_count;
 	int failures = 0;
 
@@ -329,7 +346,8 @@ static int test_page_wire_count_tracks_allocated_pages(void)
 	failures += test_expect_bool("wire init", plane_pmm_init(&mem), true);
 	failures += test_expect_bool("wire alloc",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("wire alloc phys", phys, 0x2000);
+	failures += test_expect_u64("wire alloc phys", test_paddr_raw(phys),
+				    0x2000);
 	page = plane_vm_page_from_phys(phys);
 	failures += test_expect_bool("wire initial count query",
 				     plane_vm_page_wire_count(page, &wire_count),
@@ -385,15 +403,15 @@ static int test_wire_rejects_invalid_pages(void)
 	struct plane_mem_info mem = {0};
 	struct plane_page *free_page;
 	struct plane_page *metadata_page;
-	uint64_t phys;
+	plane_paddr_t phys;
 	uint64_t wire_count;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("wire invalid init",
 				     plane_pmm_init(&mem), true);
-	metadata_page = plane_vm_page_from_phys(0x1000);
-	free_page = plane_vm_page_from_phys(0x2000);
+	metadata_page = plane_vm_page_from_phys(test_paddr(0x1000));
+	free_page = plane_vm_page_from_phys(test_paddr(0x2000));
 	failures += test_expect_bool("wire rejects metadata",
 				     plane_vm_page_wire(metadata_page), false);
 	failures += test_expect_bool("unwire rejects metadata",
@@ -425,7 +443,8 @@ static int test_wire_rejects_invalid_pages(void)
 
 	failures += test_expect_bool("wire invalid alloc",
 				     plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("wire invalid phys", phys, 0x2000);
+	failures += test_expect_u64("wire invalid phys", test_paddr_raw(phys),
+				    0x2000);
 	failures += test_expect_bool("wire invalid free unwired",
 				     plane_pmm_free_page_phys(phys), true);
 	return failures;
@@ -456,8 +475,8 @@ static int test_guard_pages_are_not_pmm_managed(void)
 	failures += test_expect_bool("guard query",
 				     plane_vm_page_is_guard(guard), true);
 	failures += test_expect_u64("guard phys",
-				    plane_vm_page_phys(guard),
-				    PLANE_VM_PAGE_GUARD_PHYS);
+				    test_page_phys_raw(guard),
+				    PLANE_VM_PAGE_GUARD_PHYS_RAW);
 	failures += test_expect_null("guard from phys",
 				     plane_vm_page_from_phys(
 					     PLANE_VM_PAGE_GUARD_PHYS));
@@ -488,8 +507,8 @@ static int test_guard_pages_are_not_pmm_managed(void)
 				      plane_vm_page_state(guard),
 				      PLANE_VM_PAGE_INVALID);
 	failures += test_expect_u64("guard released phys",
-				    plane_vm_page_phys(guard),
-				    PLANE_VM_PAGE_NO_PHYS);
+				    test_page_phys_raw(guard),
+				    PLANE_VM_PAGE_NO_PHYS_RAW);
 	failures += test_expect_bool("guard released query",
 				     plane_vm_page_is_guard(guard), false);
 	failures += test_expect_bool("guard released wire count rejected",
@@ -627,7 +646,7 @@ static int test_page_object_identity_blocks_free(void)
 	struct plane_vm_object object = {0};
 	struct plane_page *page;
 	uint64_t offset = 0;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -761,7 +780,7 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -769,10 +788,12 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 
 	failures += test_expect_bool("alloc first page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("first page address", phys, 0x2000);
+	failures += test_expect_u64("first page address", test_paddr_raw(phys),
+				    0x2000);
 	failures += test_expect_bool("alloc second page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("second page address", phys, 0x3000);
+	failures += test_expect_u64("second page address", test_paddr_raw(phys),
+				    0x3000);
 	failures += test_expect_bool("alloc exhausted",
 				plane_pmm_alloc_page_phys(&phys), false);
 
@@ -786,7 +807,7 @@ static int test_single_page_allocation_order_and_exhaustion(void)
 static int test_plain_allocation_does_not_zero_page(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -796,9 +817,10 @@ static int test_plain_allocation_does_not_zero_page(void)
 	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
 	failures += test_expect_bool("plain alloc",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("plain alloc phys", phys, 0x2000);
-	failures += check_phys_bytes("plain alloc keeps data", phys, 0xa5,
-				      PAGE_SIZE);
+	failures += test_expect_u64("plain alloc phys", test_paddr_raw(phys),
+				    0x2000);
+	failures += check_phys_bytes("plain alloc keeps data",
+				     test_paddr_raw(phys), 0xa5, PAGE_SIZE);
 
 	return failures;
 }
@@ -819,7 +841,7 @@ static int test_zeroed_single_page_allocation(void)
 						   &page),
 				true);
 	failures += test_expect_not_null("zero page metadata", page);
-	failures += test_expect_u64("zero page phys", plane_vm_page_phys(page),
+	failures += test_expect_u64("zero page phys", test_page_phys_raw(page),
 				    0x2000);
 	failures += check_phys_bytes("zero page cleared", 0x2000, 0,
 				      PAGE_SIZE);
@@ -830,7 +852,7 @@ static int test_zeroed_single_page_allocation(void)
 static int test_zeroed_multi_page_allocation(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x7000, PLANE_MEM_USABLE);
@@ -843,7 +865,8 @@ static int test_zeroed_multi_page_allocation(void)
 				plane_pmm_alloc_pages_phys_flags(
 					3, 1, PLANE_PMM_ALLOC_ZERO, &phys),
 				true);
-	failures += test_expect_u64("zero multi phys", phys, 0x2000);
+	failures += test_expect_u64("zero multi phys", test_paddr_raw(phys),
+				    0x2000);
 	failures += check_phys_bytes("zero multi cleared", 0x2000, 0,
 				      3 * PAGE_SIZE);
 	failures += check_phys_bytes("zero multi guard", 0x5000, 0x5a,
@@ -856,7 +879,7 @@ static int test_zeroed_allocation_rolls_back_without_direct_map(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys = UINT64_MAX;
+	plane_paddr_t phys = {0};
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -875,11 +898,13 @@ static int test_zeroed_allocation_rolls_back_without_direct_map(void)
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 	failures += check_page_state("zero rollback page state",
 				      plane_vm_page_state(
-					      plane_vm_page_from_phys(0x2000)),
+					      plane_vm_page_from_phys(
+						      test_paddr(0x2000))),
 				      PLANE_VM_PAGE_FREE);
 	failures += test_expect_bool("zero rollback reuses page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("zero rollback reused phys", phys, 0x2000);
+	failures += test_expect_u64("zero rollback reused phys",
+				    test_paddr_raw(phys), 0x2000);
 
 	return failures;
 }
@@ -888,7 +913,7 @@ static int test_zeroed_allocation_rolls_back_without_range_coverage(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys = UINT64_MAX;
+	plane_paddr_t phys = {0};
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -907,11 +932,12 @@ static int test_zeroed_allocation_rolls_back_without_range_coverage(void)
 				 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 	failures += check_page_state("zero range rollback page state",
 				      plane_vm_page_state(
-					      plane_vm_page_from_phys(0x2000)),
+					      plane_vm_page_from_phys(
+						      test_paddr(0x2000))),
 				      PLANE_VM_PAGE_FREE);
 	failures += test_expect_bool("zero range rollback reuses page",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("zero range rollback reused phys", phys,
+	failures += test_expect_u64("zero range rollback reused phys", test_paddr_raw(phys),
 				    0x2000);
 
 	return failures;
@@ -921,7 +947,7 @@ static int test_allocation_flags_reject_unknown_bits(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -943,7 +969,7 @@ static int test_allocation_flags_reject_unknown_bits(void)
 static int test_single_page_free_reuses_lowest_address(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x5000, PLANE_MEM_USABLE);
@@ -952,21 +978,21 @@ static int test_single_page_free_reuses_lowest_address(void)
 
 	failures += test_expect_bool("reuse alloc first",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("reuse first addr", phys, 0x2000);
+	failures += test_expect_u64("reuse first addr", test_paddr_raw(phys), 0x2000);
 	failures += test_expect_bool("reuse alloc second",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("reuse second addr", phys, 0x3000);
+	failures += test_expect_u64("reuse second addr", test_paddr_raw(phys), 0x3000);
 	failures += test_expect_bool("reuse alloc third",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("reuse third addr", phys, 0x4000);
+	failures += test_expect_u64("reuse third addr", test_paddr_raw(phys), 0x4000);
 
 	failures += test_expect_bool("reuse free second",
-				plane_pmm_free_page_phys(0x3000), true);
+				plane_pmm_free_page_phys(test_paddr(0x3000)), true);
 	failures += test_expect_bool("reuse free first",
-				plane_pmm_free_page_phys(0x2000), true);
+				plane_pmm_free_page_phys(test_paddr(0x2000)), true);
 	failures += test_expect_bool("reuse alloc lowest",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("reuse lowest addr", phys, 0x2000);
+	failures += test_expect_u64("reuse lowest addr", test_paddr_raw(phys), 0x2000);
 
 	return failures;
 }
@@ -975,7 +1001,7 @@ static int test_multi_page_alignment(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x8000, PLANE_MEM_USABLE);
@@ -991,7 +1017,7 @@ static int test_multi_page_alignment(void)
 
 	failures += test_expect_bool("aligned allocation",
 				plane_pmm_alloc_pages_phys(1, 4, &phys), true);
-	failures += test_expect_u64("aligned allocation address", phys, 0x4000);
+	failures += test_expect_u64("aligned allocation address", test_paddr_raw(phys), 0x4000);
 	failures += check_page_state("aligned allocation page state",
 				      plane_vm_page_state(plane_vm_page_from_phys(phys)),
 				      PLANE_VM_PAGE_ALLOCATED);
@@ -1006,7 +1032,7 @@ static int test_multi_page_alignment(void)
 static int test_multi_page_rejects_non_contiguous_ranges(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x2000, PLANE_MEM_USABLE);
@@ -1021,7 +1047,7 @@ static int test_multi_page_rejects_non_contiguous_ranges(void)
 static int test_multi_page_rejects_metadata_run(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
@@ -1031,7 +1057,7 @@ static int test_multi_page_rejects_metadata_run(void)
 				plane_pmm_alloc_pages_phys(3, 1, &phys), false);
 	failures += test_expect_bool("metadata run allows free tail",
 				plane_pmm_alloc_pages_phys(2, 1, &phys), true);
-	failures += test_expect_u64("metadata run tail addr", phys, 0x2000);
+	failures += test_expect_u64("metadata run tail addr", test_paddr_raw(phys), 0x2000);
 
 	return failures;
 }
@@ -1040,7 +1066,7 @@ static int test_multi_page_phys_api_updates_metadata(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x6000, PLANE_MEM_USABLE);
@@ -1049,12 +1075,15 @@ static int test_multi_page_phys_api_updates_metadata(void)
 
 	failures += test_expect_bool("multi metadata alloc",
 				plane_pmm_alloc_pages_phys(3, 1, &phys), true);
-	failures += test_expect_u64("multi metadata alloc addr", phys, 0x2000);
+	failures += test_expect_u64("multi metadata alloc addr",
+				    test_paddr_raw(phys), 0x2000);
 	for (uint64_t i = 0; i < 3; i++) {
 		failures += check_page_state("multi metadata allocated",
 					      plane_vm_page_state(
 						      plane_vm_page_from_phys(
-							      phys + i * PAGE_SIZE)),
+							      test_paddr(
+								      test_paddr_raw(phys) +
+								      i * PAGE_SIZE))),
 					      PLANE_VM_PAGE_ALLOCATED);
 	}
 
@@ -1068,7 +1097,9 @@ static int test_multi_page_phys_api_updates_metadata(void)
 		failures += check_page_state("multi metadata free",
 					      plane_vm_page_state(
 						      plane_vm_page_from_phys(
-							      phys + i * PAGE_SIZE)),
+							      test_paddr(
+								      test_paddr_raw(phys) +
+								      i * PAGE_SIZE))),
 					      PLANE_VM_PAGE_FREE);
 	}
 
@@ -1083,35 +1114,35 @@ static int test_free_merges_ranges(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x5000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("free merge init", plane_pmm_init(&mem), true);
 	failures += test_expect_bool("alloc page 1",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("alloc page 1 addr", phys, 0x2000);
+	failures += test_expect_u64("alloc page 1 addr", test_paddr_raw(phys), 0x2000);
 	failures += test_expect_bool("alloc page 2",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("alloc page 2 addr", phys, 0x3000);
+	failures += test_expect_u64("alloc page 2 addr", test_paddr_raw(phys), 0x3000);
 	failures += test_expect_bool("alloc page 3",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("alloc page 3 addr", phys, 0x4000);
+	failures += test_expect_u64("alloc page 3 addr", test_paddr_raw(phys), 0x4000);
 
 	failures += test_expect_bool("free middle page",
-				plane_pmm_free_page_phys(0x3000), true);
+				plane_pmm_free_page_phys(test_paddr(0x3000)), true);
 	stats = plane_pmm_get_stats();
 	failures += check_stats("free middle", &stats,
 				 5, 2, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
 
 	failures += test_expect_bool("free previous page",
-				plane_pmm_free_page_phys(0x2000), true);
+				plane_pmm_free_page_phys(test_paddr(0x2000)), true);
 	stats = plane_pmm_get_stats();
 	failures += check_stats("free previous", &stats,
 				 5, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2);
 
 	failures += test_expect_bool("free bridge page",
-				plane_pmm_free_page_phys(0x4000), true);
+				plane_pmm_free_page_phys(test_paddr(0x4000)), true);
 	stats = plane_pmm_get_stats();
 	failures += check_stats("free bridge", &stats,
 				 5, 4, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
@@ -1122,24 +1153,24 @@ static int test_free_merges_ranges(void)
 static int test_free_rejects_invalid_ranges(void)
 {
 	struct plane_mem_info mem = {0};
-	uint64_t phys;
+	plane_paddr_t phys;
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x2000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("free reject init", plane_pmm_init(&mem), true);
 	failures += test_expect_bool("reject metadata free",
-				plane_pmm_free_page_phys(0x1000), false);
+				plane_pmm_free_page_phys(test_paddr(0x1000)), false);
 	failures += test_expect_bool("allocate first for reject tests",
 				plane_pmm_alloc_page_phys(&phys), true);
-	failures += test_expect_u64("allocated reject test page", phys, 0x2000);
+	failures += test_expect_u64("allocated reject test page", test_paddr_raw(phys), 0x2000);
 	failures += test_expect_bool("reject unaligned free",
-				plane_pmm_free_page_phys(0x2001), false);
+				plane_pmm_free_page_phys(test_paddr(0x2001)), false);
 	failures += test_expect_bool("reject unmanaged free",
-				plane_pmm_free_page_phys(0x9000), false);
+				plane_pmm_free_page_phys(test_paddr(0x9000)), false);
 	failures += test_expect_bool("free allocated page",
-				plane_pmm_free_page_phys(0x2000), true);
+				plane_pmm_free_page_phys(test_paddr(0x2000)), true);
 	failures += test_expect_bool("reject double-free after release",
-				plane_pmm_free_page_phys(0x2000), false);
+				plane_pmm_free_page_phys(test_paddr(0x2000)), false);
 
 	return failures;
 }

@@ -1141,11 +1141,12 @@ bool plane_vm_map_lookup_allocation(
 }
 
 bool plane_vm_map_lookup_page(struct plane_vm_map *map,
-			      uint64_t vaddr,
+			      plane_vaddr_t vaddr,
 			      struct plane_vm_map_page_info *info)
 {
 	struct plane_vm_map_entry *entry;
-	uint64_t page_vaddr = vaddr & PAGE_MASK;
+	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
+	uint64_t page_vaddr = raw_vaddr & PAGE_MASK;
 	uint64_t object_delta;
 	uint64_t object_offset;
 	int64_t entry_index;
@@ -1168,7 +1169,7 @@ bool plane_vm_map_lookup_page(struct plane_vm_map *map,
 	}
 
 	if (info != NULL) {
-		info->page_vaddr = page_vaddr;
+		info->page_vaddr = plane_vaddr_make(page_vaddr);
 		info->object = entry->object;
 		info->object_offset = object_offset;
 		info->wired_count = entry->wired_count;

@@ -162,7 +162,8 @@ static void boot_limine_collect_hhdm(void)
 {
 	BUG_ON_MSG(hhdm_request.response == NULL,
 		   "limine HHDM response missing");
-	hal_mmu_set_direct_map_base(hhdm_request.response->offset);
+	hal_mmu_set_direct_map_base(
+		plane_vaddr_make(hhdm_request.response->offset));
 }
 
 void _start(void)

@@ -357,7 +357,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 		return NULL;
 	}
 
-	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
+	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS_RAW;
 	page->wire_count = 0;
 	reset_resident_links(page);
 	page->state = PLANE_VM_PAGE_GUARD;
@@ -381,7 +381,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	}
 
 	reset_resident_links(page);
-	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
 	page->queue_prev = NULL;
 	page->queue_next = NULL;
 	page->queue_state = PMM_PAGE_QUEUE_NONE;
@@ -407,9 +407,11 @@ bool plane_vm_page_add_guard_storage(void *storage,
 					 segment);
 }
 
-struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
+struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 {
-	if (page_pool == NULL || (phys_addr & (PAGE_SIZE - 1)) != 0) {
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
+
+	if (page_pool == NULL || !plane_paddr_is_page_aligned(phys_addr)) {
 		return NULL;
 	}
 
@@ -422,10 +424,10 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 			return NULL;
 		}
 
-		if (phys_addr >= managed_ranges[i].base &&
-		    phys_addr < managed_end) {
+		if (raw_phys >= managed_ranges[i].base &&
+		    raw_phys < managed_end) {
 			uint64_t page_offset =
-				(phys_addr - managed_ranges[i].base) / PAGE_SIZE;
+				(raw_phys - managed_ranges[i].base) / PAGE_SIZE;
 
 			return &page_pool[managed_ranges[i].page_index +
 					  page_offset];
@@ -435,7 +437,7 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 	return NULL;
 }
 
-uint64_t plane_vm_page_phys(const struct plane_page *page)
+plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
 	uint64_t index;
 
@@ -449,7 +451,7 @@ uint64_t plane_vm_page_phys(const struct plane_page *page)
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
-	return page_pool[index].phys_addr;
+	return plane_paddr_make(page_pool[index].phys_addr);
 }
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -794,7 +796,7 @@ static bool page_state_range_matches(uint64_t phys_addr,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		if (page == NULL || page->state != expected) {
 			return false;
 		}
@@ -822,7 +824,7 @@ static bool set_page_state_range(uint64_t phys_addr,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 
 		page->state = next;
 	}
@@ -860,8 +862,8 @@ static bool init_page_metadata(void)
 		return false;
 	}
 
-	page_pool = hal_mmu_direct_phys_range_to_virt(metadata_phys_base,
-						     metadata_size);
+	page_pool = hal_mmu_direct_phys_range_to_virt(
+		plane_paddr_make(metadata_phys_base), metadata_size);
 	if (page_pool == NULL) {
 		return false;
 	}
@@ -993,7 +995,7 @@ static bool page_range_is_free(uint64_t phys_addr, uint64_t page_count)
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		if (!page_is_free_queued(page)) {
 			return false;
 		}
@@ -1036,7 +1038,7 @@ static bool page_range_is_allocated_unwired(uint64_t phys_addr,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		if (page == NULL ||
 		    page->state != PLANE_VM_PAGE_ALLOCATED ||
 		    page->wire_count != 0 ||
@@ -1057,7 +1059,8 @@ static bool zero_allocated_pages(uint64_t phys_addr, uint64_t page_count)
 		return false;
 	}
 
-	vaddr = hal_mmu_direct_phys_range_to_virt(phys_addr, size);
+	vaddr = hal_mmu_direct_phys_range_to_virt(plane_paddr_make(phys_addr),
+						 size);
 	if (vaddr == NULL) {
 		return false;
 	}
@@ -1079,7 +1082,7 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		if (!page_is_allocated_unqueued(page)) {
 			return false;
 		}
@@ -1095,7 +1098,7 @@ static bool rollback_allocated_page_run(uint64_t phys_addr,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		page->state = PLANE_VM_PAGE_FREE;
 		page->vm_object = NULL;
 		page->vm_object_offset = 0;
@@ -1214,7 +1217,7 @@ static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		if (!free_queue_remove(page)) {
 			return false;
 		}
@@ -1235,7 +1238,7 @@ static bool plane_pmm_alloc_pages_phys_raw(uint64_t page_count,
 bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 				      uint64_t alignment_pages,
 				      uint32_t flags,
-				      uint64_t *phys_addr)
+				      plane_paddr_t *phys_addr)
 {
 	uint64_t alloc_base;
 
@@ -1254,13 +1257,13 @@ bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 		return false;
 	}
 
-	*phys_addr = alloc_base;
+	*phys_addr = plane_paddr_make(alloc_base);
 	return true;
 }
 
 bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 				uint64_t alignment_pages,
-				uint64_t *phys_addr)
+				plane_paddr_t *phys_addr)
 {
 	return plane_pmm_alloc_pages_phys_flags(page_count, alignment_pages, 0,
 					       phys_addr);
@@ -1268,40 +1271,42 @@ bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 
 bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 {
-	uint64_t phys_addr;
+	plane_paddr_t phys_addr;
 	struct plane_page *grabbed_page;
 
 	if (page == NULL ||
 	    !vm_page_grab_flags_valid(flags) ||
 	    !plane_pmm_alloc_pages_phys_flags(
-		    1, 1, vm_page_grab_to_pmm_flags(flags), &phys_addr)) {
+			1, 1, vm_page_grab_to_pmm_flags(flags), &phys_addr)) {
 		return false;
 	}
 
 	grabbed_page = plane_vm_page_from_phys(phys_addr);
 	BUG_ON_MSG(grabbed_page == NULL,
 		   "PMM allocated page without VM metadata: phys=%llx",
-		   (unsigned long long)phys_addr);
+		   (unsigned long long)plane_paddr_raw(phys_addr));
 
 	*page = grabbed_page;
 	return true;
 }
 
-bool plane_pmm_alloc_page_phys(uint64_t *phys_addr)
+bool plane_pmm_alloc_page_phys(plane_paddr_t *phys_addr)
 {
 	return plane_pmm_alloc_pages_phys_flags(1, 1, 0, phys_addr);
 }
 
-bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
+bool plane_pmm_free_pages_phys(plane_paddr_t phys_addr, uint64_t page_count)
 {
-	if (page_count == 0 || (phys_addr & (PAGE_SIZE - 1)) != 0 ||
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
+
+	if (page_count == 0 || !plane_paddr_is_page_aligned(phys_addr) ||
 	    page_count > allocated_page_count() ||
-	    !managed_range_contains(phys_addr, page_count) ||
-	    !page_range_is_allocated_unwired(phys_addr, page_count)) {
+	    !managed_range_contains(raw_phys, page_count) ||
+	    !page_range_is_allocated_unwired(raw_phys, page_count)) {
 		return false;
 	}
 
-	BUG_ON_MSG(!set_page_state_range(phys_addr, page_count,
+	BUG_ON_MSG(!set_page_state_range(raw_phys, page_count,
 					 PLANE_VM_PAGE_ALLOCATED,
 					 PLANE_VM_PAGE_FREE),
 		   "failed to mark PMM pages free");
@@ -1312,11 +1317,11 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 		uint64_t offset;
 
 		if (!plane_checked_page_offset(i, &offset) ||
-		    !plane_checked_add_u64(phys_addr, offset, &page_phys)) {
+		    !plane_checked_add_u64(raw_phys, offset, &page_phys)) {
 			return false;
 		}
 
-		page = plane_vm_page_from_phys(page_phys);
+		page = plane_vm_page_from_phys(plane_paddr_make(page_phys));
 		page->vm_object = NULL;
 		page->vm_object_offset = 0;
 		page->object_prev = NULL;
@@ -1333,7 +1338,7 @@ bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count)
 
 bool plane_vm_page_release(struct plane_page *page)
 {
-	uint64_t phys_addr;
+	plane_paddr_t phys_addr;
 
 	if (!page_pointer_index(page, NULL) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
@@ -1350,14 +1355,14 @@ bool plane_vm_page_release(struct plane_page *page)
 		return false;
 	}
 
-	phys_addr = page->phys_addr;
+	phys_addr = plane_paddr_make(page->phys_addr);
 	BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),
 		   "failed to release VM page: phys=%llx",
-		   (unsigned long long)phys_addr);
+		   (unsigned long long)plane_paddr_raw(phys_addr));
 	return true;
 }
 
-bool plane_pmm_free_page_phys(uint64_t phys_addr)
+bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 {
 	return plane_pmm_free_pages_phys(phys_addr, 1);
 }

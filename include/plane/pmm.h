@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
 #include <plane/bits.h>
 #include <plane/memmap.h>
 
@@ -49,16 +50,16 @@ struct plane_pmm_stats {
 };
 
 bool plane_pmm_init(const struct plane_mem_info *mem);
-bool plane_pmm_alloc_page_phys(uint64_t *phys_addr);
+bool plane_pmm_alloc_page_phys(plane_paddr_t *phys_addr);
 bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 				uint64_t alignment_pages,
-				uint64_t *phys_addr);
+				plane_paddr_t *phys_addr);
 bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 				      uint64_t alignment_pages,
 				      uint32_t flags,
-				      uint64_t *phys_addr);
-bool plane_pmm_free_page_phys(uint64_t phys_addr);
-bool plane_pmm_free_pages_phys(uint64_t phys_addr, uint64_t page_count);
+				      plane_paddr_t *phys_addr);
+bool plane_pmm_free_page_phys(plane_paddr_t phys_addr);
+bool plane_pmm_free_pages_phys(plane_paddr_t phys_addr, uint64_t page_count);
 struct plane_pmm_stats plane_pmm_get_stats(void);
 void plane_pmm_log_stats(void);
 

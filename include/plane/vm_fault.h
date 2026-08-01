@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
 #include <plane/vm_prot.h>
 
 struct plane_vm_map;
@@ -18,7 +19,7 @@ struct plane_vm_map;
  * locks, or submaps.
  */
 bool plane_vm_fault_page(struct plane_vm_map *map,
-			 uint64_t vaddr,
+			 plane_vaddr_t vaddr,
 			 uint32_t fault_type);
 
 #endif /* PLANE_VM_FAULT_H */

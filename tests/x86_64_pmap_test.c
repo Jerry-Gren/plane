@@ -29,9 +29,24 @@ static uint64_t test_page_phys(uint64_t page)
 	return page * PAGE_SIZE;
 }
 
-uint64_t x86_64_pmap_active_root_phys(void)
+static plane_vaddr_t test_vaddr(uint64_t raw)
 {
-	return test_page_phys(0);
+	return plane_vaddr_make(raw);
+}
+
+static plane_paddr_t test_paddr(uint64_t raw)
+{
+	return plane_paddr_make(raw);
+}
+
+static uint64_t test_paddr_raw(plane_paddr_t addr)
+{
+	return plane_paddr_raw(addr);
+}
+
+plane_paddr_t x86_64_pmap_active_root_phys(void)
+{
+	return test_paddr(test_page_phys(0));
 }
 
 static uint64_t *test_table(uint64_t page)
@@ -74,36 +89,37 @@ static void reset_pmap_test(void)
 	flush_count = 0;
 }
 
-void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
+void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
 {
+	uint64_t raw = test_paddr_raw(phys_addr);
 	uint64_t end;
 
-	if (size == 0 || phys_addr > UINT64_MAX - size) {
+	if (size == 0 || raw > UINT64_MAX - size) {
 		return NULL;
 	}
 
-	end = phys_addr + size;
+	end = raw + size;
 	if (end > TEST_PHYS_SIZE) {
 		return NULL;
 	}
 
 	if (direct_map_blocked_phys != UINT64_MAX &&
-	    phys_addr < direct_map_blocked_phys + PAGE_SIZE &&
+	    raw < direct_map_blocked_phys + PAGE_SIZE &&
 	    end > direct_map_blocked_phys) {
 		return NULL;
 	}
 
-	return &phys_storage[phys_addr];
+	return &phys_storage[raw];
 }
 
-void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
 
-void hal_mmu_invalidate_tlb(uintptr_t vaddr)
+void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
-	invalidated_vaddr = vaddr;
+	invalidated_vaddr = plane_vaddr_raw(vaddr);
 	invalidate_count++;
 }
 
@@ -115,8 +131,10 @@ void hal_mmu_flush_tlb_all(void)
 bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 				      uint64_t alignment_pages,
 				      uint32_t flags,
-				      uint64_t *phys_addr)
+				      plane_paddr_t *phys_addr)
 {
+	uint64_t raw;
+
 	if (phys_addr == NULL || page_count != 1 || alignment_pages != 1 ||
 	    (flags & ~PLANE_PMM_ALLOC_ZERO) != 0) {
 		return false;
@@ -129,9 +147,10 @@ bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 	for (uint64_t i = TEST_ALLOC_START_PAGE; i < TEST_PAGE_COUNT; i++) {
 		if (!page_allocated[i]) {
 			page_allocated[i] = true;
-			*phys_addr = test_page_phys(i);
+			raw = test_page_phys(i);
+			*phys_addr = test_paddr(raw);
 			if ((flags & PLANE_PMM_ALLOC_ZERO) != 0) {
-				memset(&phys_storage[*phys_addr], 0, PAGE_SIZE);
+				memset(&phys_storage[raw], 0, PAGE_SIZE);
 			}
 			return true;
 		}
@@ -140,11 +159,12 @@ bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 	return false;
 }
 
-bool plane_pmm_free_page_phys(uint64_t phys_addr)
+bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 {
-	uint64_t page = phys_addr / PAGE_SIZE;
+	uint64_t raw = test_paddr_raw(phys_addr);
+	uint64_t page = raw / PAGE_SIZE;
 
-	if ((phys_addr & (PAGE_SIZE - 1)) != 0 || page >= TEST_PAGE_COUNT ||
+	if ((raw & (PAGE_SIZE - 1)) != 0 || page >= TEST_PAGE_COUNT ||
 	    !page_allocated[page]) {
 		return false;
 	}
@@ -152,6 +172,133 @@ bool plane_pmm_free_page_phys(uint64_t phys_addr)
 	page_allocated[page] = false;
 	return true;
 }
+
+static void *test_direct_phys_to_virt(uint64_t phys_addr)
+{
+	return hal_mmu_direct_phys_to_virt(test_paddr(phys_addr));
+}
+
+static bool test_pmap_map_in_root(uint64_t root,
+				  uint64_t vaddr,
+				  uint64_t phys_addr,
+				  uint32_t flags)
+{
+	return x86_64_pmap_map_page_in_owned_root(
+		test_paddr(root), test_vaddr(vaddr), test_paddr(phys_addr),
+		flags);
+}
+
+static bool test_pmap_unmap_in_root(uint64_t root, uint64_t vaddr)
+{
+	return x86_64_pmap_unmap_page_in_owned_root(test_paddr(root),
+						    test_vaddr(vaddr));
+}
+
+static bool test_pmap_translate_in_root(uint64_t root,
+					uint64_t vaddr,
+					uint64_t *phys_addr)
+{
+	plane_paddr_t out;
+
+	if (!x86_64_pmap_translate_in_root(test_paddr(root),
+					   test_vaddr(vaddr),
+					   phys_addr == NULL ? NULL : &out)) {
+		return false;
+	}
+
+	*phys_addr = test_paddr_raw(out);
+	return true;
+}
+
+static bool test_pmap_clone_kernel_page_tables(uint64_t source_pml4_phys,
+					       uint64_t *new_pml4_phys)
+{
+	plane_paddr_t out;
+
+	if (new_pml4_phys == NULL ||
+	    !x86_64_pmap_clone_kernel_page_tables(test_paddr(source_pml4_phys),
+						  &out)) {
+		return false;
+	}
+
+	*new_pml4_phys = test_paddr_raw(out);
+	return true;
+}
+
+static bool test_pmap_map_kernel_page(uint64_t vaddr,
+				      uint64_t phys_addr,
+				      uint32_t flags)
+{
+	return x86_64_pmap_map_kernel_page(test_vaddr(vaddr),
+					   test_paddr(phys_addr),
+					   flags);
+}
+
+static bool test_pmap_unmap_kernel_page(uint64_t vaddr)
+{
+	return x86_64_pmap_unmap_kernel_page(test_vaddr(vaddr));
+}
+
+static bool test_pmap_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+{
+	return x86_64_pmap_protect_kernel_page(test_vaddr(vaddr), flags);
+}
+
+static bool test_hal_map_kernel_page(uint64_t vaddr,
+				     uint64_t phys_addr,
+				     uint32_t flags)
+{
+	return hal_mmu_map_kernel_page(test_vaddr(vaddr), test_paddr(phys_addr),
+				       flags);
+}
+
+static bool test_hal_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
+{
+	plane_paddr_t out;
+
+	if (!hal_mmu_translate_kernel_page(test_vaddr(vaddr),
+					   phys_addr == NULL ? NULL : &out)) {
+		return false;
+	}
+
+	*phys_addr = test_paddr_raw(out);
+	return true;
+}
+
+static bool test_hal_unmap_kernel_page(uint64_t vaddr)
+{
+	return hal_mmu_unmap_kernel_page(test_vaddr(vaddr));
+}
+
+static bool test_hal_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+{
+	return hal_mmu_protect_kernel_page(test_vaddr(vaddr), flags);
+}
+
+#define hal_mmu_direct_phys_to_virt(phys_addr) \
+	test_direct_phys_to_virt((phys_addr))
+#define x86_64_pmap_map_page_in_owned_root(root, vaddr, phys_addr, flags) \
+	test_pmap_map_in_root((root), (vaddr), (phys_addr), (flags))
+#define x86_64_pmap_unmap_page_in_owned_root(root, vaddr) \
+	test_pmap_unmap_in_root((root), (vaddr))
+#define x86_64_pmap_translate_in_root(root, vaddr, phys_addr) \
+	test_pmap_translate_in_root((root), (vaddr), (phys_addr))
+#define x86_64_pmap_clone_kernel_page_tables(source, out) \
+	test_pmap_clone_kernel_page_tables((source), (out))
+#define x86_64_pmap_map_kernel_page(vaddr, phys_addr, flags) \
+	test_pmap_map_kernel_page((vaddr), (phys_addr), (flags))
+#define x86_64_pmap_unmap_kernel_page(vaddr) \
+	test_pmap_unmap_kernel_page((vaddr))
+#define x86_64_pmap_protect_kernel_page(vaddr, flags) \
+	test_pmap_protect_kernel_page((vaddr), (flags))
+#define hal_mmu_map_kernel_page(vaddr, phys_addr, flags) \
+	test_hal_map_kernel_page((vaddr), (phys_addr), (flags))
+#define hal_mmu_translate_kernel_page(vaddr, phys_addr) \
+	test_hal_translate_kernel_page((vaddr), (phys_addr))
+#define hal_mmu_unmap_kernel_page(vaddr) \
+	test_hal_unmap_kernel_page((vaddr))
+#define hal_mmu_protect_kernel_page(vaddr, flags) \
+	test_hal_protect_kernel_page((vaddr), (flags))
 
 static int test_map_page_allocates_missing_path(void)
 {

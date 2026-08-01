@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
 #include <plane/bits.h>
 #include <plane/vm_prot.h>
 
@@ -41,7 +42,7 @@ bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot);
 bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr);
 bool plane_kmem_free_pages(void *vaddr, uint64_t page_count);
 bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot);
-bool plane_kmem_fault_page(void *vaddr, uint32_t fault_type);
+bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type);
 
 /*
  * The in-map APIs are still kernel virtual allocation APIs. The supplied map

@@ -117,7 +117,7 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 		fault_type |= PLANE_VM_PROT_WRITE;
 	}
 
-	return plane_kmem_fault_page((void *)(uintptr_t)fault_addr, fault_type);
+	return plane_kmem_fault_page(plane_vaddr_make(fault_addr), fault_type);
 }
 
 void x86_64_exception_handler(struct interrupt_frame *frame)

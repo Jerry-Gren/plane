@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
 #include <plane/bits.h>
 #include <plane/vm_prot.h>
 
@@ -83,7 +84,7 @@ struct plane_vm_map_allocation_info {
 };
 
 struct plane_vm_map_page_info {
-	uint64_t page_vaddr;
+	plane_vaddr_t page_vaddr;
 	struct plane_vm_object *object;
 	uint64_t object_offset;
 	uint64_t wired_count;
@@ -137,7 +138,7 @@ bool plane_vm_map_lookup_allocation(
 	struct plane_vm_map_allocation_info *info);
 /* Looks up the single user page containing vaddr; guard pages are holes. */
 bool plane_vm_map_lookup_page(struct plane_vm_map *map,
-			      uint64_t vaddr,
+			      plane_vaddr_t vaddr,
 			      struct plane_vm_map_page_info *info);
 /* Updates current protection metadata for a continuous user range. */
 bool plane_vm_map_protect_pages(struct plane_vm_map *map,

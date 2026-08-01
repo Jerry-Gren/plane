@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
 #include <plane/bits.h>
 
 /*
@@ -23,8 +24,10 @@
 struct plane_page;
 struct plane_vm_object;
 
-#define PLANE_VM_PAGE_NO_PHYS UINT64_MAX
-#define PLANE_VM_PAGE_GUARD_PHYS (UINT64_MAX - 1)
+#define PLANE_VM_PAGE_NO_PHYS_RAW UINT64_MAX
+#define PLANE_VM_PAGE_GUARD_PHYS_RAW (UINT64_MAX - 1)
+#define PLANE_VM_PAGE_NO_PHYS plane_paddr_make(PLANE_VM_PAGE_NO_PHYS_RAW)
+#define PLANE_VM_PAGE_GUARD_PHYS plane_paddr_make(PLANE_VM_PAGE_GUARD_PHYS_RAW)
 #define PLANE_VM_PAGE_GRAB_ZERO BIT(0)
 
 enum plane_vm_page_state {
@@ -37,8 +40,8 @@ enum plane_vm_page_state {
 
 bool plane_vm_page_grab(uint32_t flags, struct plane_page **page);
 bool plane_vm_page_release(struct plane_page *page);
-struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr);
-uint64_t plane_vm_page_phys(const struct plane_page *page);
+struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr);
+plane_paddr_t plane_vm_page_phys(const struct plane_page *page);
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page);
 bool plane_vm_page_wire(struct plane_page *page);
 bool plane_vm_page_unwire(struct plane_page *page);

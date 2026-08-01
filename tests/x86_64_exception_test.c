@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include <hal/x86_64/exception.h>
+#include <plane/kmem.h>
 #include <plane/vm_prot.h>
 
 #include "support/test.h"
@@ -28,10 +29,10 @@ static void reset_exception_test(void)
 	last_fault_type = 0;
 }
 
-bool plane_kmem_fault_page(void *vaddr, uint32_t fault_type)
+bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type)
 {
 	kmem_fault_calls++;
-	last_fault_addr = vaddr;
+	last_fault_addr = (void *)(uintptr_t)plane_vaddr_raw(vaddr);
 	last_fault_type = fault_type;
 	return kmem_fault_result;
 }

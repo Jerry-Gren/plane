@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <hal/mmu.h>
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 
 #include <plane/util.h>
@@ -15,10 +16,10 @@ static uintptr_t invalidated_vaddrs[X86_64_PAGE_TABLE_ENTRIES];
 static uint64_t invalidate_count;
 static uint64_t flush_count;
 
-void hal_mmu_invalidate_tlb(uintptr_t vaddr)
+void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
 	if (invalidate_count < X86_64_PAGE_TABLE_ENTRIES) {
-		invalidated_vaddrs[invalidate_count] = vaddr;
+		invalidated_vaddrs[invalidate_count] = plane_vaddr_raw(vaddr);
 	}
 	invalidate_count++;
 }

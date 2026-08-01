@@ -146,27 +146,32 @@ static struct test_mapping *find_mapping(uint64_t vaddr)
 	return NULL;
 }
 
-bool hal_mmu_kernel_vma_range(uint64_t *base, uint64_t *size)
+bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 {
 	if (base == NULL || size == NULL) {
 		return false;
 	}
 
-	*base = (uint64_t)(uintptr_t)test_kmem_storage;
+	*base = plane_vaddr_make((uint64_t)(uintptr_t)test_kmem_storage);
 	*size = TEST_KMEM_SIZE;
 	return true;
 }
 
-bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
+bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+			     plane_paddr_t phys_addr,
+			     uint32_t flags)
 {
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 || find_mapping(vaddr) != NULL) {
+	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
+
+	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 ||
+	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
 
 	for (uint64_t i = 0; i < TEST_MAP_COUNT; i++) {
 		if (!test_mappings[i].used) {
-			test_mappings[i].vaddr = vaddr;
-			test_mappings[i].phys_addr = phys_addr;
+			test_mappings[i].vaddr = raw_vaddr;
+			test_mappings[i].phys_addr = plane_paddr_raw(phys_addr);
 			test_mappings[i].flags = flags;
 			test_mappings[i].used = true;
 			return true;
@@ -176,9 +181,9 @@ bool hal_mmu_map_kernel_page(uint64_t vaddr, uint64_t phys_addr, uint32_t flags)
 	return false;
 }
 
-bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
+bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
 {
-	struct test_mapping *mapping = find_mapping(vaddr);
+	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
 	if (mapping == NULL) {
 		return false;
@@ -188,9 +193,9 @@ bool hal_mmu_unmap_kernel_page(uint64_t vaddr)
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 {
-	struct test_mapping *mapping = find_mapping(vaddr);
+	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
 	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 || mapping == NULL) {
 		return false;
@@ -200,7 +205,8 @@ bool hal_mmu_protect_kernel_page(uint64_t vaddr, uint32_t flags)
 	return true;
 }
 
-bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
+bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
+				   plane_paddr_t *phys_addr)
 {
 	struct test_mapping *mapping;
 
@@ -208,12 +214,12 @@ bool hal_mmu_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
 		return false;
 	}
 
-	mapping = find_mapping(vaddr);
+	mapping = find_mapping(plane_vaddr_raw(vaddr));
 	if (mapping == NULL) {
 		return false;
 	}
 
-	*phys_addr = mapping->phys_addr;
+	*phys_addr = plane_paddr_make(mapping->phys_addr);
 	return true;
 }
 
@@ -274,11 +280,12 @@ bool plane_vm_page_unwire(struct plane_page *page)
 	return true;
 }
 
-struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
+struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 {
-	uint64_t page = phys_addr / PAGE_SIZE;
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
+	uint64_t page = raw_phys / PAGE_SIZE;
 
-	if ((phys_addr & (PAGE_SIZE - 1)) != 0 ||
+	if (!plane_paddr_is_page_aligned(phys_addr) ||
 	    page >= TEST_PAGE_COUNT) {
 		return NULL;
 	}
@@ -286,7 +293,7 @@ struct plane_page *plane_vm_page_from_phys(uint64_t phys_addr)
 	return &test_pages[page];
 }
 
-uint64_t plane_vm_page_phys(const struct plane_page *page)
+plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (is_test_guard_page(page)) {
 		return page->guard ? PLANE_VM_PAGE_GUARD_PHYS :
@@ -296,7 +303,7 @@ uint64_t plane_vm_page_phys(const struct plane_page *page)
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
-	return page->phys_addr;
+	return plane_paddr_make(page->phys_addr);
 }
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -520,7 +527,8 @@ struct plane_page *plane_vm_page_create_guard(void)
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
 		if (!test_guard_pages[i].guard) {
 			test_guard_pages[i] = (struct plane_page){0};
-			test_guard_pages[i].phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
+			test_guard_pages[i].phys_addr =
+				PLANE_VM_PAGE_GUARD_PHYS_RAW;
 			test_guard_pages[i].guard = true;
 			return &test_guard_pages[i];
 		}
@@ -529,7 +537,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 		if (!runtime_guard_pages[i].guard) {
 			runtime_guard_pages[i] = (struct plane_page){0};
 			runtime_guard_pages[i].phys_addr =
-				PLANE_VM_PAGE_GUARD_PHYS;
+				PLANE_VM_PAGE_GUARD_PHYS_RAW;
 			runtime_guard_pages[i].guard = true;
 			return &runtime_guard_pages[i];
 		}
@@ -553,7 +561,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	}
 
 	page->guard = false;
-	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
 	return true;
 }
 
@@ -580,7 +588,9 @@ static int test_global_kmem_init_is_one_shot(void)
 
 	failures += test_expect_bool("global fault before init",
 				     plane_kmem_fault_page(
-					     test_kmem_storage,
+					     plane_vaddr_make(
+						     (uint64_t)(uintptr_t)
+							     test_kmem_storage),
 					     PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
@@ -622,14 +632,16 @@ static int test_global_kmem_init_is_one_shot(void)
 					    HAL_MMU_MAP_WRITE);
 		failures += test_expect_bool("global fault unmap",
 					     hal_mmu_unmap_kernel_page(
-						     (uint64_t)(uintptr_t)addr),
+						     plane_vaddr_make(
+							     (uint64_t)(uintptr_t)addr)),
 					     true);
 		failures += test_expect_u64("global fault mapping removed",
 					    mapping_count(),
 					    init_mappings + 1);
 		failures += test_expect_bool("global fault repairs pmap",
 					     plane_kmem_fault_page(
-						     addr,
+						     plane_vaddr_make(
+							     (uint64_t)(uintptr_t)addr),
 						     PLANE_VM_PROT_READ),
 					     true);
 		mapping = find_mapping((uint64_t)(uintptr_t)addr);
@@ -686,7 +698,9 @@ static int test_global_kmem_init_is_one_shot(void)
 					    mapping->flags, 0);
 		failures += test_expect_bool("global readonly write fault",
 					     plane_kmem_fault_page(
-						     readonly_addr,
+						     plane_vaddr_make(
+							     (uint64_t)(uintptr_t)
+								     readonly_addr),
 						     PLANE_VM_PROT_READ |
 							     PLANE_VM_PROT_WRITE),
 					     false);

@@ -8,9 +8,9 @@
 static uint64_t direct_map_base = X86_64_DIRECT_MAP_BASE;
 static bool direct_map_initialized;
 
-void hal_mmu_set_direct_map_base(uint64_t base)
+void hal_mmu_set_direct_map_base(plane_vaddr_t base)
 {
-	direct_map_base = base;
+	direct_map_base = plane_vaddr_raw(base);
 	direct_map_initialized = false;
 }
 
@@ -49,55 +49,56 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 	return true;
 }
 
-void *hal_mmu_direct_phys_to_virt(uint64_t phys_addr)
+void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
 
-void *hal_mmu_direct_phys_range_to_virt(uint64_t phys_addr, uint64_t size)
+void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
 {
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 	uint64_t end;
 
 	if (!direct_map_initialized || size == 0 ||
-	    !plane_checked_add_u64(phys_addr, size, &end) ||
+	    !plane_checked_add_u64(raw_phys, size, &end) ||
 	    end > X86_64_DIRECT_MAP_SIZE) {
 		return NULL;
 	}
 
-	return (void *)(direct_map_base + phys_addr);
+	return (void *)(direct_map_base + raw_phys);
 }
 
-uint64_t hal_mmu_direct_virt_to_phys(const void *vaddr)
+plane_paddr_t hal_mmu_direct_virt_to_phys(const void *vaddr)
 {
 	uint64_t addr = (uint64_t)(uintptr_t)vaddr;
 	uint64_t offset;
 
 	if (!direct_map_initialized || addr < direct_map_base) {
-		return HAL_MMU_INVALID_PHYS;
+		return plane_paddr_make(HAL_MMU_INVALID_PHYS);
 	}
 
 	offset = addr - direct_map_base;
 	if (offset >= X86_64_DIRECT_MAP_SIZE) {
-		return HAL_MMU_INVALID_PHYS;
+		return plane_paddr_make(HAL_MMU_INVALID_PHYS);
 	}
 
-	return offset;
+	return plane_paddr_make(offset);
 }
 
-bool hal_mmu_kernel_vma_range(uint64_t *base, uint64_t *size)
+bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 {
 	if (base == NULL || size == NULL) {
 		return false;
 	}
 
-	*base = X86_64_KERNEL_MAP_BASE;
+	*base = plane_vaddr_make(X86_64_KERNEL_MAP_BASE);
 	*size = X86_64_KERNEL_MAP_SIZE;
 	return true;
 }
 
-void hal_mmu_invalidate_tlb(uintptr_t vaddr)
+void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
-	__asm__ volatile ("invlpg (%0)" : : "r" (vaddr) : "memory");
+	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
 }
 
 void hal_mmu_flush_tlb_all(void)

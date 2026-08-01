@@ -57,7 +57,7 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 		uint64_t current_vaddr = X86_64_MB2_FRAMEBUFFER_VMA_BASE + offset;
 
 		target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
-		hal_mmu_invalidate_tlb(current_vaddr);
+		hal_mmu_invalidate_tlb(plane_vaddr_make(current_vaddr));
 	}
 
 	*vaddr = (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE + page_offset);
