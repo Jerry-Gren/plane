@@ -14,10 +14,14 @@ struct plane_vm_object;
 /*
  * Early kernel virtual allocator.
  *
- * This owns a kernel virtual address window and backs allocations with PMM
- * pages. Byte-size allocations are rounded up to whole pages; this is a
- * small kmem/vm_map foundation, not a sub-page heap or pageable VM.
- * PLANE_KMEM_ALLOC_ZERO clears the complete backing page range.
+ * This owns a kernel virtual address window. Byte-size allocations are rounded
+ * up to whole pages; this is a small kmem/vm_map foundation, not a sub-page
+ * heap or pageable VM.
+ * By default, allocations are eagerly backed with PMM pages.
+ * PLANE_KMEM_ALLOC_LAZY creates a fault-backed reservation: no resident page or
+ * pmap mapping is created until plane_kmem_fault_page() handles a fault.
+ * PLANE_KMEM_ALLOC_ZERO clears the complete eager backing page range; with
+ * PLANE_KMEM_ALLOC_LAZY, zero-fill happens at fault time.
  * PLANE_KMEM_ALLOC_GUARD reserves one unmapped guard page before and after the
  * returned allocation. This kernel-object path follows XNU's KMA_KOBJECT
  * direction: guard pages are VA-only sentinels here, with no PMM backing and
@@ -33,6 +37,7 @@ enum plane_kmem_alloc_flags {
 	PLANE_KMEM_ALLOC_ZERO = BIT(0),
 	PLANE_KMEM_ALLOC_GUARD = BIT(1),
 	PLANE_KMEM_ALLOC_READONLY = BIT(2),
+	PLANE_KMEM_ALLOC_LAZY = BIT(3),
 };
 
 bool plane_kmem_init(void);

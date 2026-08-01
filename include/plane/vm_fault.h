@@ -14,9 +14,10 @@ struct plane_vm_map;
  *
  * This handles a single kernel-map user page: map lookup, current protection
  * check, resident page lookup or zero-fill allocation, object insertion, and
- * pmap enter/repair. x86_64 #PF dispatch can use this through kmem's kernel
- * map wrapper, but this does not implement pager, COW, pageout, busy/wanted,
- * locks, or submaps.
+ * pmap enter/repair. This is also the backing path for lazy kernel object
+ * allocations. x86_64 #PF dispatch can use this through kmem's kernel map
+ * wrapper, but this does not implement pager, COW, pageout, busy/wanted,
+ * locks, submaps, or user-map faults.
  */
 bool plane_vm_fault_page(struct plane_vm_map *map,
 			 plane_vaddr_t vaddr,

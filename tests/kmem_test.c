@@ -4,6 +4,7 @@
 #include <hal/mmu.h>
 #include <plane/kmem.h>
 #include <plane/mm.h>
+#include <plane/vm_fault.h>
 #include <plane/vm_map.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
@@ -233,6 +234,12 @@ static struct test_mapping *find_mapping(uint64_t vaddr)
 	}
 
 	return NULL;
+}
+
+static bool fault_test_map(uint64_t vaddr, uint32_t fault_type)
+{
+	return plane_vm_fault_page(&test_map, plane_vaddr_make(vaddr),
+				   fault_type);
 }
 
 bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
@@ -1040,6 +1047,315 @@ static int test_guard_alloc_and_free_pages(void)
 	return failures;
 }
 
+static int test_lazy_alloc_faults_in_zero_page(void)
+{
+	void *addr = NULL;
+	struct plane_vm_map_allocation_info info = {0};
+	struct test_mapping *mapping;
+	uint64_t first_phys = UINT64_MAX;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2,
+					     PLANE_KMEM_ALLOC_LAZY, &addr),
+				     true);
+	failures += test_expect_ptr("lazy addr", addr,
+				    (void *)TEST_KMEM_BASE);
+	failures += test_expect_u64("lazy no backing pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy no wired pages", wired_page_count(),
+				    0);
+	failures += test_expect_u64("lazy no object pages",
+				    object_page_count(), 0);
+	failures += test_expect_u64("lazy no mappings", mapping_count(), 0);
+	failures += test_expect_u32("lazy no eager zero grab",
+				    last_grab_flags, 0);
+	failures += test_expect_bool("lazy lookup",
+				     plane_vm_map_lookup_allocation(
+					     &test_map, TEST_KMEM_BASE, 2,
+					     &info),
+				     true);
+	failures += test_expect_u64("lazy map wired metadata",
+				    info.wired_count, 1);
+	failures += test_expect_ptr("lazy map object", info.object,
+				    &test_object);
+	failures += test_expect_u64("lazy object offset",
+				    info.object_offset, TEST_KMEM_BASE);
+	failures += test_expect_u64("lazy object ref count",
+				    plane_vm_object_ref_count(&test_object), 2);
+
+	failures += test_expect_bool("lazy read fault",
+				     fault_test_map(TEST_KMEM_BASE + 17,
+						    PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("lazy fault backing pages",
+				    allocated_page_count(), 1);
+	failures += test_expect_u64("lazy fault wired pages",
+				    wired_page_count(), 1);
+	failures += test_expect_u64("lazy fault object pages",
+				    object_page_count(), 1);
+	failures += test_expect_u64("lazy fault object resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_u64("lazy fault object wired count",
+				    plane_vm_object_wired_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_u32("lazy fault zero fill",
+				    last_grab_flags, PLANE_VM_PAGE_GRAB_ZERO);
+	mapping = find_mapping(TEST_KMEM_BASE);
+	failures += test_expect_not_null("lazy fault mapping", mapping);
+	if (mapping != NULL) {
+		first_phys = mapping->phys_addr;
+		failures += test_expect_u32("lazy fault mapping writable",
+					    mapping->flags,
+					    HAL_MMU_MAP_WRITE);
+	}
+	failures += test_expect_ptr("lazy object page",
+				    plane_vm_object_lookup_page(&test_object,
+								TEST_KMEM_BASE),
+				    &test_pages[0]);
+
+	failures += test_expect_bool("lazy repeat fault",
+				     fault_test_map(TEST_KMEM_BASE,
+						    PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("lazy repeat no new backing",
+				    allocated_page_count(), 1);
+	mapping = find_mapping(TEST_KMEM_BASE);
+	if (mapping != NULL) {
+		failures += test_expect_u64("lazy repeat same phys",
+					    mapping->phys_addr, first_phys);
+	}
+
+	failures += test_expect_bool("lazy free",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 2),
+				     true);
+	failures += test_expect_u64("lazy free backing pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy free wired pages",
+				    wired_page_count(), 0);
+	failures += test_expect_u64("lazy free object pages",
+				    object_page_count(), 0);
+	failures += test_expect_u64("lazy free mappings", mapping_count(), 0);
+	failures += test_expect_u64("lazy free object ref count",
+				    plane_vm_object_ref_count(&test_object), 1);
+	return failures;
+}
+
+static int test_lazy_readonly_fault_protection(void)
+{
+	void *addr = NULL;
+	struct test_mapping *mapping;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy readonly alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 1,
+					     PLANE_KMEM_ALLOC_LAZY |
+						     PLANE_KMEM_ALLOC_READONLY,
+					     &addr),
+				     true);
+	failures += test_expect_bool("lazy readonly write fault",
+				     fault_test_map(TEST_KMEM_BASE,
+						    PLANE_VM_PROT_READ |
+							    PLANE_VM_PROT_WRITE),
+				     false);
+	failures += test_expect_u64("lazy readonly write no backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy readonly write no object",
+				    object_page_count(), 0);
+	failures += test_expect_u64("lazy readonly write no mapping",
+				    mapping_count(), 0);
+	failures += test_expect_bool("lazy readonly free after write fail",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 1),
+				     true);
+
+	failures += test_expect_bool("lazy readonly second alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 1,
+					     PLANE_KMEM_ALLOC_LAZY |
+						     PLANE_KMEM_ALLOC_READONLY,
+					     &addr),
+				     true);
+	failures += test_expect_bool("lazy readonly read fault",
+				     fault_test_map(TEST_KMEM_BASE,
+						    PLANE_VM_PROT_READ),
+				     true);
+	mapping = find_mapping(TEST_KMEM_BASE);
+	failures += test_expect_not_null("lazy readonly mapping", mapping);
+	if (mapping != NULL) {
+		failures += test_expect_u32("lazy readonly flags",
+					    mapping->flags, 0);
+	}
+	failures += test_expect_u64("lazy readonly backing",
+				    allocated_page_count(), 1);
+	failures += test_expect_bool("lazy readonly free",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 1),
+				     true);
+	return failures;
+}
+
+static int test_lazy_guard_faults_only_user_pages(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy guard alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2,
+					     PLANE_KMEM_ALLOC_LAZY |
+						     PLANE_KMEM_ALLOC_GUARD,
+					     &addr),
+				     true);
+	failures += test_expect_ptr("lazy guard user addr", addr,
+				    (void *)kmem_page_vaddr(1));
+	failures += test_expect_u64("lazy guard no backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy guard no mappings",
+				    mapping_count(), 0);
+	failures += test_expect_bool("lazy guard left fault",
+				     fault_test_map(kmem_page_vaddr(0),
+						    PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("lazy guard left no backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_bool("lazy guard user fault",
+				     fault_test_map(kmem_page_vaddr(1),
+						    PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("lazy guard user backing",
+				    allocated_page_count(), 1);
+	failures += test_expect_not_null("lazy guard user mapping",
+					 find_mapping(kmem_page_vaddr(1)));
+	failures += test_expect_bool("lazy guard right fault",
+				     fault_test_map(kmem_page_vaddr(3),
+						    PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("lazy guard right stable",
+				    allocated_page_count(), 1);
+	failures += test_expect_bool("lazy guard free",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 2),
+				     true);
+	failures += test_expect_u64("lazy guard free backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy guard free mappings",
+				    mapping_count(), 0);
+	failures += test_expect_u64("lazy guard active pages",
+				    guard_page_count(), 0);
+	return failures;
+}
+
+static int test_lazy_protect_before_and_after_fault(void)
+{
+	void *addr = NULL;
+	struct test_mapping *first;
+	struct test_mapping *second;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy protect alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2,
+					     PLANE_KMEM_ALLOC_LAZY, &addr),
+				     true);
+	failures += test_expect_bool("lazy protect before fault",
+				     plane_kmem_protect_pages_in_map(
+					     &test_map, addr, 2,
+					     PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("lazy protect no backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy protect no mappings",
+				    mapping_count(), 0);
+	failures += test_expect_bool("lazy protected read fault",
+				     fault_test_map(kmem_page_vaddr(0),
+						    PLANE_VM_PROT_READ),
+				     true);
+	first = find_mapping(kmem_page_vaddr(0));
+	failures += test_expect_not_null("lazy protected first mapping", first);
+	if (first != NULL) {
+		failures += test_expect_u32("lazy protected first ro",
+					    first->flags, 0);
+	}
+	failures += test_expect_bool("lazy protected write fault",
+				     fault_test_map(kmem_page_vaddr(1),
+						    PLANE_VM_PROT_READ |
+							    PLANE_VM_PROT_WRITE),
+				     false);
+	failures += test_expect_u64("lazy protected write stable pages",
+				    allocated_page_count(), 1);
+	failures += test_expect_null("lazy protected second absent",
+				     find_mapping(kmem_page_vaddr(1)));
+
+	failures += test_expect_bool("lazy protect writable after fault",
+				     plane_kmem_protect_pages_in_map(
+					     &test_map, addr, 2,
+					     PLANE_VM_PROT_DEFAULT),
+				     true);
+	if (first != NULL) {
+		failures += test_expect_u32("lazy protect first writable",
+					    first->flags, HAL_MMU_MAP_WRITE);
+	}
+	failures += test_expect_null("lazy protect second still absent",
+				     find_mapping(kmem_page_vaddr(1)));
+	failures += test_expect_bool("lazy second write fault",
+				     fault_test_map(kmem_page_vaddr(1),
+						    PLANE_VM_PROT_READ |
+							    PLANE_VM_PROT_WRITE),
+				     true);
+	second = find_mapping(kmem_page_vaddr(1));
+	failures += test_expect_not_null("lazy second mapping", second);
+	if (second != NULL) {
+		failures += test_expect_u32("lazy second writable",
+					    second->flags, HAL_MMU_MAP_WRITE);
+	}
+	failures += test_expect_bool("lazy protect free",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 2),
+				     true);
+	return failures;
+}
+
+static int test_lazy_free_before_fault(void)
+{
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy free-before alloc",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2,
+					     PLANE_KMEM_ALLOC_LAZY |
+						     PLANE_KMEM_ALLOC_ZERO,
+					     &addr),
+				     true);
+	failures += test_expect_u64("lazy free-before no backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy free-before no mapping",
+				    mapping_count(), 0);
+	failures += test_expect_bool("lazy free before fault",
+				     plane_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 2),
+				     true);
+	failures += test_expect_u64("lazy free-before pages freed",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy free-before mappings freed",
+				    mapping_count(), 0);
+	failures += test_expect_bool("lazy free-before reuse",
+				     plane_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2, 0,
+					     &addr),
+				     true);
+	failures += test_expect_ptr("lazy free-before reused addr", addr,
+				    (void *)TEST_KMEM_BASE);
+	return failures;
+}
+
 static int test_alloc_and_free_bytes(void)
 {
 	void *addr = NULL;
@@ -1564,6 +1880,11 @@ int main(void)
 		TEST_CASE(test_guard_protect_updates_only_user_pages),
 		TEST_CASE(test_protect_rejects_invalid_inputs),
 		TEST_CASE(test_guard_alloc_and_free_pages),
+		TEST_CASE(test_lazy_alloc_faults_in_zero_page),
+		TEST_CASE(test_lazy_readonly_fault_protection),
+		TEST_CASE(test_lazy_guard_faults_only_user_pages),
+		TEST_CASE(test_lazy_protect_before_and_after_fault),
+		TEST_CASE(test_lazy_free_before_fault),
 		TEST_CASE(test_alloc_and_free_bytes),
 		TEST_CASE(test_byte_guard_alloc_and_free),
 		TEST_CASE(test_byte_alloc_rounds_up_to_pages),
