@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <plane/address.h>
 #include <plane/memmap.h>
+#include <plane/smp.h>
 
 /* Video */
 struct plane_video_info {
@@ -24,11 +25,11 @@ struct plane_video_info {
 struct boot_info {
 	struct plane_video_info video;
 	struct plane_mem_info   mem;
+	struct plane_smp_info   smp;
 	
 	/*
 	 * and more ...
 	 * struct plane_acpi_info  acpi;
-	 * struct plane_smp_info   smp;
 	 * char cmdline[256];
 	 */
 };

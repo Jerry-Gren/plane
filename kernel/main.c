@@ -4,6 +4,7 @@
 #include <plane/kmem.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
+#include <plane/smp.h>
 #include <hal/mmu.h>
 #include <hal/serial.h>
 #include <hal/hal.h>
@@ -12,6 +13,10 @@ void kmain(struct boot_info *info)
 {
 	hal_serial_init();
 	hal_arch_early_init();
+	BUG_ON_MSG(!plane_smp_init_bsp(&info->smp),
+		   "failed to initialize BSP SMP topology");
+	pr_info("SMP: cpus=%u bsp=%u\n",
+		plane_cpu_count(), plane_cpu_current_id());
 
 	BUG_ON_MSG(!plane_sanitize_memory_map(&info->mem),
 		   "failed to sanitize boot memory map");

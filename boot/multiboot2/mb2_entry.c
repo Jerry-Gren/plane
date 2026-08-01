@@ -199,6 +199,9 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 	plane_paddr_t framebuffer_phys_addr = plane_paddr_make(0);
 	uint64_t framebuffer_size = 0;
 
+	BUG_ON_MSG(!plane_smp_info_init_bsp(&b_info.smp, 0),
+		   "failed to initialize multiboot2 BSP-only SMP info");
+
 	plane_vaddr_t info_vaddr = boot_mb2_arch_phys_to_virt(mb2_info_phys);
 	void *info_ptr = plane_vaddr_to_ptr(info_vaddr);
 	struct multiboot_info_base *info_base = info_ptr;

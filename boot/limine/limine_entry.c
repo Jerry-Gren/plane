@@ -43,6 +43,13 @@ static volatile struct limine_hhdm_request hhdm_request = {
 	.revision = 0
 };
 
+__used __section(".limine_requests")
+static volatile struct limine_mp_request mp_request = {
+	.id = LIMINE_MP_REQUEST_ID,
+	.revision = 0,
+	.flags = 0
+};
+
 /* Mark the start and end of the Limine request list. */
 
 __used __section(".limine_requests_start")
@@ -166,6 +173,55 @@ static void boot_limine_collect_hhdm(void)
 		plane_vaddr_make(hhdm_request.response->offset));
 }
 
+static void boot_limine_collect_smp(struct plane_smp_info *smp)
+{
+	struct limine_mp_response *response = mp_request.response;
+
+	BUG_ON_MSG(!plane_smp_info_init(smp),
+		   "failed to initialize limine SMP info");
+	if (response == NULL || response->cpu_count == 0 ||
+	    response->cpus == NULL) {
+		BUG_ON_MSG(!plane_smp_info_init_bsp(smp, 0),
+			   "failed to initialize limine BSP-only SMP info");
+		return;
+	}
+
+	uint32_t bsp_lapic_id = response->bsp_lapic_id;
+	bool found_bsp = false;
+
+	for (uint64_t i = 0; i < response->cpu_count; i++) {
+		struct limine_mp_info *cpu = response->cpus[i];
+
+		BUG_ON_MSG(cpu == NULL, "limine MP CPU %llu is null",
+			   (unsigned long long)i);
+		if (cpu->lapic_id == bsp_lapic_id) {
+			BUG_ON_MSG(!plane_smp_info_record_cpu(smp,
+							      cpu->lapic_id,
+							      true),
+				   "failed to record limine BSP CPU");
+			found_bsp = true;
+			break;
+		}
+	}
+
+	if (!found_bsp) {
+		BUG_ON_MSG(!plane_smp_info_record_cpu(smp, bsp_lapic_id, true),
+			   "failed to record limine fallback BSP CPU");
+	}
+
+	for (uint64_t i = 0; i < response->cpu_count; i++) {
+		struct limine_mp_info *cpu = response->cpus[i];
+
+		BUG_ON_MSG(cpu == NULL, "limine MP CPU %llu is null",
+			   (unsigned long long)i);
+		if (cpu->lapic_id == bsp_lapic_id) {
+			continue;
+		}
+
+		plane_smp_info_record_cpu(smp, cpu->lapic_id, false);
+	}
+}
+
 void _start(void)
 {
 	hal_serial_init();
@@ -179,6 +235,7 @@ void _start(void)
 	boot_limine_collect_hhdm();
 	boot_limine_collect_framebuffer(&b_info.video);
 	boot_limine_collect_memmap(&b_info.mem);
+	boot_limine_collect_smp(&b_info.smp);
 
 	kmain(&b_info);
 

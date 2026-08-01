@@ -6,3 +6,8 @@ void hal_cpu_hang(void)
 		__asm__ volatile ("cli; hlt");
 	}
 }
+
+void hal_cpu_relax(void)
+{
+	__asm__ volatile ("pause" ::: "memory");
+}
