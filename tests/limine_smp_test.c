@@ -24,6 +24,16 @@ bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	return data != NULL;
 }
 
+bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
+{
+	return info != NULL;
+}
+
+bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
+{
+	return data != NULL;
+}
+
 void hal_irq_disable(void)
 {
 }

@@ -297,6 +297,7 @@ void plane_smp_ap_park_entry(struct plane_cpu_data *data)
 	if (data == NULL || data->self != data ||
 	    !hal_cpu_install_ap_startup_context(data) ||
 	    !hal_cpu_set_current_data(data) ||
+	    !hal_cpu_init_ap_local_interrupts(data) ||
 	    !plane_smp_mark_ap_parked(data)) {
 		if (data != NULL) {
 			plane_smp_mark_ap_failed(data);

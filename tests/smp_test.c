@@ -11,13 +11,16 @@
 static bool hal_install_should_fail;
 static bool hal_prepare_context_should_fail;
 static bool hal_install_context_should_fail;
+static bool hal_local_interrupts_should_fail;
 static uint32_t hal_install_count;
 static uint32_t hal_prepare_context_count;
 static uint32_t hal_install_context_count;
+static uint32_t hal_local_interrupts_count;
 static uint32_t hal_hang_count;
 static struct plane_cpu_data *hal_last_current_data;
 static struct plane_cpu_data *hal_last_prepare_context_data;
 static struct plane_cpu_data *hal_last_install_context_data;
+static struct plane_cpu_data *hal_last_local_interrupts_data;
 static jmp_buf hal_hang_env;
 static bool hal_hang_trap_enabled;
 
@@ -40,6 +43,18 @@ bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	hal_install_context_count++;
 	hal_last_install_context_data = data;
 	return !hal_install_context_should_fail;
+}
+
+bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
+{
+	return info != NULL;
+}
+
+bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
+{
+	hal_local_interrupts_count++;
+	hal_last_local_interrupts_data = data;
+	return !hal_local_interrupts_should_fail;
 }
 
 void hal_irq_disable(void)
@@ -175,6 +190,9 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	failures += test_expect_bool("record ap 13",
 				     plane_smp_info_record_cpu(&info, 13, false),
 				     true);
+	failures += test_expect_bool("record ap 15",
+				     plane_smp_info_record_cpu(&info, 15, false),
+				     true);
 
 	failures += test_expect_bool("init succeeds",
 				     plane_smp_init_bsp(&info), true);
@@ -183,7 +201,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	failures += test_expect_bool("initialized",
 				     plane_smp_is_initialized(), true);
 	failures += test_expect_u32("runtime cpu count",
-				    plane_cpu_count(), 4);
+				    plane_cpu_count(), 5);
 	failures += test_expect_u32("current cpu id",
 				    plane_cpu_current_id(), 0);
 	failures += test_expect_bool("current is bsp",
@@ -215,7 +233,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 		failures += test_expect_bool("ap offline", ap->online, false);
 	}
 	failures += test_expect_ptr("out of range cpu data get",
-				    plane_cpu_data_get(4), NULL);
+				    plane_cpu_data_get(5), NULL);
 	return failures;
 }
 
@@ -231,7 +249,7 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				     false);
 	failures += test_expect_bool("prepare rejects out of range",
 				     plane_smp_prepare_ap_stack(
-					     4, plane_vaddr_make(0x800000), 1),
+					     5, plane_vaddr_make(0x800000), 1),
 				     false);
 	failures += test_expect_bool("prepare rejects null stack",
 				     plane_smp_prepare_ap_stack(
@@ -290,6 +308,10 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				    hal_install_count, 3);
 	failures += test_expect_ptr("current data sees ap1",
 				    hal_last_current_data, ap1);
+	failures += test_expect_u32("park entry initializes local interrupts",
+				    hal_local_interrupts_count, 1);
+	failures += test_expect_ptr("local interrupts sees ap1",
+				    hal_last_local_interrupts_data, ap1);
 	failures += test_expect_u32("ap1 state parked",
 				    plane_cpu_boot_state(1),
 				    PLANE_CPU_BOOT_PARKED);
@@ -312,32 +334,53 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				    PLANE_CPU_BOOT_FAILED);
 	failures += test_expect_u32("parked count unchanged",
 				    plane_cpu_parked_count(), 1);
+
+	struct plane_cpu_data *ap3 = plane_cpu_boot_data_get(3);
+
+	failures += test_expect_bool("prepare ap3",
+				     plane_smp_prepare_ap_stack(
+					     3, plane_vaddr_make(0xb00000), 1),
+				     true);
+	failures += test_expect_bool("start ap3",
+				     plane_smp_mark_ap_starting(3), true);
+	hal_local_interrupts_should_fail = true;
+	call_ap_park_entry(ap3);
+	hal_local_interrupts_should_fail = false;
+	failures += test_expect_u32("ap3 state failed after local interrupts",
+				    plane_cpu_boot_state(3),
+				    PLANE_CPU_BOOT_FAILED);
+	failures += test_expect_u32("local interrupts called for ap3",
+				    hal_local_interrupts_count, 2);
+	failures += test_expect_ptr("local interrupts sees ap3",
+				    hal_last_local_interrupts_data, ap3);
+	failures += test_expect_u32("parked count still unchanged",
+				    plane_cpu_parked_count(), 1);
 	return failures;
 }
 
 static int test_ap_stack_prepare_rejects_after_context_failure_path(void)
 {
 	int failures = 0;
-	struct plane_cpu_data *ap3 = plane_cpu_boot_data_get(3);
+	struct plane_cpu_data *ap4 = plane_cpu_boot_data_get(4);
 
 	hal_prepare_context_should_fail = true;
-	failures += test_expect_bool("prepare ap3 context failure rejected",
+	failures += test_expect_bool("prepare ap4 context failure rejected",
 				     plane_smp_prepare_ap_stack(
-					     3, plane_vaddr_make(0xb00000), 1),
+					     4, plane_vaddr_make(0xc00000), 1),
 				     false);
 	hal_prepare_context_should_fail = false;
-	failures += test_expect_u32("ap3 still offline",
-				    plane_cpu_boot_state(3),
+	failures += test_expect_u32("ap4 still offline",
+				    plane_cpu_boot_state(4),
 				    PLANE_CPU_BOOT_OFFLINE);
-	if (ap3 != NULL) {
-		failures += test_expect_u64("ap3 stack base cleared",
-					    plane_vaddr_raw(ap3->ap_stack_base),
+	if (ap4 != NULL) {
+		failures += test_expect_u64("ap4 stack base cleared",
+					    plane_vaddr_raw(ap4->ap_stack_base),
 					    0);
-		failures += test_expect_u64("ap3 stack top cleared",
-					    plane_vaddr_raw(ap3->ap_stack_top),
+		failures += test_expect_u64("ap4 stack top cleared",
+					    plane_vaddr_raw(ap4->ap_stack_top),
 					    0);
-		failures += test_expect_u64("ap3 stack pages cleared",
-					    ap3->ap_stack_pages, 0);
+		failures += test_expect_u64("ap4 stack pages cleared",
+					    ap4->ap_stack_pages, 0);
 	}
 	return failures;
 }
@@ -352,9 +395,9 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 	failures += test_expect_bool("reinit rejected",
 				     plane_smp_init_bsp(&info), false);
 	failures += test_expect_u32("reinit does not reinstall cpu data",
-				    hal_install_count, 3);
+				    hal_install_count, 4);
 	failures += test_expect_u32("old cpu count kept",
-				    plane_cpu_count(), 4);
+				    plane_cpu_count(), 5);
 
 	const struct plane_cpu_data *bsp = plane_cpu_data_get(0);
 

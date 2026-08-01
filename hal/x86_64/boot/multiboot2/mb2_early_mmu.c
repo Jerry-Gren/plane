@@ -5,6 +5,13 @@
 #include <plane/overflow.h>
 #include <plane/util.h>
 
+/*
+ * Boot-only framebuffer mapping.
+ *
+ * This is an early Multiboot2 handoff bridge with a dedicated framebuffer
+ * VMA, not a general MMIO mapper. The long-term IO-map path should own
+ * device/cache attributes consistently for framebuffer and LAPIC mappings.
+ */
 #define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
 
 /* in mb2_entry_entry.S */

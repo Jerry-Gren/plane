@@ -11,9 +11,10 @@
 
 /*
  * Early SMP foundation records topology and installs BSP CPU data into the
- * arch current-data slot. APs may be started only into a parked halt loop;
- * PMM/VM/pmap/kmem remain BSP-only, and Plane does not expose a GS-relative
- * accessor yet.
+ * arch current-data slot. x86_64 APs may be started only far enough to install
+ * per-CPU descriptors/current data and local APIC state before parking in a
+ * halt loop; PMM/VM/pmap/kmem remain BSP-only. Plane does not expose a
+ * GS-relative accessor, IPI dispatch, TLB shootdown, or scheduling yet.
  */
 enum plane_cpu_boot_state {
 	PLANE_CPU_BOOT_OFFLINE = 0,
