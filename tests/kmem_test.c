@@ -242,6 +242,21 @@ static bool fault_test_map(uint64_t vaddr, uint32_t fault_type)
 				   fault_type);
 }
 
+static int expect_page_wire_count(const char *name,
+				  const struct plane_page *page,
+				  uint64_t expected)
+{
+	uint64_t wire_count = UINT64_MAX;
+	int failures = 0;
+
+	failures += test_expect_bool(name,
+				     plane_vm_page_wire_count(page,
+							      &wire_count),
+				     true);
+	failures += test_expect_u64(name, wire_count, expected);
+	return failures;
+}
+
 static plane_vaddr_t test_vaddr_from_ptr(const void *ptr)
 {
 	return plane_vaddr_from_ptr(ptr);
@@ -1485,6 +1500,62 @@ static int test_lazy_range_fault_populates_all_pages(void)
 	return failures;
 }
 
+static int test_lazy_range_fault_wire_populates_and_can_unwire(void)
+{
+	struct plane_page *first_page;
+	struct plane_page *second_page;
+	uint64_t raw_addr;
+	void *addr = NULL;
+	int failures = 0;
+
+	failures += test_expect_bool("lazy fault-wire alloc",
+				     test_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 2,
+					     PLANE_KMEM_ALLOC_LAZY, &addr),
+				     true);
+	raw_addr = (uint64_t)(uintptr_t)addr;
+	failures += test_expect_bool("lazy fault-wire range",
+				     plane_vm_fault_wire_pages(
+					     &test_map,
+					     plane_vaddr_make(raw_addr),
+					     2, PLANE_VM_PROT_READ),
+				     true);
+	first_page = plane_vm_object_lookup_page(&test_object, raw_addr);
+	second_page = plane_vm_object_lookup_page(&test_object,
+						  raw_addr + PAGE_SIZE);
+	failures += test_expect_not_null("lazy fault-wire first resident",
+					 first_page);
+	failures += test_expect_not_null("lazy fault-wire second resident",
+					 second_page);
+	failures += expect_page_wire_count("lazy fault-wire first count",
+					   first_page, 2);
+	failures += expect_page_wire_count("lazy fault-wire second count",
+					   second_page, 2);
+	failures += test_expect_u64("lazy fault-wire backing",
+				    allocated_page_count(), 2);
+	failures += test_expect_u64("lazy fault-wire mappings",
+				    mapping_count(), 2);
+
+	failures += test_expect_bool("lazy fault-unwire range",
+				     plane_vm_fault_unwire_pages(
+					     &test_map,
+					     plane_vaddr_make(raw_addr), 2),
+				     true);
+	failures += expect_page_wire_count("lazy fault-unwire first count",
+					   first_page, 1);
+	failures += expect_page_wire_count("lazy fault-unwire second count",
+					   second_page, 1);
+	failures += test_expect_bool("lazy fault-wire free",
+				     test_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 2),
+				     true);
+	failures += test_expect_u64("lazy fault-wire free backing",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("lazy fault-wire free mappings",
+				    mapping_count(), 0);
+	return failures;
+}
+
 static int test_lazy_readonly_range_fault_protection(void)
 {
 	void *addr = NULL;
@@ -2122,6 +2193,7 @@ int main(void)
 		TEST_CASE(test_lazy_protect_before_and_after_fault),
 		TEST_CASE(test_lazy_free_before_fault),
 		TEST_CASE(test_lazy_range_fault_populates_all_pages),
+		TEST_CASE(test_lazy_range_fault_wire_populates_and_can_unwire),
 		TEST_CASE(test_lazy_readonly_range_fault_protection),
 		TEST_CASE(test_lazy_guard_range_fault_uses_user_pages),
 		TEST_CASE(test_alloc_and_free_bytes),

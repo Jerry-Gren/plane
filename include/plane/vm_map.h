@@ -150,6 +150,7 @@ bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
 				    plane_vaddr_t vaddr,
 				    uint64_t page_count,
 				    uint32_t max_prot);
+/* Wire/unwire only updates entry metadata; resident page wiring is in fault. */
 bool plane_vm_map_wire_pages(struct plane_vm_map *map,
 			     plane_vaddr_t vaddr,
 			     uint64_t page_count);
