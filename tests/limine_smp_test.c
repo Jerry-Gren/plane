@@ -14,6 +14,16 @@ bool hal_cpu_set_current_data(struct plane_cpu_data *data)
 	return data != NULL;
 }
 
+bool hal_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
+{
+	return data != NULL;
+}
+
+bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
+{
+	return data != NULL;
+}
+
 void hal_irq_disable(void)
 {
 }

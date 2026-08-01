@@ -38,6 +38,7 @@ struct idt_ptr {
 } __packed;
 
 void x86_64_idt_init(void);
+void x86_64_idt_load_current(void);
 
 #endif /* __ASSEMBLER__ */
 

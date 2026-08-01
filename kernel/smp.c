@@ -171,6 +171,13 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 	cpu->ap_stack_base = stack_base;
 	cpu->ap_stack_top = stack_top;
 	cpu->ap_stack_pages = stack_pages;
+	if (!hal_cpu_prepare_ap_startup_context(cpu)) {
+		cpu->ap_stack_base = plane_vaddr_make(0);
+		cpu->ap_stack_top = plane_vaddr_make(0);
+		cpu->ap_stack_pages = 0;
+		return false;
+	}
+
 	plane_atomic_store_u32(&cpu->boot_state, PLANE_CPU_BOOT_PREPARED);
 	return true;
 }
@@ -288,6 +295,7 @@ void plane_smp_ap_park_entry(struct plane_cpu_data *data)
 	hal_irq_disable();
 
 	if (data == NULL || data->self != data ||
+	    !hal_cpu_install_ap_startup_context(data) ||
 	    !hal_cpu_set_current_data(data) ||
 	    !plane_smp_mark_ap_parked(data)) {
 		if (data != NULL) {

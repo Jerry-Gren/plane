@@ -67,6 +67,10 @@ void x86_64_idt_init(void)
 	/* disabling 8259 pic */
 	legacy_pic_disable();
 
-	/* do flush */
+	x86_64_idt_load_current();
+}
+
+void x86_64_idt_load_current(void)
+{
 	x86_64_idt_flush((uint64_t)&idtr);
 }
