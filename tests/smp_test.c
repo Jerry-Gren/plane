@@ -1,8 +1,20 @@
 #include <stdint.h>
 
+#include <hal/cpu.h>
 #include <plane/smp.h>
 
 #include "support/test.h"
+
+static bool hal_install_should_fail;
+static uint32_t hal_install_count;
+static struct plane_cpu_data *hal_last_current_data;
+
+bool hal_cpu_set_current_data(struct plane_cpu_data *data)
+{
+	hal_install_count++;
+	hal_last_current_data = data;
+	return !hal_install_should_fail;
+}
 
 static int test_builder_bsp_only(void)
 {
@@ -54,6 +66,8 @@ static int test_runtime_rejects_invalid_before_init(void)
 
 	failures += test_expect_bool("invalid init rejected",
 				     plane_smp_init_bsp(&invalid), false);
+	failures += test_expect_u32("invalid init does not install cpu data",
+				    hal_install_count, 0);
 	failures += test_expect_bool("duplicate init bsp",
 				     plane_smp_info_init_bsp(&duplicate, 1),
 				     true);
@@ -64,6 +78,22 @@ static int test_runtime_rejects_invalid_before_init(void)
 	duplicate.cpus[1].lapic_id = duplicate.cpus[0].lapic_id;
 	failures += test_expect_bool("duplicate lapic init rejected",
 				     plane_smp_init_bsp(&duplicate), false);
+	failures += test_expect_u32("duplicate init does not install cpu data",
+				    hal_install_count, 0);
+
+	struct plane_smp_info valid;
+
+	failures += test_expect_bool("valid init bsp",
+				     plane_smp_info_init_bsp(&valid, 5),
+				     true);
+	hal_install_should_fail = true;
+	failures += test_expect_bool("hal install failure rejects init",
+				     plane_smp_init_bsp(&valid), false);
+	hal_install_should_fail = false;
+	failures += test_expect_u32("hal install failure called once",
+				    hal_install_count, 1);
+	failures += test_expect_not_null("hal failure saw candidate data",
+					 hal_last_current_data);
 	failures += test_expect_bool("still uninitialized",
 				     plane_smp_is_initialized(), false);
 	failures += test_expect_u32("uninitialized cpu count",
@@ -91,6 +121,8 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 
 	failures += test_expect_bool("init succeeds",
 				     plane_smp_init_bsp(&info), true);
+	failures += test_expect_u32("successful init installs cpu data",
+				    hal_install_count, 2);
 	failures += test_expect_bool("initialized",
 				     plane_smp_is_initialized(), true);
 	failures += test_expect_u32("runtime cpu count",
@@ -105,9 +137,12 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	const struct plane_cpu_data *ap = plane_cpu_data_get(1);
 
 	failures += test_expect_ptr("current is bsp data", current, bsp);
+	failures += test_expect_ptr("hal saw current data",
+				    hal_last_current_data, (void *)current);
 	failures += test_expect_not_null("bsp info", bsp);
 	failures += test_expect_not_null("ap info", ap);
 	if (bsp != NULL) {
+		failures += test_expect_ptr("bsp self", bsp->self, bsp);
 		failures += test_expect_u32("bsp lapic", bsp->lapic_id, 7);
 		failures += test_expect_u32("bsp logical id", bsp->logical_id, 0);
 		failures += test_expect_bool("bsp marked", bsp->is_bsp, true);
@@ -115,6 +150,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 		failures += test_expect_bool("bsp online", bsp->online, true);
 	}
 	if (ap != NULL) {
+		failures += test_expect_ptr("ap self", ap->self, ap);
 		failures += test_expect_u32("ap lapic", ap->lapic_id, 8);
 		failures += test_expect_u32("ap logical id", ap->logical_id, 1);
 		failures += test_expect_bool("ap not bsp", ap->is_bsp, false);
@@ -135,6 +171,8 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 				     plane_smp_info_init_bsp(&info, 99), true);
 	failures += test_expect_bool("reinit rejected",
 				     plane_smp_init_bsp(&info), false);
+	failures += test_expect_u32("reinit does not reinstall cpu data",
+				    hal_install_count, 2);
 	failures += test_expect_u32("old cpu count kept",
 				    plane_cpu_count(), 3);
 

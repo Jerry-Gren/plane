@@ -1,5 +1,7 @@
 #include <stddef.h>
 
+#include <hal/cpu.h>
+
 #include <plane/smp.h>
 
 #define CPU_INVALID_ID UINT32_MAX
@@ -115,6 +117,7 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 		const struct plane_cpu_info *src = &info->cpus[i];
 
 		cpu_data[i] = (struct plane_cpu_data){
+			.self = &cpu_data[i],
 			.logical_id = src->logical_id,
 			.lapic_id = src->lapic_id,
 			.is_bsp = src->is_bsp,
@@ -125,6 +128,12 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 
 	runtime_cpu_count = info->cpu_count;
 	current_cpu_data = &cpu_data[info->bsp_logical_id];
+	if (!hal_cpu_set_current_data(current_cpu_data)) {
+		current_cpu_data = NULL;
+		runtime_cpu_count = 0;
+		return false;
+	}
+
 	current_cpu_data->online = true;
 	smp_initialized = true;
 	return true;

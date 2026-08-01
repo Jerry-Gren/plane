@@ -7,8 +7,9 @@
 #define PLANE_MAX_CPUS 64
 
 /*
- * Early SMP foundation records topology and installs BSP CPU data. APs are
- * not started yet; PMM/VM/pmap/kmem remain BSP-only.
+ * Early SMP foundation records topology and installs BSP CPU data into the
+ * arch current-data slot. APs are not started yet; PMM/VM/pmap/kmem remain
+ * BSP-only, and Plane does not expose a GS-relative accessor yet.
  */
 struct plane_cpu_info {
 	uint32_t logical_id;
@@ -27,6 +28,7 @@ struct plane_smp_info {
 };
 
 struct plane_cpu_data {
+	struct plane_cpu_data *self;
 	uint32_t logical_id;
 	uint32_t lapic_id;
 	bool is_bsp;
