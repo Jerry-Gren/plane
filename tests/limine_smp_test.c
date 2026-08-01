@@ -3,6 +3,7 @@
 
 #include <hal/cpu.h>
 #include <hal/irq.h>
+#include <hal/local_interrupt.h>
 #include <plane/smp.h>
 
 #include "../boot/limine/limine_smp_internal.h"
@@ -24,12 +25,12 @@ bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	return data != NULL;
 }
 
-bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
+bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
+bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }

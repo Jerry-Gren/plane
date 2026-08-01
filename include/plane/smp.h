@@ -11,10 +11,11 @@
 
 /*
  * Early SMP foundation records topology and installs BSP CPU data into the
- * arch current-data slot. x86_64 APs may be started only far enough to install
- * per-CPU descriptors/current data and local APIC state before parking in a
- * halt loop; PMM/VM/pmap/kmem remain BSP-only. Plane does not expose a
- * GS-relative accessor, IPI dispatch, TLB shootdown, or scheduling yet.
+ * arch current-data slot. APs may be started only far enough to install
+ * per-CPU architecture context, current data, and local interrupt state before
+ * parking in a halt loop; PMM/VM/pmap/kmem remain BSP-only. Plane does not
+ * expose a CPU-local fast accessor, IPI dispatch, TLB shootdown, or scheduling
+ * yet.
  */
 enum plane_cpu_boot_state {
 	PLANE_CPU_BOOT_OFFLINE = 0,
@@ -26,7 +27,7 @@ enum plane_cpu_boot_state {
 
 struct plane_cpu_info {
 	uint32_t logical_id;
-	uint32_t lapic_id;
+	uint32_t physical_id;
 	bool is_bsp;
 	bool present;
 	bool online;
@@ -43,7 +44,7 @@ struct plane_smp_info {
 struct plane_cpu_data {
 	struct plane_cpu_data *self;
 	uint32_t logical_id;
-	uint32_t lapic_id;
+	uint32_t physical_id;
 	bool is_bsp;
 	bool present;
 	bool online;
@@ -54,9 +55,9 @@ struct plane_cpu_data {
 };
 
 bool plane_smp_info_init(struct plane_smp_info *info);
-bool plane_smp_info_init_bsp(struct plane_smp_info *info, uint32_t lapic_id);
+bool plane_smp_info_init_bsp(struct plane_smp_info *info, uint32_t physical_id);
 bool plane_smp_info_record_cpu(struct plane_smp_info *info,
-			       uint32_t lapic_id,
+			       uint32_t physical_id,
 			       bool is_bsp);
 
 bool plane_smp_init_bsp(const struct plane_smp_info *info);

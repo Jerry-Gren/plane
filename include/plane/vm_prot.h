@@ -11,7 +11,7 @@
  *
  * READ and WRITE are independent metadata bits. Plane currently has no
  * EXEC/NX and no no-access user mapping API. The early soft fault core and
- * hardware #PF dispatch consume these bits.
+ * hardware fault dispatch consume these bits.
  */
 enum plane_vm_prot {
 	PLANE_VM_PROT_NONE = 0,

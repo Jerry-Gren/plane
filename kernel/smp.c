@@ -2,6 +2,7 @@
 
 #include <hal/cpu.h>
 #include <hal/irq.h>
+#include <hal/local_interrupt.h>
 
 #include <plane/atomic.h>
 #include <plane/smp.h>
@@ -28,7 +29,7 @@ bool plane_smp_info_init(struct plane_smp_info *info)
 }
 
 bool plane_smp_info_record_cpu(struct plane_smp_info *info,
-			       uint32_t lapic_id,
+			       uint32_t physical_id,
 			       bool is_bsp)
 {
 	uint32_t logical_id;
@@ -43,7 +44,7 @@ bool plane_smp_info_record_cpu(struct plane_smp_info *info,
 	}
 
 	for (uint32_t i = 0; i < info->cpu_count; i++) {
-		if (info->cpus[i].lapic_id == lapic_id) {
+		if (info->cpus[i].physical_id == physical_id) {
 			return false;
 		}
 	}
@@ -56,7 +57,7 @@ bool plane_smp_info_record_cpu(struct plane_smp_info *info,
 	logical_id = info->cpu_count;
 	info->cpus[logical_id] = (struct plane_cpu_info){
 		.logical_id = logical_id,
-		.lapic_id = lapic_id,
+		.physical_id = physical_id,
 		.is_bsp = is_bsp,
 		.present = true,
 		.online = false
@@ -70,10 +71,10 @@ bool plane_smp_info_record_cpu(struct plane_smp_info *info,
 	return true;
 }
 
-bool plane_smp_info_init_bsp(struct plane_smp_info *info, uint32_t lapic_id)
+bool plane_smp_info_init_bsp(struct plane_smp_info *info, uint32_t physical_id)
 {
 	return plane_smp_info_init(info) &&
-	       plane_smp_info_record_cpu(info, lapic_id, true);
+	       plane_smp_info_record_cpu(info, physical_id, true);
 }
 
 static bool smp_info_validate(const struct plane_smp_info *info)
@@ -95,7 +96,7 @@ static bool smp_info_validate(const struct plane_smp_info *info)
 
 		for (uint32_t j = i + 1; j < info->cpu_count; j++) {
 			if (info->cpus[j].present &&
-			    info->cpus[j].lapic_id == cpu->lapic_id) {
+			    info->cpus[j].physical_id == cpu->physical_id) {
 				return false;
 			}
 		}
@@ -123,7 +124,7 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 		cpu_data[i] = (struct plane_cpu_data){
 			.self = &cpu_data[i],
 			.logical_id = src->logical_id,
-			.lapic_id = src->lapic_id,
+			.physical_id = src->physical_id,
 			.is_bsp = src->is_bsp,
 			.present = src->present,
 			.online = false,
@@ -297,7 +298,7 @@ void plane_smp_ap_park_entry(struct plane_cpu_data *data)
 	if (data == NULL || data->self != data ||
 	    !hal_cpu_install_ap_startup_context(data) ||
 	    !hal_cpu_set_current_data(data) ||
-	    !hal_cpu_init_ap_local_interrupts(data) ||
+	    !hal_local_interrupt_init_ap(data) ||
 	    !plane_smp_mark_ap_parked(data)) {
 		if (data != NULL) {
 			plane_smp_mark_ap_failed(data);

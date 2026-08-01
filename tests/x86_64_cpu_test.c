@@ -68,7 +68,7 @@ static int test_set_current_data_writes_gs_base(void)
 	int failures = 0;
 	struct plane_cpu_data data = {
 		.logical_id = 7,
-		.lapic_id = 9,
+		.physical_id = 9,
 		.is_bsp = true,
 		.present = true,
 	};

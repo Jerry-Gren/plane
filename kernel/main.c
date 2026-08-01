@@ -5,7 +5,7 @@
 #include <plane/printk.h>
 #include <plane/pmm.h>
 #include <plane/smp.h>
-#include <hal/cpu.h>
+#include <hal/local_interrupt.h>
 #include <hal/mmu.h>
 #include <hal/serial.h>
 #include <hal/hal.h>
@@ -34,7 +34,7 @@ void kmain(struct boot_info *info)
 	 * xAPIC path may install a transitional MMIO PTE until Plane grows a
 	 * real kernel IO-map API.
 	 */
-	BUG_ON_MSG(!hal_cpu_init_bsp_local_interrupts(&info->smp),
+	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
 		   "failed to initialize BSP local interrupts");
 	BUG_ON_MSG(!plane_kmem_init(),
 		   "failed to initialize kernel memory allocator");

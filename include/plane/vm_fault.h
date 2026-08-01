@@ -20,9 +20,10 @@ struct plane_vm_map;
  * faults if a later page fails. Fault wiring is the reduced vm_fault_wire()
  * layer: it wires map metadata, faults pages in, and synchronizes resident
  * page wire counts. This is also the backing path for lazy kernel object
- * allocations. x86_64 #PF dispatch can use this through kmem's kernel map
- * wrapper, but this does not implement pager, COW, pageout, busy/wanted,
- * locks, submaps, clustering, pmap pageable wiring, or user-map faults.
+ * allocations. Architecture page-fault dispatch can use this through kmem's
+ * kernel map wrapper, but this does not implement pager, COW, pageout,
+ * busy/wanted, locks, submaps, clustering, pmap pageable wiring, or user-map
+ * faults.
  */
 bool plane_vm_fault_page(struct plane_vm_map *map,
 			 plane_vaddr_t vaddr,

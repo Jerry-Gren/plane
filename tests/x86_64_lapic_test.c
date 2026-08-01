@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <hal/irq.h>
+#include <hal/local_interrupt.h>
 #include <hal/mmu.h>
 #include <hal/x86_64/cpu_features.h>
 #include <plane/smp.h>
@@ -184,19 +185,19 @@ static bool build_topology(struct plane_smp_info *info)
 		.cpus = {
 			{
 				.logical_id = 0,
-				.lapic_id = 1,
+				.physical_id = 1,
 				.is_bsp = true,
 				.present = true,
 			},
 			{
 				.logical_id = 1,
-				.lapic_id = 2,
+				.physical_id = 2,
 				.is_bsp = false,
 				.present = true,
 			},
 			{
 				.logical_id = 2,
-				.lapic_id = 3,
+				.physical_id = 3,
 				.is_bsp = false,
 				.present = true,
 			},
@@ -212,7 +213,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("null topology rejected",
-				     hal_cpu_init_bsp_local_interrupts(NULL),
+				     hal_local_interrupt_init_bsp(NULL),
 				     false);
 	failures += test_expect_bool("null topology leaves uninitialized",
 				     lapic_initialized, false);
@@ -222,7 +223,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_has_apic = false;
 	failures += test_expect_bool("missing apic rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -230,7 +231,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_has_msr = false;
 	failures += test_expect_bool("missing msr rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -238,7 +239,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_direct_map_available = false;
 	failures += test_expect_bool("missing direct map rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -246,15 +247,15 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_apic_base_msr = TEST_APIC_PHYS | X86_64_APIC_BASE_X2APIC;
 	failures += test_expect_bool("x2apic rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
-	info.cpus[2].lapic_id = UINT8_MAX + 1u;
+	info.cpus[2].physical_id = UINT8_MAX + 1u;
 	failures += test_expect_bool("large xapic id rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 	failures += test_expect_u32("large id does not write msr",
 				    test_msr_write_count, 0);
@@ -264,7 +265,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_msr_write_should_fail = true;
 	failures += test_expect_bool("apic enable write failure rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 	failures += test_expect_bool("write failure leaves uninitialized",
 				     lapic_initialized, false);
@@ -274,7 +275,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_map_should_fail = true;
 	failures += test_expect_bool("mmio map failure rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 	failures += test_expect_bool("map failure leaves uninitialized",
 				     lapic_initialized, false);
@@ -285,7 +286,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	test_existing_mapping = true;
 	test_mapped_phys = plane_paddr_make(0x1000);
 	failures += test_expect_bool("wrong existing mapping rejected",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     false);
 	return failures;
 }
@@ -300,7 +301,7 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 				     build_topology(&info), true);
 	test_apic_base_msr = TEST_APIC_PHYS;
 	failures += test_expect_bool("bsp lapic init",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	failures += test_expect_bool("lapic initialized",
 				     lapic_initialized, true);
@@ -355,7 +356,7 @@ static int test_bsp_init_reuses_existing_mmio_mapping(void)
 	test_existing_mapping = true;
 	test_mapped_phys = plane_paddr_make(TEST_APIC_PHYS);
 	failures += test_expect_bool("bsp lapic init",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	failures += test_expect_u32("translate checked",
 				    test_translate_count, 1);
@@ -371,7 +372,7 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 	struct plane_cpu_data ap = {
 		.self = &ap,
 		.logical_id = 1,
-		.lapic_id = 2,
+		.physical_id = 2,
 		.is_bsp = false,
 		.present = true,
 	};
@@ -379,17 +380,17 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("ap init before runtime rejected",
-				     hal_cpu_init_ap_local_interrupts(&ap),
+				     hal_local_interrupt_init_ap(&ap),
 				     false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	test_regs[reg_index(X86_64_LAPIC_ID)] =
-		ap.lapic_id << X86_64_LAPIC_ID_SHIFT;
+		ap.physical_id << X86_64_LAPIC_ID_SHIFT;
 	failures += test_expect_bool("ap lapic init",
-				     hal_cpu_init_ap_local_interrupts(&ap),
+				     hal_local_interrupt_init_ap(&ap),
 				     true);
 	failures += test_expect_u32("ap svr configured",
 				    test_regs[reg_index(X86_64_LAPIC_SVR)],
@@ -398,11 +399,11 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 
 	bad_self.self = NULL;
 	failures += test_expect_bool("bad self rejected",
-				     hal_cpu_init_ap_local_interrupts(&bad_self),
+				     hal_local_interrupt_init_ap(&bad_self),
 				     false);
-	ap.lapic_id = 7;
+	ap.physical_id = 7;
 	failures += test_expect_bool("wrong mapped lapic rejected",
-				     hal_cpu_init_ap_local_interrupts(&ap),
+				     hal_local_interrupt_init_ap(&ap),
 				     false);
 	return failures;
 }
@@ -414,14 +415,14 @@ static int test_eoi_requires_initialization(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("eoi before init rejected",
-				     hal_cpu_local_eoi(), false);
+				     hal_local_interrupt_eoi(), false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	test_regs[reg_index(X86_64_LAPIC_EOI)] = 0xfeedface;
-	failures += test_expect_bool("eoi succeeds", hal_cpu_local_eoi(), true);
+	failures += test_expect_bool("eoi succeeds", hal_local_interrupt_eoi(), true);
 	failures += test_expect_u32("eoi written",
 				    test_regs[reg_index(X86_64_LAPIC_EOI)], 0);
 	return failures;
@@ -434,20 +435,20 @@ static int test_fixed_ipi_validates_and_writes_icr(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("ipi before init rejected",
-				     hal_cpu_send_fixed_ipi(1, 0xf0), false);
+				     hal_local_interrupt_send_fixed_ipi(1, 0xf0), false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     hal_cpu_init_bsp_local_interrupts(&info),
+				     hal_local_interrupt_init_bsp(&info),
 				     true);
 	failures += test_expect_bool("low vector rejected",
-				     hal_cpu_send_fixed_ipi(1, 31), false);
+				     hal_local_interrupt_send_fixed_ipi(1, 31), false);
 	failures += test_expect_bool("bad cpu rejected",
-				     hal_cpu_send_fixed_ipi(3, 0xf0), false);
+				     hal_local_interrupt_send_fixed_ipi(3, 0xf0), false);
 
 	test_regs[reg_index(X86_64_LAPIC_ICR_LOW)] = X86_64_LAPIC_ICR_PENDING;
 	failures += test_expect_bool("send fixed ipi",
-				     hal_cpu_send_fixed_ipi(2, 0xf0), true);
+				     hal_local_interrupt_send_fixed_ipi(2, 0xf0), true);
 	failures += test_expect_u32("waits while pending", test_relax_count, 1);
 	failures += test_expect_u32("irq saved", test_irq_save_count, 1);
 	failures += test_expect_u32("irq restored", test_irq_restore_count, 1);

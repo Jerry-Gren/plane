@@ -3,6 +3,7 @@
 
 #include <hal/cpu.h>
 #include <hal/irq.h>
+#include <hal/local_interrupt.h>
 #include <plane/smp.h>
 
 #include "../kernel/smp_internal.h"
@@ -45,12 +46,12 @@ bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	return !hal_install_context_should_fail;
 }
 
-bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
+bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
+bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
 	hal_local_interrupts_count++;
 	hal_last_local_interrupts_data = data;
@@ -92,7 +93,7 @@ static int test_builder_bsp_only(void)
 	failures += test_expect_u32("discovered count",
 				    info.discovered_cpu_count, 1);
 	failures += test_expect_u32("bsp logical", info.bsp_logical_id, 0);
-	failures += test_expect_u32("bsp lapic", info.cpus[0].lapic_id, 9);
+	failures += test_expect_u32("bsp physical id", info.cpus[0].physical_id, 9);
 	failures += test_expect_bool("bsp present", info.cpus[0].present, true);
 	failures += test_expect_bool("bsp marked", info.cpus[0].is_bsp, true);
 	failures += test_expect_bool("bsp not online before init",
@@ -140,8 +141,8 @@ static int test_runtime_rejects_invalid_before_init(void)
 				     plane_smp_info_record_cpu(&duplicate, 2,
 							       false),
 				     true);
-	duplicate.cpus[1].lapic_id = duplicate.cpus[0].lapic_id;
-	failures += test_expect_bool("duplicate lapic init rejected",
+	duplicate.cpus[1].physical_id = duplicate.cpus[0].physical_id;
+	failures += test_expect_bool("duplicate physical id init rejected",
 				     plane_smp_init_bsp(&duplicate), false);
 	failures += test_expect_u32("duplicate init does not install cpu data",
 				    hal_install_count, 0);
@@ -218,7 +219,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	failures += test_expect_not_null("ap info", ap);
 	if (bsp != NULL) {
 		failures += test_expect_ptr("bsp self", bsp->self, bsp);
-		failures += test_expect_u32("bsp lapic", bsp->lapic_id, 7);
+		failures += test_expect_u32("bsp physical id", bsp->physical_id, 7);
 		failures += test_expect_u32("bsp logical id", bsp->logical_id, 0);
 		failures += test_expect_bool("bsp marked", bsp->is_bsp, true);
 		failures += test_expect_bool("bsp present", bsp->present, true);
@@ -226,7 +227,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	}
 	if (ap != NULL) {
 		failures += test_expect_ptr("ap self", ap->self, ap);
-		failures += test_expect_u32("ap lapic", ap->lapic_id, 8);
+		failures += test_expect_u32("ap physical id", ap->physical_id, 8);
 		failures += test_expect_u32("ap logical id", ap->logical_id, 1);
 		failures += test_expect_bool("ap not bsp", ap->is_bsp, false);
 		failures += test_expect_bool("ap present", ap->present, true);
@@ -403,8 +404,8 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 
 	failures += test_expect_not_null("old bsp still present", bsp);
 	if (bsp != NULL) {
-		failures += test_expect_u32("old bsp lapic kept",
-					    bsp->lapic_id, 7);
+		failures += test_expect_u32("old bsp physical id kept",
+					    bsp->physical_id, 7);
 	}
 	return failures;
 }
@@ -423,7 +424,7 @@ static int test_builder_rejects_duplicates_and_null(void)
 				     false);
 	failures += test_expect_bool("init bsp",
 				     plane_smp_info_init_bsp(&info, 3), true);
-	failures += test_expect_bool("duplicate lapic rejected",
+	failures += test_expect_bool("duplicate physical id rejected",
 				     plane_smp_info_record_cpu(&info, 3, false),
 				     false);
 	failures += test_expect_bool("second bsp rejected",

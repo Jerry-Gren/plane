@@ -92,7 +92,7 @@ static int test_prepare_ap_context_builds_per_cpu_tss(void)
 	struct plane_cpu_data data = {
 		.self = &data,
 		.logical_id = 3,
-		.lapic_id = 17,
+		.physical_id = 17,
 		.is_bsp = false,
 		.present = true,
 		.ap_stack_top = plane_vaddr_make(0xffff800000804000ull),
@@ -127,7 +127,7 @@ static int test_install_ap_context_validates_state_and_loads_context(void)
 	struct plane_cpu_data data = {
 		.self = &data,
 		.logical_id = 2,
-		.lapic_id = 9,
+		.physical_id = 9,
 		.is_bsp = false,
 		.present = true,
 		.ap_stack_top = plane_vaddr_make(0xffff800000904000ull),

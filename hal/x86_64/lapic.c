@@ -2,6 +2,7 @@
 
 #include <hal/cpu.h>
 #include <hal/irq.h>
+#include <hal/local_interrupt.h>
 #include <hal/mmu.h>
 #include <hal/page.h>
 #include <hal/x86_64/arch_mmu.h>
@@ -165,7 +166,7 @@ static void lapic_configure_current(void)
 		    X86_64_LAPIC_SPURIOUS_VECTOR | X86_64_LAPIC_SVR_ENABLE);
 }
 
-bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
+bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	plane_vaddr_t mmio_base;
 
@@ -176,12 +177,13 @@ bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
 
 	for (uint32_t i = 0; i < info->cpu_count; i++) {
 		const struct plane_cpu_info *cpu = &info->cpus[i];
+		uint32_t lapic_id = cpu->physical_id;
 
 		if (!cpu->present || cpu->logical_id != i ||
-		    !lapic_id_valid(cpu->lapic_id)) {
+		    !lapic_id_valid(lapic_id)) {
 			return false;
 		}
-		lapic_id_by_logical_id[i] = cpu->lapic_id;
+		lapic_id_by_logical_id[i] = lapic_id;
 	}
 
 	if (!lapic_probe_xapic(&mmio_base)) {
@@ -195,19 +197,24 @@ bool hal_cpu_init_bsp_local_interrupts(const struct plane_smp_info *info)
 	return true;
 }
 
-bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
+bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
+	uint32_t expected_lapic_id;
 	uint32_t local_lapic_id;
 
 	if (!lapic_initialized || data == NULL || data->self != data ||
 	    data->is_bsp || !data->present ||
-	    data->logical_id >= lapic_cpu_count ||
-	    data->lapic_id != lapic_id_by_logical_id[data->logical_id]) {
+	    data->logical_id >= lapic_cpu_count) {
+		return false;
+	}
+
+	expected_lapic_id = data->physical_id;
+	if (expected_lapic_id != lapic_id_by_logical_id[data->logical_id]) {
 		return false;
 	}
 
 	local_lapic_id = lapic_read(X86_64_LAPIC_ID) >> X86_64_LAPIC_ID_SHIFT;
-	if (local_lapic_id != data->lapic_id) {
+	if (local_lapic_id != expected_lapic_id) {
 		return false;
 	}
 
@@ -215,7 +222,7 @@ bool hal_cpu_init_ap_local_interrupts(struct plane_cpu_data *data)
 	return true;
 }
 
-bool hal_cpu_local_eoi(void)
+bool hal_local_interrupt_eoi(void)
 {
 	if (!lapic_initialized) {
 		return false;
@@ -225,7 +232,7 @@ bool hal_cpu_local_eoi(void)
 	return true;
 }
 
-bool hal_cpu_send_fixed_ipi(uint32_t logical_id, uint8_t vector)
+bool hal_local_interrupt_send_fixed_ipi(uint32_t logical_id, uint8_t vector)
 {
 	plane_irq_state_t irq_state;
 	uint32_t lapic_id;

@@ -114,7 +114,7 @@ unit-check: $(TEST_BINS)
 		$$test || exit $$?; \
 	done
 
-build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(ARCH_TEST_HEADERS) $(TEST_SUPPORT_HEADERS) $(INTERNAL_TEST_HEADERS) $$($$*_test_DEPS)
+build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(ARCH_TEST_HEADERS) $(TEST_SUPPORT_HEADERS) $(INTERNAL_TEST_HEADERS) $$($$*_test_DEPS) $$($$*_test_PREREQS)
 	@echo "  HOSTCC  $@"
 	@mkdir -p $(dir $@)
 	@$(HOSTCC) $(HOSTCFLAGS) $< $($*_test_DEPS) -o $@
