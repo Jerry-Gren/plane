@@ -1,8 +1,10 @@
 #include <stdint.h>
 
 #include <hal/cpu.h>
+#include <hal/irq.h>
 #include <plane/smp.h>
 
+#include "../kernel/smp_internal.h"
 #include "support/test.h"
 
 static bool hal_install_should_fail;
@@ -14,6 +16,16 @@ bool hal_cpu_set_current_data(struct plane_cpu_data *data)
 	hal_install_count++;
 	hal_last_current_data = data;
 	return !hal_install_should_fail;
+}
+
+void hal_irq_disable(void)
+{
+}
+
+void hal_cpu_hang(void)
+{
+	for (;;) {
+	}
 }
 
 static int test_builder_bsp_only(void)
@@ -102,6 +114,10 @@ static int test_runtime_rejects_invalid_before_init(void)
 				    plane_cpu_current_data(), NULL);
 	failures += test_expect_ptr("uninitialized cpu data get",
 				    plane_cpu_data_get(0), NULL);
+	failures += test_expect_bool("uninitialized prepare rejected",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0x1000), 1),
+				     false);
 	return failures;
 }
 
@@ -162,6 +178,90 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	return failures;
 }
 
+static int test_ap_stack_prepare_and_state_transitions(void)
+{
+	int failures = 0;
+	struct plane_cpu_data *ap1 = plane_cpu_boot_data_get(1);
+	struct plane_cpu_data *ap2 = plane_cpu_boot_data_get(2);
+
+	failures += test_expect_bool("prepare rejects bsp",
+				     plane_smp_prepare_ap_stack(
+					     0, plane_vaddr_make(0x800000), 1),
+				     false);
+	failures += test_expect_bool("prepare rejects out of range",
+				     plane_smp_prepare_ap_stack(
+					     3, plane_vaddr_make(0x800000), 1),
+				     false);
+	failures += test_expect_bool("prepare rejects null stack",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0), 1),
+				     false);
+	failures += test_expect_bool("prepare rejects unaligned stack",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0x800123), 1),
+				     false);
+	failures += test_expect_bool("prepare rejects zero pages",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0x800000), 0),
+				     false);
+	failures += test_expect_bool("park before starting rejected",
+				     plane_smp_mark_ap_parked(ap1), false);
+
+	failures += test_expect_bool("prepare ap1",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0x800000), 2),
+				     true);
+	failures += test_expect_bool("prepare ap1 again rejected",
+				     plane_smp_prepare_ap_stack(
+					     1, plane_vaddr_make(0x900000), 1),
+				     false);
+	failures += test_expect_u32("ap1 state prepared",
+				    plane_cpu_boot_state(1),
+				    PLANE_CPU_BOOT_PREPARED);
+	if (ap1 != NULL) {
+		failures += test_expect_u64("ap1 stack base",
+					    plane_vaddr_raw(ap1->ap_stack_base),
+					    0x800000);
+		failures += test_expect_u64("ap1 stack top",
+					    plane_vaddr_raw(ap1->ap_stack_top),
+					    0x802000);
+		failures += test_expect_u64("ap1 stack pages",
+					    ap1->ap_stack_pages, 2);
+	}
+
+	failures += test_expect_bool("start ap1",
+				     plane_smp_mark_ap_starting(1), true);
+	failures += test_expect_bool("start ap1 again rejected",
+				     plane_smp_mark_ap_starting(1), false);
+	failures += test_expect_u32("ap1 state starting",
+				    plane_cpu_boot_state(1),
+				    PLANE_CPU_BOOT_STARTING);
+	failures += test_expect_bool("park ap1",
+				     plane_smp_mark_ap_parked(ap1), true);
+	failures += test_expect_u32("ap1 state parked",
+				    plane_cpu_boot_state(1),
+				    PLANE_CPU_BOOT_PARKED);
+	failures += test_expect_u32("one parked ap",
+				    plane_cpu_parked_count(), 1);
+	failures += test_expect_bool("fail parked ap rejected",
+				     plane_smp_mark_ap_failed(ap1), false);
+
+	failures += test_expect_bool("prepare ap2",
+				     plane_smp_prepare_ap_stack(
+					     2, plane_vaddr_make(0xa00000), 1),
+				     true);
+	failures += test_expect_bool("start ap2",
+				     plane_smp_mark_ap_starting(2), true);
+	failures += test_expect_bool("fail ap2",
+				     plane_smp_mark_ap_failed(ap2), true);
+	failures += test_expect_u32("ap2 state failed",
+				    plane_cpu_boot_state(2),
+				    PLANE_CPU_BOOT_FAILED);
+	failures += test_expect_u32("parked count unchanged",
+				    plane_cpu_parked_count(), 1);
+	return failures;
+}
+
 static int test_runtime_rejects_reinit_without_state_change(void)
 {
 	int failures = 0;
@@ -218,6 +318,7 @@ int main(void)
 		TEST_CASE(test_builder_truncates_extra_cpus),
 		TEST_CASE(test_runtime_rejects_invalid_before_init),
 		TEST_CASE(test_runtime_accepts_multi_cpu_bsp_topology),
+		TEST_CASE(test_ap_stack_prepare_and_state_transitions),
 		TEST_CASE(test_runtime_rejects_reinit_without_state_change),
 		TEST_CASE(test_builder_rejects_duplicates_and_null),
 	};

@@ -12,6 +12,8 @@
 #include <plane/entry.h>
 #include <plane/printk.h>
 
+#include "limine_smp_internal.h"
+
 /*
  * Set the recommended Limine base revision.
  * See the Limine boot protocol specification for details.
@@ -177,6 +179,7 @@ static void boot_limine_collect_smp(struct plane_smp_info *smp)
 {
 	struct limine_mp_response *response = mp_request.response;
 
+	boot_limine_smp_reset_cpu_handles();
 	BUG_ON_MSG(!plane_smp_info_init(smp),
 		   "failed to initialize limine SMP info");
 	if (response == NULL || response->cpu_count == 0 ||
@@ -199,6 +202,9 @@ static void boot_limine_collect_smp(struct plane_smp_info *smp)
 							      cpu->lapic_id,
 							      true),
 				   "failed to record limine BSP CPU");
+			BUG_ON_MSG(!boot_limine_smp_set_cpu_handle(
+					   smp->bsp_logical_id, cpu),
+				   "failed to record limine BSP handle");
 			found_bsp = true;
 			break;
 		}
@@ -218,7 +224,11 @@ static void boot_limine_collect_smp(struct plane_smp_info *smp)
 			continue;
 		}
 
-		plane_smp_info_record_cpu(smp, cpu->lapic_id, false);
+		if (plane_smp_info_record_cpu(smp, cpu->lapic_id, false)) {
+			BUG_ON_MSG(!boot_limine_smp_set_cpu_handle(
+					   smp->cpu_count - 1, cpu),
+				   "failed to record limine AP handle");
+		}
 	}
 }
 
@@ -236,6 +246,7 @@ void _start(void)
 	boot_limine_collect_framebuffer(&b_info.video);
 	boot_limine_collect_memmap(&b_info.mem);
 	boot_limine_collect_smp(&b_info.smp);
+	b_info.start_aps = boot_limine_smp_start_aps;
 
 	kmain(&b_info);
 

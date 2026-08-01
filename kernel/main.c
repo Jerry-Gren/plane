@@ -9,6 +9,8 @@
 #include <hal/serial.h>
 #include <hal/hal.h>
 
+#include "smp_internal.h"
+
 void kmain(struct boot_info *info)
 {
 	hal_serial_init();
@@ -29,6 +31,14 @@ void kmain(struct boot_info *info)
 	BUG_ON_MSG(!plane_kmem_init(),
 		   "failed to initialize kernel memory allocator");
 	plane_pmm_log_stats();
+
+	BUG_ON_MSG(!plane_smp_prepare_ap_stacks(),
+		   "failed to prepare AP startup stacks");
+	if (info->start_aps != NULL) {
+		BUG_ON_MSG(!info->start_aps(),
+			   "failed to start AP park bringup");
+		pr_info("SMP: parked APs=%u\n", plane_cpu_parked_count());
+	}
 
 	/*
 	 * TODO:

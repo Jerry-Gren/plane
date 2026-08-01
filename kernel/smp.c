@@ -1,8 +1,12 @@
 #include <stddef.h>
 
 #include <hal/cpu.h>
+#include <hal/irq.h>
 
+#include <plane/atomic.h>
 #include <plane/smp.h>
+
+#include "smp_internal.h"
 
 #define CPU_INVALID_ID UINT32_MAX
 
@@ -122,7 +126,8 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 			.lapic_id = src->lapic_id,
 			.is_bsp = src->is_bsp,
 			.present = src->present,
-			.online = false
+			.online = false,
+			.boot_state = PLANE_CPU_BOOT_OFFLINE
 		};
 	}
 
@@ -137,6 +142,95 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 	current_cpu_data->online = true;
 	smp_initialized = true;
 	return true;
+}
+
+static bool cpu_data_is_startable_ap(const struct plane_cpu_data *cpu)
+{
+	return cpu != NULL && !cpu->is_bsp && cpu->present;
+}
+
+bool plane_smp_prepare_ap_stack(uint32_t logical_id,
+				plane_vaddr_t stack_base,
+				uint64_t stack_pages)
+{
+	struct plane_cpu_data *cpu = plane_cpu_boot_data_get(logical_id);
+	plane_vaddr_t stack_top;
+
+	if (!cpu_data_is_startable_ap(cpu) || stack_pages == 0 ||
+	    plane_vaddr_is_null(stack_base) ||
+	    !plane_vaddr_is_page_aligned(stack_base) ||
+	    !plane_vaddr_add_pages(stack_base, stack_pages, &stack_top)) {
+		return false;
+	}
+
+	if (plane_atomic_load_u32(&cpu->boot_state) !=
+	    PLANE_CPU_BOOT_OFFLINE) {
+		return false;
+	}
+
+	cpu->ap_stack_base = stack_base;
+	cpu->ap_stack_top = stack_top;
+	cpu->ap_stack_pages = stack_pages;
+	plane_atomic_store_u32(&cpu->boot_state, PLANE_CPU_BOOT_PREPARED);
+	return true;
+}
+
+bool plane_smp_mark_ap_starting(uint32_t logical_id)
+{
+	struct plane_cpu_data *cpu = plane_cpu_boot_data_get(logical_id);
+	uint32_t expected = PLANE_CPU_BOOT_PREPARED;
+
+	if (!cpu_data_is_startable_ap(cpu)) {
+		return false;
+	}
+
+	return plane_atomic_compare_exchange_u32(&cpu->boot_state, &expected,
+						 PLANE_CPU_BOOT_STARTING);
+}
+
+bool plane_smp_mark_ap_parked(struct plane_cpu_data *data)
+{
+	uint32_t expected = PLANE_CPU_BOOT_STARTING;
+
+	if (!cpu_data_is_startable_ap(data) || data->self != data) {
+		return false;
+	}
+
+	return plane_atomic_compare_exchange_u32(&data->boot_state, &expected,
+						 PLANE_CPU_BOOT_PARKED);
+}
+
+bool plane_smp_mark_ap_failed(struct plane_cpu_data *data)
+{
+	uint32_t expected = PLANE_CPU_BOOT_STARTING;
+
+	if (!cpu_data_is_startable_ap(data) || data->self != data) {
+		return false;
+	}
+
+	return plane_atomic_compare_exchange_u32(&data->boot_state, &expected,
+						 PLANE_CPU_BOOT_FAILED);
+}
+
+uint32_t plane_cpu_parked_count(void)
+{
+	uint32_t count = 0;
+
+	if (!smp_initialized) {
+		return 0;
+	}
+
+	for (uint32_t i = 0; i < runtime_cpu_count; i++) {
+		const struct plane_cpu_data *cpu = &cpu_data[i];
+
+		if (!cpu->is_bsp &&
+		    plane_atomic_load_u32(&cpu->boot_state) ==
+			    PLANE_CPU_BOOT_PARKED) {
+			count++;
+		}
+	}
+
+	return count;
 }
 
 bool plane_smp_is_initialized(void)
@@ -166,9 +260,40 @@ const struct plane_cpu_data *plane_cpu_current_data(void)
 
 const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id)
 {
+	return plane_cpu_boot_data_get(logical_id);
+}
+
+struct plane_cpu_data *plane_cpu_boot_data_get(uint32_t logical_id)
+{
 	if (!smp_initialized || logical_id >= runtime_cpu_count) {
 		return NULL;
 	}
 
 	return &cpu_data[logical_id];
+}
+
+enum plane_cpu_boot_state plane_cpu_boot_state(uint32_t logical_id)
+{
+	const struct plane_cpu_data *cpu = plane_cpu_data_get(logical_id);
+
+	if (cpu == NULL) {
+		return PLANE_CPU_BOOT_FAILED;
+	}
+
+	return plane_atomic_load_u32(&cpu->boot_state);
+}
+
+void plane_smp_ap_park_entry(struct plane_cpu_data *data)
+{
+	hal_irq_disable();
+
+	if (data == NULL || data->self != data ||
+	    !hal_cpu_set_current_data(data) ||
+	    !plane_smp_mark_ap_parked(data)) {
+		if (data != NULL) {
+			plane_smp_mark_ap_failed(data);
+		}
+	}
+
+	hal_cpu_hang();
 }

@@ -4,13 +4,25 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
+#include <plane/compiler.h>
+
 #define PLANE_MAX_CPUS 64
 
 /*
  * Early SMP foundation records topology and installs BSP CPU data into the
- * arch current-data slot. APs are not started yet; PMM/VM/pmap/kmem remain
- * BSP-only, and Plane does not expose a GS-relative accessor yet.
+ * arch current-data slot. APs may be started only into a parked halt loop;
+ * PMM/VM/pmap/kmem remain BSP-only, and Plane does not expose a GS-relative
+ * accessor yet.
  */
+enum plane_cpu_boot_state {
+	PLANE_CPU_BOOT_OFFLINE = 0,
+	PLANE_CPU_BOOT_PREPARED,
+	PLANE_CPU_BOOT_STARTING,
+	PLANE_CPU_BOOT_PARKED,
+	PLANE_CPU_BOOT_FAILED,
+};
+
 struct plane_cpu_info {
 	uint32_t logical_id;
 	uint32_t lapic_id;
@@ -34,6 +46,10 @@ struct plane_cpu_data {
 	bool is_bsp;
 	bool present;
 	bool online;
+	plane_vaddr_t ap_stack_base;
+	plane_vaddr_t ap_stack_top;
+	uint64_t ap_stack_pages;
+	uint32_t boot_state;
 };
 
 bool plane_smp_info_init(struct plane_smp_info *info);
@@ -44,10 +60,15 @@ bool plane_smp_info_record_cpu(struct plane_smp_info *info,
 
 bool plane_smp_init_bsp(const struct plane_smp_info *info);
 bool plane_smp_is_initialized(void);
+bool plane_smp_prepare_ap_stack(uint32_t logical_id,
+				plane_vaddr_t stack_base,
+				uint64_t stack_pages);
+uint32_t plane_cpu_parked_count(void);
 uint32_t plane_cpu_count(void);
 uint32_t plane_cpu_current_id(void);
 bool plane_cpu_is_bsp(void);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id);
+enum plane_cpu_boot_state plane_cpu_boot_state(uint32_t logical_id);
 
 #endif /* PLANE_SMP_H */

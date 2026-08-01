@@ -1,6 +1,7 @@
 #ifndef PLANE_BOOT_INFO_H
 #define PLANE_BOOT_INFO_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <plane/address.h>
 #include <plane/memmap.h>
@@ -26,6 +27,7 @@ struct boot_info {
 	struct plane_video_info video;
 	struct plane_mem_info   mem;
 	struct plane_smp_info   smp;
+	bool (*start_aps)(void);
 	
 	/*
 	 * and more ...
