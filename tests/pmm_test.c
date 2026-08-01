@@ -38,7 +38,8 @@ static uint64_t test_page_phys_raw(const struct plane_page *page)
 	return plane_paddr_raw(plane_vm_page_phys(page));
 }
 
-void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
+plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+						uint64_t size)
 {
 	uint64_t raw = plane_paddr_raw(phys_addr);
 
@@ -47,13 +48,13 @@ void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
 	    size > direct_map_limit - raw ||
 	    raw > DIRECT_MAP_STORAGE_SIZE ||
 	    size > DIRECT_MAP_STORAGE_SIZE - raw) {
-		return NULL;
+		return plane_vaddr_make(0);
 	}
 
-	return &direct_map_storage[raw];
+	return plane_vaddr_from_ptr(&direct_map_storage[raw]);
 }
 
-void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
@@ -143,7 +144,7 @@ static void add_region(struct plane_mem_info *mem, uint64_t base,
 {
 	uint64_t index = mem->entry_count++;
 
-	mem->map[index].base = base;
+	mem->map[index].base = plane_paddr_make(base);
 	mem->map[index].length = length;
 	mem->map[index].type = type;
 }
@@ -730,15 +731,15 @@ static int test_grub_like_reservations_are_counted(void)
 
 	add_region(&mem, 0x1000, 0x9000, PLANE_MEM_USABLE);
 	failures += test_expect_bool("grub reserve boot info",
-				plane_memmap_reserve(&mem, 0x2000, 0x1000,
+				plane_memmap_reserve(&mem, plane_paddr_make(0x2000), 0x1000,
 						     PLANE_MEM_BOOTLOADER_RECLAIMABLE),
 				true);
 	failures += test_expect_bool("grub reserve kernel image",
-				plane_memmap_reserve(&mem, 0x4000, 0x2000,
+				plane_memmap_reserve(&mem, plane_paddr_make(0x4000), 0x2000,
 						     PLANE_MEM_EXECUTABLE_AND_MODULES),
 				true);
 	failures += test_expect_bool("grub reserve framebuffer",
-				plane_memmap_reserve(&mem, 0x7000, 0x1000,
+				plane_memmap_reserve(&mem, plane_paddr_make(0x7000), 0x1000,
 						     PLANE_MEM_FRAMEBUFFER),
 				true);
 

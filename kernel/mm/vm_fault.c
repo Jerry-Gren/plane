@@ -187,3 +187,32 @@ bool plane_vm_fault_page(struct plane_vm_map *map,
 
 	return true;
 }
+
+bool plane_vm_fault_pages(struct plane_vm_map *map,
+			  plane_vaddr_t vaddr,
+			  uint64_t page_count,
+			  uint32_t fault_type)
+{
+	plane_vaddr_t last_vaddr;
+
+	if (map == NULL ||
+	    plane_vaddr_is_null(vaddr) ||
+	    !plane_vaddr_is_page_aligned(vaddr) ||
+	    page_count == 0 ||
+	    !plane_vm_prot_valid(fault_type) ||
+	    !plane_vaddr_add_pages(vaddr, page_count - 1, &last_vaddr)) {
+		return false;
+	}
+
+	for (uint64_t i = 0; i < page_count; i++) {
+		plane_vaddr_t page_vaddr;
+
+		BUG_ON_MSG(!plane_vaddr_add_pages(vaddr, i, &page_vaddr),
+			   "failed to advance fault range");
+		if (!plane_vm_fault_page(map, page_vaddr, fault_type)) {
+			return false;
+		}
+	}
+
+	return true;
+}

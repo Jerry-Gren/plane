@@ -95,7 +95,7 @@ static void dump_code(uint64_t rip, uint64_t int_no)
 }
 
 bool x86_64_try_handle_page_fault(uint64_t int_no,
-				  uint64_t fault_addr,
+				  plane_vaddr_t fault_addr,
 				  uint64_t error_code)
 {
 	uint32_t fault_type = PLANE_VM_PROT_READ;
@@ -117,7 +117,7 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 		fault_type |= PLANE_VM_PROT_WRITE;
 	}
 
-	return plane_kmem_fault_page(plane_vaddr_make(fault_addr), fault_type);
+	return plane_kmem_fault_page(fault_addr, fault_type);
 }
 
 void x86_64_exception_handler(struct interrupt_frame *frame)
@@ -132,7 +132,7 @@ void x86_64_exception_handler(struct interrupt_frame *frame)
 	if (frame->int_no == X86_EXCEPTION_PF) {
 		cr2 = read_cr2();
 		if (x86_64_try_handle_page_fault(frame->int_no,
-						 cr2,
+						 plane_vaddr_make(cr2),
 						 frame->error_code)) {
 			return;
 		}

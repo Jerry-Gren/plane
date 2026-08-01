@@ -4,6 +4,7 @@
 #ifndef __ASSEMBLER__
 #include <stdbool.h>
 #include <stdint.h>
+#include <plane/address.h>
 #include <plane/compiler.h>
 
 struct interrupt_frame {
@@ -37,7 +38,7 @@ struct interrupt_frame {
 } __packed;
 
 bool x86_64_try_handle_page_fault(uint64_t int_no,
-				  uint64_t fault_addr,
+				  plane_vaddr_t fault_addr,
 				  uint64_t error_code);
 void x86_64_exception_handler(struct interrupt_frame *frame);
 

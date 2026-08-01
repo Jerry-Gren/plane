@@ -56,13 +56,13 @@ bool plane_early_video_format_supported(const struct plane_video_info *video)
 bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
 {
 	if (!plane_early_video_format_supported(video) ||
-	    video->framebuffer_addr == NULL ||
+	    plane_vaddr_is_null(video->framebuffer_addr) ||
 	    video->width == 0 ||
 	    video->height == 0) {
 		return false;
 	}
 
-	uint8_t *fb_ptr = (uint8_t *)video->framebuffer_addr;
+	uint8_t *fb_ptr = plane_vaddr_to_ptr(video->framebuffer_addr);
 	uint8_t bytes_per_pixel = video->bpp / 8;
 	
 	/* reject pitch values that cannot hold one full framebuffer row */

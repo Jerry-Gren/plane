@@ -162,7 +162,7 @@ static bool init_map_and_object(uint64_t object_size)
 {
 	return plane_vm_object_init(&test_object, object_size) &&
 	       plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
-				 TEST_MAP_BASE, TEST_MAP_SIZE);
+				 test_vaddr(TEST_MAP_BASE), TEST_MAP_SIZE);
 }
 
 static bool enter_object(uint64_t address,
@@ -171,10 +171,17 @@ static bool enter_object(uint64_t address,
 			 uint32_t prot,
 			 uint64_t *vaddr)
 {
-	return plane_vm_map_enter(
+	plane_vaddr_t out;
+	bool ok;
+
+	if (vaddr == NULL) {
+		return false;
+	}
+
+	ok = plane_vm_map_enter(
 		&test_map,
 		&(struct plane_vm_map_enter_options){
-			.address = address,
+			.address = test_vaddr(address),
 			.page_count = page_count,
 			.object = &test_object,
 			.object_offset = object_offset,
@@ -182,7 +189,18 @@ static bool enter_object(uint64_t address,
 			.max_prot = PLANE_VM_PROT_ALL,
 			.flags = PLANE_VM_MAP_ENTER_FIXED,
 		},
-		vaddr);
+		&out);
+	if (ok) {
+		*vaddr = plane_vaddr_raw(out);
+	}
+	return ok;
+}
+
+static bool test_map_wire_pages(struct plane_vm_map *map,
+				uint64_t vaddr,
+				uint64_t page_count)
+{
+	return plane_vm_map_wire_pages(map, test_vaddr(vaddr), page_count);
 }
 
 static bool test_fault_page(struct plane_vm_map *map,
@@ -190,6 +208,15 @@ static bool test_fault_page(struct plane_vm_map *map,
 			    uint32_t fault_type)
 {
 	return plane_vm_fault_page(map, test_vaddr(vaddr), fault_type);
+}
+
+static bool test_fault_pages(struct plane_vm_map *map,
+			     uint64_t vaddr,
+			     uint64_t page_count,
+			     uint32_t fault_type)
+{
+	return plane_vm_fault_pages(map, test_vaddr(vaddr), page_count,
+				    fault_type);
 }
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
@@ -879,7 +906,7 @@ static int test_fault_wired_entry_wires_new_page(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault wire entry",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 	failures += test_expect_bool("fault wire page",
@@ -917,11 +944,11 @@ static int test_fault_multi_wired_entry_wires_new_page(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault multiwire entry first",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 	failures += test_expect_bool("fault multiwire entry second",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 	failures += test_expect_bool("fault multiwire page",
@@ -957,11 +984,11 @@ static int test_fault_multi_wire_failure_rolls_back_all_wires(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault multiwire fail entry first",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 	failures += test_expect_bool("fault multiwire fail entry second",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 	wire_fail_after = 1;
@@ -999,7 +1026,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 						  &vaddr),
 				     true);
 	failures += test_expect_bool("fault rollback wire entry",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr, 1),
 				     true);
 
@@ -1058,6 +1085,285 @@ static int test_fault_rolls_back_allocation_failures(void)
 	return failures;
 }
 
+static int test_fault_pages_faults_contiguous_range(void)
+{
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("range fault init",
+				     init_map_and_object(3 * PAGE_SIZE), true);
+	failures += test_expect_bool("range fault enter",
+				     enter_object(page_vaddr(1), 3, 0,
+						  PLANE_VM_PROT_DEFAULT,
+						  &vaddr),
+				     true);
+	failures += test_expect_bool("range fault pages",
+				     test_fault_pages(&test_map, vaddr, 3,
+						      PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("range fault allocated",
+				    allocated_page_count(), 3);
+	failures += test_expect_u64("range fault resident",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    3);
+	failures += test_expect_u64("range fault mappings",
+				    mapping_count(), 3);
+	failures += test_expect_not_null(
+		"range fault first resident",
+		plane_vm_object_lookup_page(&test_object, 0));
+	failures += test_expect_not_null(
+		"range fault second resident",
+		plane_vm_object_lookup_page(&test_object, PAGE_SIZE));
+	failures += test_expect_not_null(
+		"range fault third resident",
+		plane_vm_object_lookup_page(&test_object, 2 * PAGE_SIZE));
+	failures += test_expect_not_null("range fault first mapping",
+					 find_mapping(vaddr));
+	failures += test_expect_not_null("range fault second mapping",
+					 find_mapping(vaddr + PAGE_SIZE));
+	failures += test_expect_not_null("range fault third mapping",
+					 find_mapping(vaddr + 2 * PAGE_SIZE));
+	return failures;
+}
+
+static int test_fault_pages_rejects_invalid_inputs(void)
+{
+	uint64_t vaddr = 0;
+	uint64_t overflow_base = UINT64_MAX & ~(PAGE_SIZE - 1);
+	int failures = 0;
+
+	failures += test_expect_bool("range invalid init",
+				     init_map_and_object(PAGE_SIZE), true);
+	failures += test_expect_bool("range invalid enter",
+				     enter_object(page_vaddr(1), 1, 0,
+						  PLANE_VM_PROT_DEFAULT,
+						  &vaddr),
+				     true);
+	failures += test_expect_bool("range null map",
+				     test_fault_pages(NULL, vaddr, 1,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("range null addr",
+				     test_fault_pages(&test_map, 0, 1,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("range unaligned",
+				     test_fault_pages(&test_map, vaddr + 1, 1,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("range zero pages",
+				     test_fault_pages(&test_map, vaddr, 0,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("range none",
+				     test_fault_pages(&test_map, vaddr, 1,
+						      PLANE_VM_PROT_NONE),
+				     false);
+	failures += test_expect_bool("range unknown",
+				     test_fault_pages(&test_map, vaddr, 1,
+						      BIT(7)),
+				     false);
+	failures += test_expect_bool("range overflow",
+				     test_fault_pages(&test_map, overflow_base,
+						      2, PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("range invalid allocated",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("range invalid resident",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    0);
+	failures += test_expect_u64("range invalid mappings",
+				    mapping_count(), 0);
+	return failures;
+}
+
+static int test_fault_pages_keeps_prefix_before_hole(void)
+{
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("range hole init",
+				     init_map_and_object(4 * PAGE_SIZE), true);
+	failures += test_expect_bool("range hole first enter",
+				     enter_object(page_vaddr(1), 1, 0,
+						  PLANE_VM_PROT_DEFAULT,
+						  &first),
+				     true);
+	failures += test_expect_bool("range hole second enter",
+				     enter_object(page_vaddr(3), 1,
+						  2 * PAGE_SIZE,
+						  PLANE_VM_PROT_DEFAULT,
+						  &second),
+				     true);
+	failures += test_expect_bool("range hole pages",
+				     test_fault_pages(&test_map, first, 3,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("range hole allocated",
+				    allocated_page_count(), 1);
+	failures += test_expect_u64("range hole resident",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_not_null("range hole prefix resident",
+					 plane_vm_object_lookup_page(
+						 &test_object, 0));
+	failures += test_expect_null("range hole suffix untouched",
+				     plane_vm_object_lookup_page(
+					     &test_object, 2 * PAGE_SIZE));
+	failures += test_expect_not_null("range hole prefix mapping",
+					 find_mapping(first));
+	failures += test_expect_null("range hole suffix mapping",
+				     find_mapping(second));
+	return failures;
+}
+
+static int test_fault_pages_keeps_prefix_before_protection_failure(void)
+{
+	uint64_t first = 0;
+	uint64_t second = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("range prot init",
+				     init_map_and_object(2 * PAGE_SIZE), true);
+	failures += test_expect_bool("range prot first enter",
+				     enter_object(page_vaddr(1), 1, 0,
+						  PLANE_VM_PROT_DEFAULT,
+						  &first),
+				     true);
+	failures += test_expect_bool("range prot second enter",
+				     enter_object(page_vaddr(2), 1,
+						  PAGE_SIZE,
+						  PLANE_VM_PROT_READ,
+						  &second),
+				     true);
+	failures += test_expect_bool("range prot pages",
+				     test_fault_pages(&test_map, first, 2,
+						      PLANE_VM_PROT_READ |
+							      PLANE_VM_PROT_WRITE),
+				     false);
+	failures += test_expect_u64("range prot allocated",
+				    allocated_page_count(), 1);
+	failures += test_expect_u64("range prot resident",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_not_null("range prot prefix resident",
+					 plane_vm_object_lookup_page(
+						 &test_object, 0));
+	failures += test_expect_null("range prot denied resident",
+				     plane_vm_object_lookup_page(
+					     &test_object, PAGE_SIZE));
+	failures += test_expect_not_null("range prot prefix mapping",
+					 find_mapping(first));
+	failures += test_expect_null("range prot denied mapping",
+				     find_mapping(second));
+	return failures;
+}
+
+static int test_fault_pages_repairs_and_protects_resident_pages(void)
+{
+	struct plane_page *first_page;
+	struct plane_page *second_page;
+	struct test_mapping *first_mapping;
+	struct test_mapping *second_mapping;
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("range repair init",
+				     init_map_and_object(2 * PAGE_SIZE), true);
+	failures += test_expect_bool("range repair enter",
+				     enter_object(page_vaddr(1), 2, 0,
+						  PLANE_VM_PROT_READ,
+						  &vaddr),
+				     true);
+	failures += test_expect_bool("range repair first grab",
+				     plane_vm_page_grab(0, &first_page), true);
+	failures += test_expect_bool("range repair second grab",
+				     plane_vm_page_grab(0, &second_page), true);
+	failures += test_expect_bool("range repair first insert",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, first_page),
+				     true);
+	failures += test_expect_bool("range repair second insert",
+				     plane_vm_object_insert_page(
+					     &test_object, PAGE_SIZE,
+					     second_page),
+				     true);
+	failures += test_expect_bool("range repair second premap",
+				     hal_mmu_map_kernel_page(
+					     test_vaddr(vaddr + PAGE_SIZE),
+					     plane_vm_page_phys(second_page),
+					     HAL_MMU_MAP_WRITE),
+				     true);
+	failures += test_expect_bool("range repair pages",
+				     test_fault_pages(&test_map, vaddr, 2,
+						      PLANE_VM_PROT_READ),
+				     true);
+	first_mapping = find_mapping(vaddr);
+	second_mapping = find_mapping(vaddr + PAGE_SIZE);
+	failures += test_expect_not_null("range repair first mapping",
+					 first_mapping);
+	failures += test_expect_not_null("range repair second mapping",
+					 second_mapping);
+	failures += test_expect_u64("range repair map calls",
+				    map_call_count, 2);
+	failures += test_expect_u64("range repair protect calls",
+				    protect_call_count, 1);
+	if (first_mapping != NULL) {
+		failures += test_expect_u32("range repair first flags",
+					    first_mapping->flags, 0);
+	}
+	if (second_mapping != NULL) {
+		failures += test_expect_u32("range repair second flags",
+					    second_mapping->flags, 0);
+	}
+	return failures;
+}
+
+static int test_fault_pages_keeps_prefix_on_map_failure(void)
+{
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("range map fail init",
+				     init_map_and_object(2 * PAGE_SIZE), true);
+	failures += test_expect_bool("range map fail enter",
+				     enter_object(page_vaddr(1), 2, 0,
+						  PLANE_VM_PROT_DEFAULT,
+						  &vaddr),
+				     true);
+	failures += test_expect_bool("range map fail prefix",
+				     test_fault_page(&test_map, vaddr,
+						     PLANE_VM_PROT_READ),
+				     true);
+	map_force_fail = true;
+	failures += test_expect_bool("range map fail pages",
+				     test_fault_pages(&test_map, vaddr, 2,
+						      PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("range map fail allocated",
+				    allocated_page_count(), 1);
+	failures += test_expect_u64("range map fail resident",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_not_null("range map fail prefix resident",
+					 plane_vm_object_lookup_page(
+						 &test_object, 0));
+	failures += test_expect_null("range map fail failed resident",
+				     plane_vm_object_lookup_page(
+					     &test_object, PAGE_SIZE));
+	failures += test_expect_not_null("range map fail prefix mapping",
+					 find_mapping(vaddr));
+	failures += test_expect_null("range map fail failed mapping",
+				     find_mapping(vaddr + PAGE_SIZE));
+	return failures;
+}
+
 int main(void)
 {
 	static const struct test_case cases[] = {
@@ -1074,6 +1380,12 @@ int main(void)
 		TEST_CASE(test_fault_multi_wired_entry_wires_new_page),
 		TEST_CASE(test_fault_multi_wire_failure_rolls_back_all_wires),
 		TEST_CASE(test_fault_rolls_back_allocation_failures),
+		TEST_CASE(test_fault_pages_faults_contiguous_range),
+		TEST_CASE(test_fault_pages_rejects_invalid_inputs),
+		TEST_CASE(test_fault_pages_keeps_prefix_before_hole),
+		TEST_CASE(test_fault_pages_keeps_prefix_before_protection_failure),
+		TEST_CASE(test_fault_pages_repairs_and_protects_resident_pages),
+		TEST_CASE(test_fault_pages_keeps_prefix_on_map_failure),
 	};
 
 	return test_run_cases_with_fixture("vm_fault_test", cases,

@@ -40,8 +40,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
-				      void **vaddr);
+#include <plane/address.h>
+
+bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
+				      plane_vaddr_t *vaddr);
 void x86_64_mb2_early_remove_identity_mapping(void);
 #endif /* !__ASSEMBLER__ */
 

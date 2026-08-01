@@ -49,7 +49,14 @@ static uint64_t page_table_entry_make(uint64_t phys_addr, uint64_t flags)
 
 static uint64_t *direct_map_page_table(plane_paddr_t phys_addr)
 {
-	return hal_mmu_direct_phys_range_to_virt(phys_addr, PAGE_SIZE);
+	plane_vaddr_t vaddr =
+		hal_mmu_direct_phys_range_to_virt(phys_addr, PAGE_SIZE);
+
+	if (plane_vaddr_is_null(vaddr)) {
+		return NULL;
+	}
+
+	return plane_vaddr_to_ptr(vaddr);
 }
 
 static bool free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)

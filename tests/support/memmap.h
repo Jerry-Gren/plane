@@ -65,7 +65,7 @@ static inline void test_dump_memmap(const char *label,
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
 		printf("  [%llu] base=0x%llx length=0x%llx type=%s(%u)\n",
 		       (unsigned long long)i,
-		       (unsigned long long)mem->map[i].base,
+		       (unsigned long long)plane_paddr_raw(mem->map[i].base),
 		       (unsigned long long)mem->map[i].length,
 		       test_mem_type_name(mem->map[i].type),
 		       mem->map[i].type);
@@ -136,7 +136,7 @@ static inline int test_run_memmap_reserve_case(
 	memcpy(expected.map, tc->expected,
 	       tc->expected_count * sizeof(tc->expected[0]));
 
-	ret = plane_memmap_reserve(&actual, tc->reserve_base,
+	ret = plane_memmap_reserve(&actual, plane_paddr_make(tc->reserve_base),
 				   tc->reserve_length, tc->reserve_type);
 	if (ret == tc->expected_ret && test_memmaps_equal(&actual, &expected)) {
 		return 0;

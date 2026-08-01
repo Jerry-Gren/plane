@@ -91,7 +91,7 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video)
 		   fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX,
 		   "limine framebuffer fields exceed plane_video_info limits");
 
-	video->framebuffer_addr = (uint32_t *)fb->address;
+	video->framebuffer_addr = plane_vaddr_make((uint64_t)fb->address);
 	video->width            = fb->width;
 	video->height           = fb->height;
 	video->pitch            = fb->pitch;
@@ -129,7 +129,7 @@ static void boot_limine_collect_memmap(struct plane_mem_info *mem)
 		BUG_ON_MSG(entry == NULL, "limine memmap entry %llu is null",
 			   (unsigned long long)i);
 
-		mem->map[index].base = entry->base;
+		mem->map[index].base = plane_paddr_make(entry->base);
 		mem->map[index].length = entry->length;
 
 		switch (entry->type) {

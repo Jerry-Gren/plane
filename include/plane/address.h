@@ -25,6 +25,16 @@ static inline uint64_t plane_vaddr_raw(plane_vaddr_t addr)
 	return addr.raw;
 }
 
+static inline plane_vaddr_t plane_vaddr_from_ptr(const void *ptr)
+{
+	return plane_vaddr_make((uint64_t)(uintptr_t)ptr);
+}
+
+static inline void *plane_vaddr_to_ptr(plane_vaddr_t addr)
+{
+	return (void *)(uintptr_t)addr.raw;
+}
+
 static inline bool plane_vaddr_is_null(plane_vaddr_t addr)
 {
 	return addr.raw == 0;

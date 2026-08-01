@@ -10,13 +10,15 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 {
 	if (*clean_count > 0) {
 		struct plane_mem_region *prev = &clean_map[*clean_count - 1];
+		uint64_t prev_base = plane_paddr_raw(prev->base);
+		uint64_t region_base = plane_paddr_raw(region.base);
 		uint64_t prev_end;
 
-		if (!plane_checked_add_u64(prev->base, prev->length, &prev_end)) {
+		if (!plane_checked_add_u64(prev_base, prev->length, &prev_end)) {
 			return false;
 		}
 
-		if (prev_end == region.base && prev->type == region.type) {
+		if (prev_end == region_base && prev->type == region.type) {
 			uint64_t region_end;
 
 			/*
@@ -27,11 +29,11 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 			 *
 			 * action: merge equal-type neighbors.
 			 */
-			if (!plane_checked_add_u64(region.base, region.length,
+			if (!plane_checked_add_u64(region_base, region.length,
 						   &region_end)) {
 				return false;
 			}
-			prev->length = region_end - prev->base;
+			prev->length = region_end - prev_base;
 			return true;
 		}
 	}
@@ -117,14 +119,15 @@ static bool choose_interval_type(const struct plane_mem_info *mem,
 
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
 		const struct plane_mem_region *region = &mem->map[i];
+		uint64_t region_base = plane_paddr_raw(region->base);
 		uint64_t region_end;
 
-		if (!plane_checked_add_u64(region->base, region->length,
+		if (!plane_checked_add_u64(region_base, region->length,
 					   &region_end)) {
 			return false;
 		}
 
-		if (region->base > base || region_end < end) {
+		if (region_base > base || region_end < end) {
 			continue;
 		}
 
@@ -167,23 +170,24 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 	uint64_t valid_count = 0;
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
 		struct plane_mem_region *r = &mem->map[i];
+		uint64_t r_base = plane_paddr_raw(r->base);
 
 		if (r->length == 0) {
 			continue;
 		}
 
 		uint64_t end;
-		if (!plane_checked_add_u64(r->base, r->length, &end)) {
+		if (!plane_checked_add_u64(r_base, r->length, &end)) {
 			return false;
 		}
 
 		if (r->type == PLANE_MEM_USABLE) {
-			uint64_t start = ALIGN(r->base, PAGE_SIZE);
+			uint64_t start = ALIGN(r_base, PAGE_SIZE);
 			uint64_t aligned_end = ALIGN_DOWN(end, PAGE_SIZE);
 			if (start >= aligned_end) {
 				continue;
 			}
-			r->base = start;
+			r->base = plane_paddr_make(start);
 			r->length = aligned_end - start;
 		}
 
@@ -197,7 +201,8 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 	 */
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
 		for (uint64_t j = 0; j < mem->entry_count - i - 1; j++) {
-			if (mem->map[j].base > mem->map[j + 1].base) {
+			if (plane_paddr_raw(mem->map[j].base) >
+			    plane_paddr_raw(mem->map[j + 1].base)) {
 				struct plane_mem_region tmp = mem->map[j];
 				mem->map[j] = mem->map[j + 1];
 				mem->map[j + 1] = tmp;
@@ -208,15 +213,16 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 	uint64_t boundaries[PLANE_MEMMAP_MAX_BOUNDARIES];
 	uint64_t boundary_count = 0;
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
+		uint64_t map_base = plane_paddr_raw(mem->map[i].base);
 		uint64_t end;
 
-		if (!plane_checked_add_u64(mem->map[i].base, mem->map[i].length,
+		if (!plane_checked_add_u64(map_base, mem->map[i].length,
 					   &end)) {
 			return false;
 		}
 
 		if (!append_boundary(boundaries, &boundary_count,
-				     mem->map[i].base) ||
+				     map_base) ||
 		    !append_boundary(boundaries, &boundary_count, end)) {
 			return false;
 		}
@@ -257,7 +263,7 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 
 		if (!append_clean_region(clean_map, &clean_count,
 					 (struct plane_mem_region){
-						 .base = base,
+						 .base = plane_paddr_make(base),
 						 .length = end - base,
 						 .type = type
 					 })) {
@@ -273,9 +279,11 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 	return true;
 }
 
-bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
+bool plane_memmap_reserve(struct plane_mem_info *mem, plane_paddr_t base,
 			  uint64_t length, uint32_t type)
 {
+	uint64_t raw_base = plane_paddr_raw(base);
+
 	if (length == 0) {
 		return true;
 	}
@@ -289,11 +297,11 @@ bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 	}
 
 	uint64_t end;
-	if (!plane_checked_add_u64(base, length, &end)) {
+	if (!plane_checked_add_u64(raw_base, length, &end)) {
 		return false;
 	}
 
-	uint64_t reserve_base = ALIGN_DOWN(base, PAGE_SIZE);
+	uint64_t reserve_base = ALIGN_DOWN(raw_base, PAGE_SIZE);
 	uint64_t reserve_end = ALIGN(end, PAGE_SIZE);
 	if (reserve_end < end || reserve_end <= reserve_base) {
 		return false;
@@ -301,7 +309,7 @@ bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
 
 	struct plane_mem_info tmp = *mem;
 	uint64_t index = tmp.entry_count++;
-	tmp.map[index].base = reserve_base;
+	tmp.map[index].base = plane_paddr_make(reserve_base);
 	tmp.map[index].length = reserve_end - reserve_base;
 	tmp.map[index].type = type;
 

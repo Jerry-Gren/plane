@@ -89,30 +89,31 @@ static void reset_pmap_test(void)
 	flush_count = 0;
 }
 
-void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
+plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+						uint64_t size)
 {
 	uint64_t raw = test_paddr_raw(phys_addr);
 	uint64_t end;
 
 	if (size == 0 || raw > UINT64_MAX - size) {
-		return NULL;
+		return plane_vaddr_make(0);
 	}
 
 	end = raw + size;
 	if (end > TEST_PHYS_SIZE) {
-		return NULL;
+		return plane_vaddr_make(0);
 	}
 
 	if (direct_map_blocked_phys != UINT64_MAX &&
 	    raw < direct_map_blocked_phys + PAGE_SIZE &&
 	    end > direct_map_blocked_phys) {
-		return NULL;
+		return plane_vaddr_make(0);
 	}
 
-	return &phys_storage[raw];
+	return plane_vaddr_from_ptr(&phys_storage[raw]);
 }
 
-void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
@@ -175,7 +176,14 @@ bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 
 static void *test_direct_phys_to_virt(uint64_t phys_addr)
 {
-	return hal_mmu_direct_phys_to_virt(test_paddr(phys_addr));
+	plane_vaddr_t vaddr = hal_mmu_direct_phys_to_virt(
+		test_paddr(phys_addr));
+
+	if (plane_vaddr_is_null(vaddr)) {
+		return NULL;
+	}
+
+	return plane_vaddr_to_ptr(vaddr);
 }
 
 static bool test_pmap_map_in_root(uint64_t root,

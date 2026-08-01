@@ -65,7 +65,7 @@ static bool reserve_kmem_vaddr(struct plane_vm_map *map,
 			       struct plane_vm_object *object,
 			       uint64_t page_count,
 			       uint32_t flags,
-			       uint64_t *base)
+			       plane_vaddr_t *base)
 {
 	uint64_t guard_pages = 0;
 	uint32_t prot = PLANE_VM_PROT_READ;
@@ -108,6 +108,10 @@ static bool expand_kmem_metadata(void)
 	struct plane_vm_object *runtime_objects;
 	struct plane_page **runtime_hash;
 	void *runtime_guards;
+	plane_vaddr_t runtime_entries_addr;
+	plane_vaddr_t runtime_objects_addr;
+	plane_vaddr_t runtime_hash_addr;
+	plane_vaddr_t runtime_guards_addr;
 	uint64_t runtime_guard_size;
 
 	BUILD_BUG_ON(PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS == 0);
@@ -117,9 +121,10 @@ static bool expand_kmem_metadata(void)
 	if (!plane_kmem_alloc(sizeof(runtime_entries[0]) *
 			      PLANE_KERNEL_MAP_RUNTIME_ENTRIES,
 			      PLANE_KMEM_ALLOC_ZERO,
-			      (void **)&runtime_entries)) {
+			      &runtime_entries_addr)) {
 		return false;
 	}
+	runtime_entries = plane_vaddr_to_ptr(runtime_entries_addr);
 	if (!plane_vm_map_rehome_entries(&kernel_map, runtime_entries,
 					 PLANE_KERNEL_MAP_RUNTIME_ENTRIES)) {
 		return false;
@@ -128,9 +133,10 @@ static bool expand_kmem_metadata(void)
 	if (!plane_kmem_alloc(sizeof(runtime_objects[0]) *
 			      PLANE_VM_OBJECT_RUNTIME_POOL_SIZE,
 			      PLANE_KMEM_ALLOC_ZERO,
-			      (void **)&runtime_objects)) {
+			      &runtime_objects_addr)) {
 		return false;
 	}
+	runtime_objects = plane_vaddr_to_ptr(runtime_objects_addr);
 	if (!plane_vm_object_add_zone_storage(runtime_objects,
 					      PLANE_VM_OBJECT_RUNTIME_POOL_SIZE,
 					      &kernel_object_runtime_segment)) {
@@ -140,9 +146,10 @@ static bool expand_kmem_metadata(void)
 	if (!plane_kmem_alloc(sizeof(runtime_hash[0]) *
 			      PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS,
 			      PLANE_KMEM_ALLOC_ZERO,
-			      (void **)&runtime_hash)) {
+			      &runtime_hash_addr)) {
 		return false;
 	}
+	runtime_hash = plane_vaddr_to_ptr(runtime_hash_addr);
 	if (!plane_vm_object_rehome_resident_hash(
 		    runtime_hash, PLANE_VM_OBJECT_RUNTIME_HASH_BUCKETS)) {
 		return false;
@@ -153,9 +160,10 @@ static bool expand_kmem_metadata(void)
 		    &runtime_guard_size) ||
 	    !plane_kmem_alloc(runtime_guard_size,
 			      PLANE_KMEM_ALLOC_ZERO,
-			      &runtime_guards)) {
+			      &runtime_guards_addr)) {
 		return false;
 	}
+	runtime_guards = plane_vaddr_to_ptr(runtime_guards_addr);
 	return plane_vm_page_add_guard_storage(
 		runtime_guards,
 		PLANE_VM_GUARD_PAGE_RUNTIME_POOL_SIZE,
@@ -164,7 +172,7 @@ static bool expand_kmem_metadata(void)
 
 static bool release_resident_page(struct plane_vm_object *object,
 				  uint64_t object_offset,
-				  uint64_t vaddr)
+				  plane_vaddr_t vaddr)
 {
 	struct plane_page *page;
 	plane_paddr_t phys_addr;
@@ -175,10 +183,9 @@ static bool release_resident_page(struct plane_vm_object *object,
 		return true;
 	}
 
-	if (hal_mmu_translate_kernel_page(plane_vaddr_make(vaddr),
-					  &phys_addr)) {
+	if (hal_mmu_translate_kernel_page(vaddr, &phys_addr)) {
 		if (plane_vm_page_from_phys(phys_addr) != page ||
-		    !hal_mmu_unmap_kernel_page(plane_vaddr_make(vaddr))) {
+		    !hal_mmu_unmap_kernel_page(vaddr)) {
 			return false;
 		}
 	}
@@ -198,18 +205,18 @@ static bool release_resident_page(struct plane_vm_object *object,
 	return plane_vm_page_release(page);
 }
 
-static bool release_resident_pages(uint64_t vaddr,
+static bool release_resident_pages(plane_vaddr_t vaddr,
 				   struct plane_vm_object *object,
 				   uint64_t object_offset,
 				   uint64_t page_count)
 {
 	for (uint64_t i = page_count; i > 0; i--) {
-		uint64_t page_vaddr;
+		plane_vaddr_t page_vaddr;
 		uint64_t page_object_offset;
 		uint64_t offset;
 
-		if (!plane_checked_page_offset(i - 1, &offset) ||
-		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
+		if (!plane_vaddr_add_pages(vaddr, i - 1, &page_vaddr) ||
+		    !plane_checked_page_offset(i - 1, &offset) ||
 		    !plane_checked_add_u64(object_offset, offset,
 					   &page_object_offset) ||
 		    !release_resident_page(object, page_object_offset,
@@ -237,7 +244,7 @@ static bool rollback_object_page(struct plane_vm_object *object,
 	return plane_vm_page_release(page);
 }
 
-static bool map_allocated_pages(uint64_t vaddr,
+static bool map_allocated_pages(plane_vaddr_t vaddr,
 				struct plane_vm_object *object,
 				uint64_t object_offset,
 				uint64_t page_count,
@@ -250,13 +257,13 @@ static bool map_allocated_pages(uint64_t vaddr,
 
 	for (uint64_t i = 0; i < page_count; i++) {
 		struct plane_page *page;
-		uint64_t page_vaddr;
+		plane_vaddr_t page_vaddr;
 		uint64_t page_object_offset;
 		plane_paddr_t phys_addr;
 		uint64_t offset;
 
-		if (!plane_checked_page_offset(i, &offset) ||
-		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
+		if (!plane_vaddr_add_pages(vaddr, i, &page_vaddr) ||
+		    !plane_checked_page_offset(i, &offset) ||
 		    !plane_checked_add_u64(object_offset, offset,
 					   &page_object_offset)) {
 			BUG_ON_MSG(!release_resident_pages(vaddr, object,
@@ -306,8 +313,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 			return false;
 		}
 
-		if (!hal_mmu_map_kernel_page(plane_vaddr_make(page_vaddr),
-					     phys_addr, map_flags)) {
+		if (!hal_mmu_map_kernel_page(page_vaddr, phys_addr, map_flags)) {
 			bool page_ok = rollback_object_page(
 				object, page_object_offset, page);
 			bool mappings_ok = release_resident_pages(
@@ -324,7 +330,7 @@ static bool map_allocated_pages(uint64_t vaddr,
 	return true;
 }
 
-static bool protect_mapped_pages(uint64_t vaddr,
+static bool protect_mapped_pages(plane_vaddr_t vaddr,
 				 struct plane_vm_object *object,
 				 uint64_t object_offset,
 				 uint64_t page_count,
@@ -333,14 +339,14 @@ static bool protect_mapped_pages(uint64_t vaddr,
 	uint32_t map_flags = kmem_prot_to_map_flags(prot);
 
 	for (uint64_t i = 0; i < page_count; i++) {
-		uint64_t page_vaddr;
+		plane_vaddr_t page_vaddr;
 		uint64_t page_object_offset;
 		uint64_t offset;
 		struct plane_page *page;
 		plane_paddr_t phys_addr;
 
-		if (!plane_checked_page_offset(i, &offset) ||
-		    !plane_checked_add_u64(vaddr, offset, &page_vaddr) ||
+		if (!plane_vaddr_add_pages(vaddr, i, &page_vaddr) ||
+		    !plane_checked_page_offset(i, &offset) ||
 		    !plane_checked_add_u64(object_offset, offset,
 					   &page_object_offset)) {
 			return false;
@@ -348,15 +354,13 @@ static bool protect_mapped_pages(uint64_t vaddr,
 
 		page = plane_vm_object_lookup_page(object, page_object_offset);
 		if (page == NULL ||
-		    !hal_mmu_translate_kernel_page(plane_vaddr_make(page_vaddr),
-						   &phys_addr)) {
+		    !hal_mmu_translate_kernel_page(page_vaddr, &phys_addr)) {
 			continue;
 		}
 		if (plane_vm_page_from_phys(phys_addr) != page) {
 			return false;
 		}
-		if (!hal_mmu_protect_kernel_page(plane_vaddr_make(page_vaddr),
-						 map_flags)) {
+		if (!hal_mmu_protect_kernel_page(page_vaddr, map_flags)) {
 			return false;
 		}
 	}
@@ -367,7 +371,6 @@ static bool protect_mapped_pages(uint64_t vaddr,
 bool plane_kmem_init(void)
 {
 	plane_vaddr_t base;
-	uint64_t raw_base;
 	uint64_t object_size;
 	uint64_t size;
 
@@ -384,9 +387,8 @@ bool plane_kmem_init(void)
 		return false;
 	}
 
-	raw_base = plane_vaddr_raw(base);
 	if (!plane_vm_map_init(&kernel_map, kernel_map_entries,
-			       ARRAY_SIZE(kernel_map_entries), raw_base, size)) {
+			       ARRAY_SIZE(kernel_map_entries), base, size)) {
 		return false;
 	}
 
@@ -401,7 +403,7 @@ bool plane_kmem_init(void)
 	return true;
 }
 
-bool plane_kmem_alloc(uint64_t size, uint32_t flags, void **addr)
+bool plane_kmem_alloc(uint64_t size, uint32_t flags, plane_vaddr_t *addr)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -415,11 +417,12 @@ bool plane_kmem_alloc_in_map(struct plane_vm_map *map,
 			     struct plane_vm_object *object,
 			     uint64_t size,
 			     uint32_t flags,
-			     void **addr)
+			     plane_vaddr_t *addr)
 {
 	uint64_t page_count;
 
-	if (!kmem_size_to_pages(size, &page_count)) {
+	if (addr == NULL ||
+	    !kmem_size_to_pages(size, &page_count)) {
 		return false;
 	}
 
@@ -427,7 +430,7 @@ bool plane_kmem_alloc_in_map(struct plane_vm_map *map,
 					     addr);
 }
 
-bool plane_kmem_free(void *addr, uint64_t size)
+bool plane_kmem_free(plane_vaddr_t addr, uint64_t size)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -438,7 +441,7 @@ bool plane_kmem_free(void *addr, uint64_t size)
 
 bool plane_kmem_free_in_map(struct plane_vm_map *map,
 			    struct plane_vm_object *object,
-			    void *addr,
+			    plane_vaddr_t addr,
 			    uint64_t size)
 {
 	uint64_t page_count;
@@ -450,7 +453,7 @@ bool plane_kmem_free_in_map(struct plane_vm_map *map,
 	return plane_kmem_free_pages_in_map(map, object, addr, page_count);
 }
 
-bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot)
+bool plane_kmem_protect(plane_vaddr_t addr, uint64_t size, uint32_t prot)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -460,7 +463,7 @@ bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot)
 }
 
 bool plane_kmem_protect_in_map(struct plane_vm_map *map,
-			       void *addr,
+			       plane_vaddr_t addr,
 			       uint64_t size,
 			       uint32_t prot)
 {
@@ -473,7 +476,9 @@ bool plane_kmem_protect_in_map(struct plane_vm_map *map,
 	return plane_kmem_protect_pages_in_map(map, addr, page_count, prot);
 }
 
-bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr)
+bool plane_kmem_alloc_pages(uint64_t page_count,
+			    uint32_t flags,
+			    plane_vaddr_t *vaddr)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -487,10 +492,10 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 				   struct plane_vm_object *object,
 				   uint64_t page_count,
 				   uint32_t flags,
-				   void **vaddr)
+				   plane_vaddr_t *vaddr)
 {
 	struct plane_vm_map_allocation_info info;
-	uint64_t base;
+	plane_vaddr_t base;
 
 	if (vaddr == NULL ||
 	    map == NULL ||
@@ -523,11 +528,13 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 		return false;
 	}
 
-	*vaddr = (void *)(uintptr_t)base;
+	*vaddr = base;
 	return true;
 }
 
-bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot)
+bool plane_kmem_protect_pages(plane_vaddr_t vaddr,
+			      uint64_t page_count,
+			      uint32_t prot)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -545,38 +552,48 @@ bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type)
 	return plane_vm_fault_page(&kernel_map, vaddr, fault_type);
 }
 
+bool plane_kmem_fault_pages(plane_vaddr_t vaddr,
+			    uint64_t page_count,
+			    uint32_t fault_type)
+{
+	if (!kmem_initialized) {
+		return false;
+	}
+
+	return plane_vm_fault_pages(&kernel_map, vaddr, page_count, fault_type);
+}
+
 bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,
-				     void *vaddr,
+				     plane_vaddr_t vaddr,
 				     uint64_t page_count,
 				     uint32_t prot)
 {
 	struct plane_vm_map_allocation_info info;
-	uint64_t addr = (uint64_t)(uintptr_t)vaddr;
 
 	if (map == NULL ||
-	    vaddr == NULL ||
+	    plane_vaddr_is_null(vaddr) ||
 	    page_count == 0 ||
-	    !plane_is_page_aligned(addr) ||
+	    !plane_vaddr_is_page_aligned(vaddr) ||
 	    !plane_vm_prot_valid(prot)) {
 		return false;
 	}
 
-	if (!plane_vm_map_lookup_allocation(map, addr, page_count, &info)) {
+	if (!plane_vm_map_lookup_allocation(map, vaddr, page_count, &info)) {
 		return false;
 	}
 	if ((prot & ~info.max_prot) != 0) {
 		return false;
 	}
 
-	BUG_ON_MSG(!plane_vm_map_protect_pages(map, addr, page_count, prot),
+	BUG_ON_MSG(!plane_vm_map_protect_pages(map, vaddr, page_count, prot),
 		   "failed to update kmem virtual protection");
-	BUG_ON_MSG(!protect_mapped_pages(addr, info.object, info.object_offset,
+	BUG_ON_MSG(!protect_mapped_pages(vaddr, info.object, info.object_offset,
 					 page_count, prot),
 		   "failed to protect kmem backing pages");
 	return true;
 }
 
-bool plane_kmem_free_pages(void *vaddr, uint64_t page_count)
+bool plane_kmem_free_pages(plane_vaddr_t vaddr, uint64_t page_count)
 {
 	if (!kmem_initialized) {
 		return false;
@@ -588,31 +605,30 @@ bool plane_kmem_free_pages(void *vaddr, uint64_t page_count)
 
 bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 				  struct plane_vm_object *object,
-				  void *vaddr,
+				  plane_vaddr_t vaddr,
 				  uint64_t page_count)
 {
 	struct plane_vm_map_allocation_info info;
-	uint64_t addr = (uint64_t)(uintptr_t)vaddr;
 
 	if (map == NULL ||
 	    object == NULL ||
-	    vaddr == NULL ||
+	    plane_vaddr_is_null(vaddr) ||
 	    page_count == 0 ||
-	    !plane_is_page_aligned(addr)) {
+	    !plane_vaddr_is_page_aligned(vaddr)) {
 		return false;
 	}
 
-	if (!plane_vm_map_lookup_allocation(map, addr, page_count, &info) ||
+	if (!plane_vm_map_lookup_allocation(map, vaddr, page_count, &info) ||
 	    info.object != object) {
 		return false;
 	}
 
-	BUG_ON_MSG(!release_resident_pages(addr, object, info.object_offset,
+	BUG_ON_MSG(!release_resident_pages(vaddr, object, info.object_offset,
 					   page_count),
 		   "failed to release kmem backing pages");
-	BUG_ON_MSG(!plane_vm_map_unwire_pages(map, addr, page_count),
+	BUG_ON_MSG(!plane_vm_map_unwire_pages(map, vaddr, page_count),
 		   "failed to unwire kmem virtual reservation");
-	BUG_ON_MSG(!plane_vm_map_free_pages(map, addr, page_count),
+	BUG_ON_MSG(!plane_vm_map_free_pages(map, vaddr, page_count),
 		   "failed to release kmem virtual reservation");
 	return true;
 }

@@ -2,11 +2,12 @@
 #define PLANE_BOOT_INFO_H
 
 #include <stdint.h>
+#include <plane/address.h>
 #include <plane/memmap.h>
 
 /* Video */
 struct plane_video_info {
-	void *framebuffer_addr;
+	plane_vaddr_t framebuffer_addr;
 	uint32_t width;
 	uint32_t height;
 	uint32_t pitch;

@@ -46,10 +46,10 @@ struct plane_vm_map_stats {
  * Entry storage does not need to be zeroed by callers; init resets it.
  */
 struct plane_vm_map_entry {
-	uint64_t start;
-	uint64_t end;
-	uint64_t user_start;
-	uint64_t user_end;
+	plane_vaddr_t start;
+	plane_vaddr_t end;
+	plane_vaddr_t user_start;
+	plane_vaddr_t user_end;
 	struct plane_vm_object *object;
 	uint64_t object_offset;
 	uint64_t wired_count;
@@ -61,8 +61,8 @@ struct plane_vm_map_entry {
 };
 
 struct plane_vm_map {
-	uint64_t base;
-	uint64_t end;
+	plane_vaddr_t base;
+	plane_vaddr_t end;
 	uint64_t head;
 	uint64_t tail;
 	uint64_t entry_count;
@@ -72,9 +72,9 @@ struct plane_vm_map {
 };
 
 struct plane_vm_map_allocation_info {
-	uint64_t reserved_start;
+	plane_vaddr_t reserved_start;
 	uint64_t reserved_pages;
-	uint64_t user_start;
+	plane_vaddr_t user_start;
 	uint64_t user_pages;
 	struct plane_vm_object *object;
 	uint64_t object_offset;
@@ -93,7 +93,7 @@ struct plane_vm_map_page_info {
 };
 
 struct plane_vm_map_enter_options {
-	uint64_t address;
+	plane_vaddr_t address;
 	uint64_t page_count;
 	uint64_t guard_pages;
 	struct plane_vm_object *object;
@@ -106,7 +106,7 @@ struct plane_vm_map_enter_options {
 bool plane_vm_map_init(struct plane_vm_map *map,
 		       struct plane_vm_map_entry *entries,
 		       uint64_t entry_capacity,
-		       uint64_t base,
+		       plane_vaddr_t base,
 		       uint64_t size);
 /*
  * Move map-owned entry metadata into caller-provided storage. Existing entry
@@ -121,19 +121,19 @@ bool plane_vm_map_rehome_entries(struct plane_vm_map *map,
  */
 bool plane_vm_map_enter(struct plane_vm_map *map,
 			const struct plane_vm_map_enter_options *options,
-			uint64_t *vaddr);
+			plane_vaddr_t *vaddr);
 /*
  * Deletes complete entries in a reserved map range. This does not unmap pmap
  * state or release resident pages; callers that own backing state must tear it
  * down first.
  */
 bool plane_vm_map_delete_range(struct plane_vm_map *map,
-			       uint64_t start,
+			       plane_vaddr_t start,
 			       uint64_t page_count);
 /* Lookup and free use an exact user range match. */
 bool plane_vm_map_lookup_allocation(
 	struct plane_vm_map *map,
-	uint64_t vaddr,
+	plane_vaddr_t vaddr,
 	uint64_t page_count,
 	struct plane_vm_map_allocation_info *info);
 /* Looks up the single user page containing vaddr; guard pages are holes. */
@@ -142,22 +142,22 @@ bool plane_vm_map_lookup_page(struct plane_vm_map *map,
 			      struct plane_vm_map_page_info *info);
 /* Updates current protection metadata for a continuous user range. */
 bool plane_vm_map_protect_pages(struct plane_vm_map *map,
-				uint64_t vaddr,
+				plane_vaddr_t vaddr,
 				uint64_t page_count,
 				uint32_t prot);
 /* Shrinks max protection metadata for a continuous user range. */
 bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
-				    uint64_t vaddr,
+				    plane_vaddr_t vaddr,
 				    uint64_t page_count,
 				    uint32_t max_prot);
 bool plane_vm_map_wire_pages(struct plane_vm_map *map,
-			     uint64_t vaddr,
+			     plane_vaddr_t vaddr,
 			     uint64_t page_count);
 bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
-			       uint64_t vaddr,
+			       plane_vaddr_t vaddr,
 			       uint64_t page_count);
 bool plane_vm_map_free_pages(struct plane_vm_map *map,
-			     uint64_t vaddr,
+			     plane_vaddr_t vaddr,
 			     uint64_t page_count);
 struct plane_vm_map_stats plane_vm_map_get_stats(struct plane_vm_map *map);
 

@@ -66,7 +66,7 @@ static int test_draw_pattern_packs_rgb_formats(void)
 		struct plane_video_info video = cases[i].video;
 		uint8_t bytes_per_pixel = video.bpp / 8;
 
-		video.framebuffer_addr = framebuffer;
+		video.framebuffer_addr = plane_vaddr_from_ptr(framebuffer);
 		video.width = 2;
 		video.height = 2;
 		video.pitch = video.width * bytes_per_pixel;
@@ -123,7 +123,7 @@ static int test_draw_pattern_honors_pitch(void)
 	memset(framebuffer, 0x5a, sizeof(framebuffer));
 
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
-	video.framebuffer_addr = framebuffer;
+	video.framebuffer_addr = plane_vaddr_from_ptr(framebuffer);
 	video.width = 2;
 	video.height = 2;
 	video.pitch = 12;
@@ -166,7 +166,7 @@ static int test_draw_rejects_invalid_inputs(void)
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
 	int failures = 0;
 
-	video.framebuffer_addr = framebuffer;
+	video.framebuffer_addr = plane_vaddr_from_ptr(framebuffer);
 	video.width = 1;
 	video.height = 1;
 	video.pitch = 4;
@@ -177,7 +177,7 @@ static int test_draw_rejects_invalid_inputs(void)
 				     false);
 	video.bpp = 32;
 
-	video.framebuffer_addr = NULL;
+	video.framebuffer_addr = plane_vaddr_make(0);
 	failures += test_expect_bool("draw rejects null framebuffer",
 				     plane_early_video_draw_test_pattern(&video),
 				     false);
@@ -192,7 +192,7 @@ static int test_draw_rejects_short_pitch(void)
 	memset(framebuffer, 0x5a, sizeof(framebuffer));
 
 	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
-	video.framebuffer_addr = framebuffer;
+	video.framebuffer_addr = plane_vaddr_from_ptr(framebuffer);
 	video.width = 2;
 	video.height = 2;
 	video.pitch = 4;

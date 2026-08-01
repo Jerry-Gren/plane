@@ -55,7 +55,7 @@ static int page_directory_untouched(void)
 static int test_maps_unaligned_framebuffer(void)
 {
 	int failures = 0;
-	void *vaddr = NULL;
+	plane_vaddr_t vaddr = plane_vaddr_make(0);
 	uint64_t phys_addr = 0x123450;
 	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
 	uint64_t page_offset = phys_addr - phys_base;
@@ -66,11 +66,13 @@ static int test_maps_unaligned_framebuffer(void)
 
 	failures += test_expect_bool("map unaligned framebuffer",
 				     x86_64_mb2_early_map_framebuffer(
-					     phys_addr, 0x300000, &vaddr),
+					     plane_paddr_make(phys_addr),
+					     0x300000, &vaddr),
 				     true);
-	failures += test_expect_ptr("mapped virtual address", vaddr,
-				    (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE +
-					     page_offset));
+	failures += test_expect_u64("mapped virtual address",
+				    plane_vaddr_raw(vaddr),
+				    X86_64_MB2_FRAMEBUFFER_VMA_BASE +
+					    page_offset);
 	failures += test_expect_u64("first framebuffer pde",
 				    x86_64_mb2_early_pd_fb[start_idx],
 				    phys_base | flags);
@@ -91,17 +93,18 @@ static int test_maps_unaligned_framebuffer(void)
 
 static int check_map_failure(const char *name, uint64_t phys_addr,
 			      uint64_t size) {
-	void *vaddr = (void *)0xfeedface;
+	plane_vaddr_t vaddr = plane_vaddr_make(0xfeedface);
 	int failures = 0;
 
 	reset_state();
 
 	failures += test_expect_bool(name,
 				     x86_64_mb2_early_map_framebuffer(
-					     phys_addr, size, &vaddr),
+					     plane_paddr_make(phys_addr), size,
+					     &vaddr),
 				     false);
-	failures += test_expect_ptr("failure leaves out pointer unchanged",
-				    vaddr, (void *)0xfeedface);
+	failures += test_expect_u64("failure leaves out address unchanged",
+				    plane_vaddr_raw(vaddr), 0xfeedface);
 	failures += test_expect_bool("failure leaves page directories untouched",
 				     page_directory_untouched(), true);
 	failures += test_expect_u64("failure does not invalidate tlb",

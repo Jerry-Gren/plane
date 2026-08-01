@@ -28,6 +28,82 @@ static bool test_lookup_page(struct plane_vm_map *map,
 	return plane_vm_map_lookup_page(map, plane_vaddr_make(vaddr), info);
 }
 
+static plane_vaddr_t test_vaddr(uint64_t raw)
+{
+	return plane_vaddr_make(raw);
+}
+
+static uint64_t test_vaddr_raw(plane_vaddr_t vaddr)
+{
+	return plane_vaddr_raw(vaddr);
+}
+
+static bool test_map_delete_range(struct plane_vm_map *map,
+				  uint64_t start,
+				  uint64_t page_count)
+{
+	return plane_vm_map_delete_range(map, test_vaddr(start), page_count);
+}
+
+static bool test_map_lookup_allocation(
+	struct plane_vm_map *map,
+	uint64_t vaddr,
+	uint64_t page_count,
+	struct plane_vm_map_allocation_info *info)
+{
+	return plane_vm_map_lookup_allocation(map, test_vaddr(vaddr),
+					      page_count, info);
+}
+
+static bool test_map_protect_pages(struct plane_vm_map *map,
+				   uint64_t vaddr,
+				   uint64_t page_count,
+				   uint32_t prot)
+{
+	return plane_vm_map_protect_pages(map, test_vaddr(vaddr), page_count,
+					  prot);
+}
+
+static bool test_map_protect_max_pages(struct plane_vm_map *map,
+				       uint64_t vaddr,
+				       uint64_t page_count,
+				       uint32_t max_prot)
+{
+	return plane_vm_map_protect_max_pages(map, test_vaddr(vaddr),
+					      page_count, max_prot);
+}
+
+static bool test_map_wire_pages(struct plane_vm_map *map,
+				uint64_t vaddr,
+				uint64_t page_count)
+{
+	return plane_vm_map_wire_pages(map, test_vaddr(vaddr), page_count);
+}
+
+static bool test_map_unwire_pages(struct plane_vm_map *map,
+				  uint64_t vaddr,
+				  uint64_t page_count)
+{
+	return plane_vm_map_unwire_pages(map, test_vaddr(vaddr), page_count);
+}
+
+static bool test_map_free_pages(struct plane_vm_map *map,
+				uint64_t vaddr,
+				uint64_t page_count)
+{
+	return plane_vm_map_free_pages(map, test_vaddr(vaddr), page_count);
+}
+
+static bool test_map_init(struct plane_vm_map *map,
+			  struct plane_vm_map_entry *entries,
+			  uint64_t entry_capacity,
+			  uint64_t base,
+			  uint64_t size)
+{
+	return plane_vm_map_init(map, entries, entry_capacity, test_vaddr(base),
+				 size);
+}
+
 bool plane_vm_object_init(struct plane_vm_object *object,
 			  uint64_t offset_limit)
 {
@@ -184,7 +260,14 @@ static bool test_map_enter_pages_protected_max(struct plane_vm_map *map,
 					       uint32_t max_prot,
 					       uint64_t *vaddr)
 {
-	return plane_vm_map_enter(
+	plane_vaddr_t out;
+	bool ok;
+
+	if (vaddr == NULL) {
+		return false;
+	}
+
+	ok = plane_vm_map_enter(
 		map,
 		&(struct plane_vm_map_enter_options){
 			.page_count = page_count,
@@ -193,7 +276,11 @@ static bool test_map_enter_pages_protected_max(struct plane_vm_map *map,
 			.max_prot = max_prot,
 			.flags = PLANE_VM_MAP_ENTER_ANYWHERE,
 		},
-		vaddr);
+		&out);
+	if (ok) {
+		*vaddr = test_vaddr_raw(out);
+	}
+	return ok;
 }
 
 static bool test_map_enter_pages_protected(struct plane_vm_map *map,
@@ -225,7 +312,14 @@ static bool test_map_enter_pages_object(struct plane_vm_map *map,
 					uint32_t max_prot,
 					uint64_t *vaddr)
 {
-	return plane_vm_map_enter(
+	plane_vaddr_t out;
+	bool ok;
+
+	if (vaddr == NULL) {
+		return false;
+	}
+
+	ok = plane_vm_map_enter(
 		map,
 		&(struct plane_vm_map_enter_options){
 			.page_count = page_count,
@@ -236,7 +330,11 @@ static bool test_map_enter_pages_object(struct plane_vm_map *map,
 			.max_prot = max_prot,
 			.flags = PLANE_VM_MAP_ENTER_ANYWHERE,
 		},
-		vaddr);
+		&out);
+	if (ok) {
+		*vaddr = test_vaddr_raw(out);
+	}
+	return ok;
 }
 
 static bool test_map_enter_fixed(uint64_t address,
@@ -247,10 +345,17 @@ static bool test_map_enter_fixed(uint64_t address,
 				 uint32_t flags,
 				 uint64_t *vaddr)
 {
-	return plane_vm_map_enter(
+	plane_vaddr_t out;
+	bool ok;
+
+	if (vaddr == NULL) {
+		return false;
+	}
+
+	ok = plane_vm_map_enter(
 		&test_map,
 		&(struct plane_vm_map_enter_options){
-			.address = address,
+			.address = test_vaddr(address),
 			.page_count = page_count,
 			.guard_pages = guard_pages,
 			.object = object,
@@ -259,7 +364,11 @@ static bool test_map_enter_fixed(uint64_t address,
 			.max_prot = PLANE_VM_PROT_ALL,
 			.flags = flags,
 		},
-		vaddr);
+		&out);
+	if (ok) {
+		*vaddr = test_vaddr_raw(out);
+	}
+	return ok;
 }
 
 static int check_stats(const char *name,
@@ -319,7 +428,7 @@ static int test_init_stats(void)
 	int failures = 0;
 
 	failures += test_expect_bool("map init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += check_stats("kernel map total pages",
@@ -333,19 +442,19 @@ static int test_rejects_invalid_init(void)
 	int failures = 0;
 
 	failures += test_expect_bool("zero size init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   0),
 				     false);
 	failures += test_expect_bool("unaligned base init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE + 1,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE + 1,
 							   TEST_KERNEL_MAP_SIZE),
 				     false);
 	failures += test_expect_bool("unaligned size init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE - 1),
 				     false);
 	failures += test_expect_bool("wrapping init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, UINT64_MAX - PAGE_SIZE + 1,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, UINT64_MAX - PAGE_SIZE + 1,
 							   2 * PAGE_SIZE),
 				     false);
 
@@ -368,7 +477,7 @@ static int test_init_is_one_shot_in_production_mode(void)
 	int failures = 0;
 
 	failures += test_expect_bool("oneshot init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("oneshot alloc",
@@ -376,15 +485,15 @@ static int test_init_is_one_shot_in_production_mode(void)
 				     true);
 
 	failures += test_expect_bool("oneshot reject valid reinit",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     false);
 	failures += test_expect_bool("oneshot reject invalid reinit",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   0),
 				     false);
 	failures += test_expect_bool("oneshot allocation preserved",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+				     test_map_lookup_allocation(&test_map, vaddr, 2,
 									NULL),
 				     true);
 	failures += check_stats("oneshot stats preserved",
@@ -409,7 +518,7 @@ static int test_rehome_entries_rejects_invalid_inputs(void)
 					     TEST_REHOME_MAP_ENTRIES),
 				     false);
 	failures += test_expect_bool("rehome init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -450,7 +559,7 @@ static int test_rehome_entries_preserves_map_behavior(void)
 	int failures = 0;
 
 	failures += test_expect_bool("rehome behavior init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -468,26 +577,26 @@ static int test_rehome_entries_preserves_map_behavior(void)
 					     TEST_REHOME_MAP_ENTRIES),
 				     true);
 	failures += test_expect_bool("rehome lookup first",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 4, &info),
 				     true);
 	failures += test_expect_u64("rehome first object ref",
 				    plane_vm_object_ref_count(info.object), 1);
 	failures += test_expect_bool("rehome protect clipped middle",
-				     plane_vm_map_protect_pages(
+				     test_map_protect_pages(
 					     &test_map, first + PAGE_SIZE, 2,
 					     PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_bool("rehome wire clipped middle",
-				     plane_vm_map_wire_pages(
+				     test_map_wire_pages(
 					     &test_map, first + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_bool("rehome unwire clipped middle",
-				     plane_vm_map_unwire_pages(
+				     test_map_unwire_pages(
 					     &test_map, first + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_bool("rehome free second",
-				     plane_vm_map_free_pages(&test_map,
+				     test_map_free_pages(&test_map,
 							     second, 2),
 				     true);
 	failures += test_expect_u64("rehome reserved after free",
@@ -502,7 +611,7 @@ static int test_alloc_and_free_pages(void)
 	int failures = 0;
 
 	failures += test_expect_bool("alloc init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("alloc pages",
@@ -511,14 +620,14 @@ static int test_alloc_and_free_pages(void)
 	failures += test_expect_u64("alloc vaddr", vaddr,
 				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_bool("has allocation",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+				     test_map_lookup_allocation(&test_map, vaddr, 2,
 									NULL),
 				     true);
 	failures += check_stats("alloc stats", TEST_KERNEL_MAP_PAGES - 2,
 				2, 2, 1, 1);
 
 	failures += test_expect_bool("free pages",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	failures += check_stats("free stats", TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
 	return failures;
@@ -531,7 +640,7 @@ static int test_anywhere_enter_allocates_anonymous_object(void)
 	int failures = 0;
 
 	failures += test_expect_bool("anonymous anywhere init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -540,13 +649,13 @@ static int test_anywhere_enter_allocates_anonymous_object(void)
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("anonymous anywhere lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
 	failures += check_anonymous_object("anonymous anywhere object",
 					   &info, 2 * PAGE_SIZE);
 	failures += test_expect_bool("anonymous anywhere free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	return failures;
 }
@@ -558,7 +667,7 @@ static int test_fixed_enter_allocates_anonymous_object(void)
 	int failures = 0;
 
 	failures += test_expect_bool("anonymous fixed init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -570,15 +679,16 @@ static int test_fixed_enter_allocates_anonymous_object(void)
 					     &vaddr),
 				     true);
 	failures += test_expect_bool("anonymous fixed lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 3, &info),
 				     true);
 	failures += check_anonymous_object("anonymous fixed object",
 					   &info, 3 * PAGE_SIZE);
 	failures += test_expect_u64("anonymous fixed reserved start",
-				    info.reserved_start, page_vaddr(3));
+				    test_vaddr_raw(info.reserved_start),
+				    page_vaddr(3));
 	failures += test_expect_bool("anonymous fixed free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 3),
+				     test_map_free_pages(&test_map, vaddr, 3),
 				     true);
 	return failures;
 }
@@ -595,7 +705,7 @@ static int test_lookup_page_uses_user_page_semantics(void)
 							  8 * PAGE_SIZE),
 				     true);
 	failures += test_expect_bool("lookup page init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -653,7 +763,7 @@ static int test_lookup_page_tracks_split_object_offsets(void)
 							  8 * PAGE_SIZE),
 				     true);
 	failures += test_expect_bool("lookup split init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -665,7 +775,7 @@ static int test_lookup_page_tracks_split_object_offsets(void)
 					     PLANE_VM_PROT_ALL, &vaddr),
 				     true);
 	failures += test_expect_bool("lookup split protect middle",
-				     plane_vm_map_protect_pages(
+				     test_map_protect_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     PLANE_VM_PROT_READ),
 				     true);
@@ -710,7 +820,7 @@ static int test_free_releases_anonymous_object_slot(void)
 	int failures = 0;
 
 	failures += test_expect_bool("anonymous free init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -719,24 +829,24 @@ static int test_free_releases_anonymous_object_slot(void)
 				     test_map_enter_pages(&test_map, 1, &first),
 				     true);
 	failures += test_expect_bool("anonymous free first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, &first_info),
 				     true);
 	first_object = first_info.object;
 	failures += test_expect_bool("anonymous free release",
-				     plane_vm_map_free_pages(&test_map, first, 1),
+				     test_map_free_pages(&test_map, first, 1),
 				     true);
 	failures += test_expect_bool("anonymous free second",
 				     test_map_enter_pages(&test_map, 1, &second),
 				     true);
 	failures += test_expect_bool("anonymous free second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, &second_info),
 				     true);
 	failures += test_expect_ptr("anonymous free reused object slot",
 				    second_info.object, first_object);
 	failures += test_expect_bool("anonymous free cleanup",
-				     plane_vm_map_free_pages(&test_map,
+				     test_map_free_pages(&test_map,
 							     second, 1),
 				     true);
 	return failures;
@@ -752,7 +862,7 @@ static int test_delete_releases_anonymous_object_slot(void)
 	int failures = 0;
 
 	failures += test_expect_bool("anonymous delete init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -764,12 +874,12 @@ static int test_delete_releases_anonymous_object_slot(void)
 					     &first),
 				     true);
 	failures += test_expect_bool("anonymous delete first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, &first_info),
 				     true);
 	first_object = first_info.object;
 	failures += test_expect_bool("anonymous delete range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(1),
 							       3),
 				     true);
@@ -777,7 +887,7 @@ static int test_delete_releases_anonymous_object_slot(void)
 				     test_map_enter_pages(&test_map, 1, &second),
 				     true);
 	failures += test_expect_bool("anonymous delete second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, &second_info),
 				     true);
 	failures += test_expect_ptr("anonymous delete reused object slot",
@@ -797,7 +907,7 @@ static int test_overwrite_releases_old_anonymous_object_slot(void)
 	int failures = 0;
 
 	failures += test_expect_bool("anonymous overwrite init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -809,7 +919,7 @@ static int test_overwrite_releases_old_anonymous_object_slot(void)
 					     &old_vaddr),
 				     true);
 	failures += test_expect_bool("anonymous overwrite old lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, old_vaddr, 1, &old_info),
 				     true);
 	old_object = old_info.object;
@@ -821,7 +931,7 @@ static int test_overwrite_releases_old_anonymous_object_slot(void)
 					     &new_vaddr),
 				     true);
 	failures += test_expect_bool("anonymous overwrite new lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, new_vaddr, 2, &new_info),
 				     true);
 	failures += check_anonymous_object("anonymous overwrite new object",
@@ -833,7 +943,7 @@ static int test_overwrite_releases_old_anonymous_object_slot(void)
 					     &reuse_vaddr),
 				     true);
 	failures += test_expect_bool("anonymous overwrite reuse lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, reuse_vaddr, 1,
 					     &reuse_info),
 				     true);
@@ -859,7 +969,7 @@ static int test_anonymous_allocation_failure_keeps_map_state(void)
 	}
 
 	failures += test_expect_bool("anonymous exhausted init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -883,7 +993,7 @@ static int test_rejects_invalid_alloc_and_free(void)
 	int failures = 0;
 
 	failures += test_expect_bool("invalid init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("alloc zero pages",
@@ -893,11 +1003,11 @@ static int test_rejects_invalid_alloc_and_free(void)
 				     test_map_enter_pages(&test_map, 1, NULL),
 				     false);
 	failures += test_expect_bool("free zero pages",
-				     plane_vm_map_free_pages(&test_map, TEST_KERNEL_MAP_BASE,
+				     test_map_free_pages(&test_map, TEST_KERNEL_MAP_BASE,
 								 0),
 				     false);
 	failures += test_expect_bool("free unaligned",
-				     plane_vm_map_free_pages(&test_map, TEST_KERNEL_MAP_BASE + 1,
+				     test_map_free_pages(&test_map, TEST_KERNEL_MAP_BASE + 1,
 								 1),
 				     false);
 
@@ -905,23 +1015,23 @@ static int test_rejects_invalid_alloc_and_free(void)
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("partial free accepted",
-				     plane_vm_map_free_pages(&test_map, vaddr, 1),
+				     test_map_free_pages(&test_map, vaddr, 1),
 				     true);
 	failures += test_expect_bool("partial freed allocation absent",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr, 1,
+				     test_map_lookup_allocation(&test_map, vaddr, 1,
 									NULL),
 				     false);
 	failures += test_expect_bool("partial remainder present",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     NULL),
 				     true);
 	failures += test_expect_bool("partial remainder free accepted",
-				     plane_vm_map_free_pages(&test_map,
+				     test_map_free_pages(&test_map,
 							     vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_bool("double free rejected",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     false);
 	return failures;
 }
@@ -933,7 +1043,7 @@ static int test_partial_free_clips_object_offsets_and_refs(void)
 	int failures = 0;
 
 	failures += test_expect_bool("partial object free init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -951,13 +1061,13 @@ static int test_partial_free_clips_object_offsets_and_refs(void)
 	failures += test_expect_u64("partial object ref before",
 				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("partial object free middle",
-				     plane_vm_map_free_pages(
+				     test_map_free_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_u64("partial object ref after",
 				    plane_vm_object_ref_count(&test_object), 3);
 	failures += test_expect_bool("partial object left lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, &info),
 				     true);
 	failures += test_expect_ptr("partial object left object",
@@ -965,12 +1075,12 @@ static int test_partial_free_clips_object_offsets_and_refs(void)
 	failures += test_expect_u64("partial object left offset",
 				    info.object_offset, 0);
 	failures += test_expect_bool("partial object middle absent",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     NULL),
 				     false);
 	failures += test_expect_bool("partial object right lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
 					     &info),
 				     true);
@@ -996,7 +1106,7 @@ static int test_partial_free_rejects_exhausted_split_entries(void)
 		small_entries[i] = (struct plane_vm_map_entry){0};
 	}
 	failures += test_expect_bool("free split exhausted init",
-				     plane_vm_map_init(&small_map, small_entries,
+				     test_map_init(&small_map, small_entries,
 						       TEST_ARRAY_SIZE(small_entries),
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1006,7 +1116,7 @@ static int test_partial_free_rejects_exhausted_split_entries(void)
 				     true);
 	before = plane_vm_map_get_stats(&small_map);
 	failures += test_expect_bool("free split exhausted rejected",
-				     plane_vm_map_free_pages(
+				     test_map_free_pages(
 					     &small_map, vaddr + PAGE_SIZE, 1),
 				     false);
 	after = plane_vm_map_get_stats(&small_map);
@@ -1016,7 +1126,7 @@ static int test_partial_free_rejects_exhausted_split_entries(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("free split exhausted preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &small_map, vaddr, 3, NULL),
 				     true);
 	return failures;
@@ -1029,7 +1139,7 @@ static int test_rejects_exhausted_vaddr_space(void)
 	int failures = 0;
 
 	failures += test_expect_bool("space init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   PAGE_SIZE),
 				     true);
 	failures += test_expect_bool("space alloc too large",
@@ -1054,7 +1164,7 @@ static int test_rejects_exhausted_entries(void)
 	int failures = 0;
 
 	failures += test_expect_bool("entries init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	for (uint64_t i = 0; i < TEST_MAP_ENTRIES; i++) {
@@ -1090,7 +1200,7 @@ static int test_first_fit_reuses_lowest_hole(void)
 	int failures = 0;
 
 	failures += test_expect_bool("fit init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("fit alloc first",
@@ -1102,7 +1212,7 @@ static int test_first_fit_reuses_lowest_hole(void)
 	failures += test_expect_u64("fit second address", second,
 				    page_vaddr(2));
 	failures += test_expect_bool("fit free first",
-				     plane_vm_map_free_pages(&test_map, first, 2),
+				     test_map_free_pages(&test_map, first, 2),
 				     true);
 	failures += check_stats("fit hole stats", TEST_KERNEL_MAP_PAGES - 2,
 				2, 2, 2, 1);
@@ -1121,7 +1231,7 @@ static int test_holes_merge_after_entry_removal(void)
 	int failures = 0;
 
 	failures += test_expect_bool("merge init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(addrs); i++) {
@@ -1132,20 +1242,20 @@ static int test_holes_merge_after_entry_removal(void)
 	}
 
 	failures += test_expect_bool("merge free page 1",
-				     plane_vm_map_free_pages(&test_map, addrs[1], 1),
+				     test_map_free_pages(&test_map, addrs[1], 1),
 				     true);
 	failures += test_expect_bool("merge free page 3",
-				     plane_vm_map_free_pages(&test_map, addrs[3], 1),
+				     test_map_free_pages(&test_map, addrs[3], 1),
 				     true);
 	failures += check_stats("merge separated holes",
 				TEST_KERNEL_MAP_PAGES - 3, 3, 3, 3, 3);
 	failures += test_expect_bool("merge bridge holes",
-				     plane_vm_map_free_pages(&test_map, addrs[2], 1),
+				     test_map_free_pages(&test_map, addrs[2], 1),
 				     true);
 	failures += check_stats("merge bridged holes",
 				TEST_KERNEL_MAP_PAGES - 2, 2, 2, 2, 2);
 	failures += test_expect_bool("merge with tail hole",
-				     plane_vm_map_free_pages(&test_map, addrs[4], 1),
+				     test_map_free_pages(&test_map, addrs[4], 1),
 				     true);
 	failures += check_stats("merge tail hole",
 				TEST_KERNEL_MAP_PAGES - 1, 1, 1, 1, 1);
@@ -1158,7 +1268,7 @@ static int test_delete_range_removes_single_entry(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1170,12 +1280,12 @@ static int test_delete_range_removes_single_entry(void)
 					     &vaddr),
 				     true);
 	failures += test_expect_bool("delete range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(2),
 							       2),
 				     true);
 	failures += test_expect_bool("delete lookup gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     false);
 	failures += check_stats("delete stats", TEST_KERNEL_MAP_PAGES,
@@ -1190,7 +1300,7 @@ static int test_delete_range_removes_multiple_entries(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete multi init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1208,16 +1318,16 @@ static int test_delete_range_removes_multiple_entries(void)
 					     &second),
 				     true);
 	failures += test_expect_bool("delete multi range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(0),
 							       5),
 				     true);
 	failures += test_expect_bool("delete multi first gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, NULL),
 				     false);
 	failures += test_expect_bool("delete multi second gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, NULL),
 				     false);
 	failures += check_stats("delete multi stats",
@@ -1231,7 +1341,7 @@ static int test_delete_range_removes_guarded_entry(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete guard init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1245,12 +1355,12 @@ static int test_delete_range_removes_guarded_entry(void)
 	failures += test_expect_u64("delete guard user", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("delete guard range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(0),
 							       4),
 				     true);
 	failures += test_expect_bool("delete guard lookup gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     false);
 	failures += check_stats("delete guard stats",
@@ -1266,7 +1376,7 @@ static int test_delete_range_empty_hole_is_noop(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete noop init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1279,7 +1389,7 @@ static int test_delete_range_empty_hole_is_noop(void)
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("delete noop range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(1),
 							       2),
 				     true);
@@ -1292,7 +1402,7 @@ static int test_delete_range_empty_hole_is_noop(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("delete noop allocation preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, NULL),
 				     true);
 	return failures;
@@ -1305,30 +1415,30 @@ static int test_delete_range_rejects_invalid_ranges(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete invalid init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("delete invalid unaligned",
-				     plane_vm_map_delete_range(
+				     test_map_delete_range(
 					     &test_map, TEST_KERNEL_MAP_BASE + 1,
 					     1),
 				     false);
 	failures += test_expect_bool("delete invalid zero",
-				     plane_vm_map_delete_range(
+				     test_map_delete_range(
 					     &test_map, TEST_KERNEL_MAP_BASE,
 					     0),
 				     false);
 	failures += test_expect_bool("delete invalid overflow",
-				     plane_vm_map_delete_range(
+				     test_map_delete_range(
 					     &test_map,
 					     UINT64_MAX - PAGE_SIZE + 1,
 					     2),
 				     false);
 	failures += test_expect_bool("delete invalid out of map",
-				     plane_vm_map_delete_range(
+				     test_map_delete_range(
 					     &test_map,
 					     page_vaddr(TEST_KERNEL_MAP_PAGES),
 					     1),
@@ -1349,7 +1459,7 @@ static int test_delete_range_clips_partial_overlap(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete partial init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1361,7 +1471,7 @@ static int test_delete_range_clips_partial_overlap(void)
 					     &vaddr),
 				     true);
 	failures += test_expect_bool("delete partial accepted",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(3),
 							       1),
 				     true);
@@ -1371,11 +1481,11 @@ static int test_delete_range_clips_partial_overlap(void)
 	failures += test_expect_u64("delete partial count clipped",
 				    after.allocation_count, 1);
 	failures += test_expect_bool("delete partial old absent",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     false);
 	failures += test_expect_bool("delete partial remainder preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, NULL),
 				     true);
 	return failures;
@@ -1389,7 +1499,7 @@ static int test_delete_range_rejects_guarded_partial_overlap(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete guard partial init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1402,7 +1512,7 @@ static int test_delete_range_rejects_guarded_partial_overlap(void)
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("delete guard partial rejected",
-				     plane_vm_map_delete_range(&test_map, vaddr, 1),
+				     test_map_delete_range(&test_map, vaddr, 1),
 				     false);
 	after = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_u64("delete guard partial free unchanged",
@@ -1411,7 +1521,7 @@ static int test_delete_range_rejects_guarded_partial_overlap(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("delete guard partial preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     true);
 	return failures;
@@ -1426,7 +1536,7 @@ static int test_delete_range_rejects_wired_entry(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete wired init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1438,11 +1548,11 @@ static int test_delete_range_rejects_wired_entry(void)
 					     &vaddr),
 				     true);
 	failures += test_expect_bool("delete wired wire",
-				     plane_vm_map_wire_pages(&test_map, vaddr, 2),
+				     test_map_wire_pages(&test_map, vaddr, 2),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("delete wired rejected",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(2),
 							       2),
 				     false);
@@ -1453,7 +1563,7 @@ static int test_delete_range_rejects_wired_entry(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("delete wired lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
 	failures += test_expect_u64("delete wired count", info.wired_count,
@@ -1469,7 +1579,7 @@ static int test_delete_range_rejects_object_ref_release_failure(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete object init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1491,7 +1601,7 @@ static int test_delete_range_rejects_object_ref_release_failure(void)
 	test_object.resident_page_count = 1;
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("delete object rejected",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(2),
 							       2),
 				     false);
@@ -1504,7 +1614,7 @@ static int test_delete_range_rejects_object_ref_release_failure(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("delete object allocation preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     true);
 	test_object.resident_page_count = 0;
@@ -1517,7 +1627,7 @@ static int test_delete_range_releases_object_reference(void)
 	int failures = 0;
 
 	failures += test_expect_bool("delete ref init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1536,14 +1646,14 @@ static int test_delete_range_releases_object_reference(void)
 	failures += test_expect_u64("delete ref held",
 				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("delete ref range",
-				     plane_vm_map_delete_range(&test_map,
+				     test_map_delete_range(&test_map,
 							       page_vaddr(2),
 							       2),
 				     true);
 	failures += test_expect_u64("delete ref released",
 				    plane_vm_object_ref_count(&test_object), 1);
 	failures += test_expect_bool("delete ref lookup gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, NULL),
 				     false);
 	failures += check_stats("delete ref stats",
@@ -1557,7 +1667,7 @@ static int test_fixed_overwrite_reuses_zapped_entry_slot(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite reuse init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1592,7 +1702,7 @@ static int test_fixed_enter_succeeds_in_empty_hole(void)
 	int failures = 0;
 
 	failures += test_expect_bool("fixed init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1606,11 +1716,12 @@ static int test_fixed_enter_succeeds_in_empty_hole(void)
 	failures += test_expect_u64("fixed returned address", vaddr,
 				    page_vaddr(4));
 	failures += test_expect_bool("fixed lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
 	failures += test_expect_u64("fixed reserved start",
-				    info.reserved_start, page_vaddr(3));
+				    test_vaddr_raw(info.reserved_start),
+				    page_vaddr(3));
 	failures += test_expect_u64("fixed reserved pages",
 				    info.reserved_pages, 4);
 	failures += check_stats("fixed stats", TEST_KERNEL_MAP_PAGES - 4,
@@ -1626,7 +1737,7 @@ static int test_fixed_enter_rejects_invalid_ranges(void)
 	int failures = 0;
 
 	failures += test_expect_bool("fixed reject init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1690,7 +1801,7 @@ static int test_fixed_enter_rejects_overlap_without_overwrite(void)
 	int failures = 0;
 
 	failures += test_expect_bool("fixed overlap init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1715,7 +1826,7 @@ static int test_fixed_enter_rejects_overlap_without_overwrite(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("fixed overlap first preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 2, NULL),
 				     true);
 	return failures;
@@ -1729,7 +1840,7 @@ static int test_fixed_overwrite_replaces_single_entry(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite single init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1772,11 +1883,11 @@ static int test_fixed_overwrite_replaces_single_entry(void)
 					    &second_test_object),
 				    2);
 	failures += test_expect_bool("overwrite old lookup gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, old_vaddr, 2, NULL),
 				     false);
 	failures += test_expect_bool("overwrite new lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, new_vaddr, 4, &info),
 				     true);
 	failures += test_expect_ptr("overwrite new object",
@@ -1794,7 +1905,7 @@ static int test_fixed_overwrite_replaces_multiple_entries(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite multi init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1819,15 +1930,15 @@ static int test_fixed_overwrite_replaces_multiple_entries(void)
 					     &replacement),
 				     true);
 	failures += test_expect_bool("overwrite multi first gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, NULL),
 				     false);
 	failures += test_expect_bool("overwrite multi second gone",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, NULL),
 				     false);
 	failures += test_expect_bool("overwrite multi new lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, replacement, 5, NULL),
 				     true);
 	failures += check_stats("overwrite multi stats",
@@ -1844,7 +1955,7 @@ static int test_fixed_overwrite_rejects_partial_overlap(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite partial init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1870,7 +1981,7 @@ static int test_fixed_overwrite_rejects_partial_overlap(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("overwrite partial old preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, old_vaddr, 2, NULL),
 				     true);
 	return failures;
@@ -1886,7 +1997,7 @@ static int test_fixed_overwrite_rejects_wired_entry(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite wired init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1898,7 +2009,7 @@ static int test_fixed_overwrite_rejects_wired_entry(void)
 					     &old_vaddr),
 				     true);
 	failures += test_expect_bool("overwrite wired wire",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     old_vaddr, 2),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
@@ -1916,7 +2027,7 @@ static int test_fixed_overwrite_rejects_wired_entry(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("overwrite wired lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, old_vaddr, 2, &info),
 				     true);
 	failures += test_expect_u64("overwrite wired count", info.wired_count,
@@ -1933,7 +2044,7 @@ static int test_fixed_overwrite_rejects_object_ref_release_failure(void)
 	int failures = 0;
 
 	failures += test_expect_bool("overwrite object init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -1970,7 +2081,7 @@ static int test_fixed_overwrite_rejects_object_ref_release_failure(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("overwrite object old preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, old_vaddr, 2, NULL),
 				     true);
 	test_object.resident_page_count = 0;
@@ -1984,7 +2095,7 @@ static int test_guarded_alloc_reserves_unmapped_sentinels(void)
 	int failures = 0;
 
 	failures += test_expect_bool("guard init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("guard alloc",
@@ -1995,21 +2106,21 @@ static int test_guarded_alloc_reserves_unmapped_sentinels(void)
 	failures += test_expect_u64("guard user address", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("guard has user allocation",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+				     test_map_lookup_allocation(&test_map, vaddr, 2,
 									NULL),
 				     true);
 	failures += test_expect_bool("guard base not allocation",
-				     plane_vm_map_lookup_allocation(&test_map,
+				     test_map_lookup_allocation(&test_map,
 					     page_vaddr(0), 1, NULL),
 				     false);
 	failures += check_stats("guard stats", TEST_KERNEL_MAP_PAGES - 4,
 				4, 2, 1, 1);
 
 	failures += test_expect_bool("guard partial free rejected",
-				     plane_vm_map_free_pages(&test_map, vaddr, 1),
+				     test_map_free_pages(&test_map, vaddr, 1),
 				     false);
 	failures += test_expect_bool("guard free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	failures += check_stats("guard free stats",
 				TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
@@ -2029,7 +2140,7 @@ static int test_guarded_alloc_rejects_invalid_ranges(void)
 	int failures = 0;
 
 	failures += test_expect_bool("guard reject init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   2 * PAGE_SIZE),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
@@ -2069,7 +2180,7 @@ static int test_protected_alloc_rejects_invalid_protection(void)
 	int failures = 0;
 
 	failures += test_expect_bool("prot init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
@@ -2100,7 +2211,7 @@ static int test_protected_alloc_accepts_write_only_protection(void)
 	int failures = 0;
 
 	failures += test_expect_bool("write-only init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool(
@@ -2110,14 +2221,16 @@ static int test_protected_alloc_accepts_write_only_protection(void)
 		true);
 	failures += test_expect_bool(
 		"write-only lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 1, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 1, &info),
 		true);
 	failures += test_expect_u64("write-only reserved start",
-				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+				    test_vaddr_raw(info.reserved_start),
+				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_u64("write-only reserved pages",
 				    info.reserved_pages, 1);
 	failures += test_expect_u64("write-only user start",
-				    info.user_start, TEST_KERNEL_MAP_BASE);
+				    test_vaddr_raw(info.user_start),
+				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_u64("write-only user pages",
 				    info.user_pages, 1);
 	failures += test_expect_u32("write-only prot",
@@ -2135,7 +2248,7 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 	int failures = 0;
 
 	failures += test_expect_bool("prot guard init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool(
@@ -2146,23 +2259,25 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 	failures += test_expect_u64("prot guard user address", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("prot guard has user allocation",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr, 2,
+				     test_map_lookup_allocation(&test_map, vaddr, 2,
 									NULL),
 				     true);
 	failures += test_expect_bool("prot guard base not allocation",
-				     plane_vm_map_lookup_allocation(&test_map,
+				     test_map_lookup_allocation(&test_map,
 					     page_vaddr(0), 1, NULL),
 				     false);
 	failures += test_expect_bool(
 		"prot guard lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u64("prot guard reserved start",
-				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+				    test_vaddr_raw(info.reserved_start),
+				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_u64("prot guard reserved pages",
 				    info.reserved_pages, 4);
 	failures += test_expect_u64("prot guard user start",
-				    info.user_start, page_vaddr(1));
+				    test_vaddr_raw(info.user_start),
+				    page_vaddr(1));
 	failures += test_expect_u64("prot guard user pages",
 				    info.user_pages, 2);
 	failures += test_expect_u32("prot guard prot",
@@ -2173,7 +2288,7 @@ static int test_protected_guarded_alloc_keeps_user_range_semantics(void)
 	failures += check_stats("prot guard stats",
 				TEST_KERNEL_MAP_PAGES - 4, 4, 2, 1, 1);
 	failures += test_expect_bool("prot guard free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	failures += check_stats("prot guard free stats",
 				TEST_KERNEL_MAP_PAGES, 0, 0, 1, 0);
@@ -2187,18 +2302,18 @@ static int test_protect_pages_updates_exact_allocation(void)
 	int failures = 0;
 
 	failures += test_expect_bool("protect init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("protect alloc",
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("protect readonly",
-				     plane_vm_map_protect_pages(&test_map,
+				     test_map_protect_pages(&test_map,
 					     vaddr, 2, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_bool("protect lookup readonly",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     true);
@@ -2207,11 +2322,11 @@ static int test_protect_pages_updates_exact_allocation(void)
 	failures += test_expect_u32("protect readonly max",
 				    info.max_prot, PLANE_VM_PROT_ALL);
 	failures += test_expect_bool("protect writable again",
-				     plane_vm_map_protect_pages(&test_map,
+				     test_map_protect_pages(&test_map,
 					     vaddr, 2, PLANE_VM_PROT_DEFAULT),
 				     true);
 	failures += test_expect_bool("protect lookup writable",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     true);
@@ -2227,7 +2342,7 @@ static int test_protect_pages_clips_middle_fragment(void)
 	int failures = 0;
 
 	failures += test_expect_bool("protect middle init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -2236,32 +2351,32 @@ static int test_protect_pages_clips_middle_fragment(void)
 				     test_map_enter_pages(&test_map, 3, &vaddr),
 				     true);
 	failures += test_expect_bool("protect middle",
-				     plane_vm_map_protect_pages(
+				     test_map_protect_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_bool("protect left lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, &info),
 				     true);
 	failures += test_expect_u32("protect left unchanged",
 				    info.prot, PLANE_VM_PROT_DEFAULT);
 	failures += test_expect_bool("protect middle lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     &info),
 				     true);
 	failures += test_expect_u32("protect middle readonly",
 				    info.prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool("protect right lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
 					     &info),
 				     true);
 	failures += test_expect_u32("protect right unchanged",
 				    info.prot, PLANE_VM_PROT_DEFAULT);
 	failures += test_expect_bool("protect original absent",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 3, NULL),
 				     false);
 	failures += check_stats("protect middle stats",
@@ -2278,7 +2393,7 @@ static int test_protect_pages_rejects_hole_in_range(void)
 	int failures = 0;
 
 	failures += test_expect_bool("protect hole init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -2297,7 +2412,7 @@ static int test_protect_pages_rejects_hole_in_range(void)
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("protect hole rejected",
-				     plane_vm_map_protect_pages(
+				     test_map_protect_pages(
 					     &test_map, first, 3,
 					     PLANE_VM_PROT_READ),
 				     false);
@@ -2308,11 +2423,11 @@ static int test_protect_pages_rejects_hole_in_range(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("protect hole first preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, NULL),
 				     true);
 	failures += test_expect_bool("protect hole second preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, NULL),
 				     true);
 	return failures;
@@ -2331,7 +2446,7 @@ static int test_protect_pages_rejects_exhausted_split_entries(void)
 		small_entries[i] = (struct plane_vm_map_entry){0};
 	}
 	failures += test_expect_bool("protect split exhausted init",
-				     plane_vm_map_init(&small_map, small_entries,
+				     test_map_init(&small_map, small_entries,
 						       TEST_ARRAY_SIZE(small_entries),
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -2341,7 +2456,7 @@ static int test_protect_pages_rejects_exhausted_split_entries(void)
 				     true);
 	before = plane_vm_map_get_stats(&small_map);
 	failures += test_expect_bool("protect split exhausted rejected",
-				     plane_vm_map_protect_pages(
+				     test_map_protect_pages(
 					     &small_map, vaddr + PAGE_SIZE, 1,
 					     PLANE_VM_PROT_READ),
 				     false);
@@ -2352,7 +2467,7 @@ static int test_protect_pages_rejects_exhausted_split_entries(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("protect split exhausted preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &small_map, vaddr, 3, NULL),
 				     true);
 	return failures;
@@ -2365,35 +2480,35 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 	int failures = 0;
 
 	failures += test_expect_bool("protect reject init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("protect reject alloc",
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("protect rejects none",
-				     plane_vm_map_protect_pages(&test_map, vaddr, 2, 0),
+				     test_map_protect_pages(&test_map, vaddr, 2, 0),
 				     false);
 	failures += test_expect_bool("protect rejects unknown",
-				     plane_vm_map_protect_pages(&test_map, vaddr, 2,
+				     test_map_protect_pages(&test_map, vaddr, 2,
 								    BIT(8)),
 				     false);
 	failures += test_expect_bool("protect accepts partial",
-				     plane_vm_map_protect_pages(&test_map,
+				     test_map_protect_pages(&test_map,
 					     vaddr, 1, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_bool("protect rejects absent",
-				     plane_vm_map_protect_pages(&test_map,
+				     test_map_protect_pages(&test_map,
 					     page_vaddr(10), 1,
 					     PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("protect old full lookup absent",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     false);
 	failures += test_expect_bool("protect partial lookup",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       1,
 								       &info),
 				     true);
@@ -2401,7 +2516,7 @@ static int test_protect_pages_rejects_invalid_ranges(void)
 				    info.prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool(
 		"protect remainder lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE, 1,
+		test_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE, 1,
 					       &info),
 		true);
 	failures += test_expect_u32("protect remainder prot",
@@ -2419,7 +2534,7 @@ static int test_protect_max_pages_updates_exact_allocation(void)
 
 	failures += test_expect_bool(
 		"protect max exact init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool("protect max exact alloc",
@@ -2427,12 +2542,12 @@ static int test_protect_max_pages_updates_exact_allocation(void)
 				     true);
 	failures += test_expect_bool(
 		"protect max exact readonly",
-		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+		test_map_protect_max_pages(&test_map, vaddr, 2,
 					       PLANE_VM_PROT_READ),
 		true);
 	failures += test_expect_bool(
 		"protect max exact lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u32("protect max exact current",
 				    info.prot, PLANE_VM_PROT_READ);
@@ -2440,17 +2555,17 @@ static int test_protect_max_pages_updates_exact_allocation(void)
 				    info.max_prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool(
 		"protect max rejects current write",
-		plane_vm_map_protect_pages(&test_map, vaddr, 2,
+		test_map_protect_pages(&test_map, vaddr, 2,
 					   PLANE_VM_PROT_WRITE),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects raise",
-		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+		test_map_protect_max_pages(&test_map, vaddr, 2,
 					       PLANE_VM_PROT_ALL),
 		false);
 	failures += test_expect_bool(
 		"protect max exact lookup unchanged",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u32("protect max unchanged current",
 				    info.prot, PLANE_VM_PROT_READ);
@@ -2467,7 +2582,7 @@ static int test_protect_max_pages_clips_object_offsets_and_refs(void)
 
 	failures += test_expect_bool(
 		"protect max object init map",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool("protect max object init",
@@ -2484,18 +2599,18 @@ static int test_protect_max_pages_clips_object_offsets_and_refs(void)
 				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool(
 		"protect max object middle",
-		plane_vm_map_protect_max_pages(&test_map, vaddr + PAGE_SIZE,
+		test_map_protect_max_pages(&test_map, vaddr + PAGE_SIZE,
 					       1, PLANE_VM_PROT_READ),
 		true);
 	failures += test_expect_u64("protect max object ref after",
 				    plane_vm_object_ref_count(&test_object), 4);
 	failures += test_expect_bool(
 		"protect max object full absent",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 3, NULL),
+		test_map_lookup_allocation(&test_map, vaddr, 3, NULL),
 		false);
 	failures += test_expect_bool(
 		"protect max object left",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 1, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 1, &info),
 		true);
 	failures += test_expect_ptr("protect max object left object",
 				    info.object, &test_object);
@@ -2507,7 +2622,7 @@ static int test_protect_max_pages_clips_object_offsets_and_refs(void)
 				    info.max_prot, PLANE_VM_PROT_ALL);
 	failures += test_expect_bool(
 		"protect max object middle lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE,
+		test_map_lookup_allocation(&test_map, vaddr + PAGE_SIZE,
 					       1, &info),
 		true);
 	failures += test_expect_ptr("protect max object middle object",
@@ -2520,7 +2635,7 @@ static int test_protect_max_pages_clips_object_offsets_and_refs(void)
 				    info.max_prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool(
 		"protect max object right",
-		plane_vm_map_lookup_allocation(&test_map,
+		test_map_lookup_allocation(&test_map,
 					       vaddr + 2 * PAGE_SIZE, 1,
 					       &info),
 		true);
@@ -2546,7 +2661,7 @@ static int test_protect_max_pages_updates_contiguous_entries(void)
 
 	failures += test_expect_bool(
 		"protect max contiguous init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool(
@@ -2561,12 +2676,12 @@ static int test_protect_max_pages_updates_contiguous_entries(void)
 		true);
 	failures += test_expect_bool(
 		"protect max contiguous range",
-		plane_vm_map_protect_max_pages(&test_map, first, 2,
+		test_map_protect_max_pages(&test_map, first, 2,
 					       PLANE_VM_PROT_READ),
 		true);
 	failures += test_expect_bool(
 		"protect max contiguous first lookup",
-		plane_vm_map_lookup_allocation(&test_map, first, 1, &info),
+		test_map_lookup_allocation(&test_map, first, 1, &info),
 		true);
 	failures += test_expect_u32("protect max contiguous first prot",
 				    info.prot, PLANE_VM_PROT_READ);
@@ -2574,7 +2689,7 @@ static int test_protect_max_pages_updates_contiguous_entries(void)
 				    info.max_prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool(
 		"protect max contiguous second lookup",
-		plane_vm_map_lookup_allocation(&test_map, second, 1, &info),
+		test_map_lookup_allocation(&test_map, second, 1, &info),
 		true);
 	failures += test_expect_u32("protect max contiguous second prot",
 				    info.prot, PLANE_VM_PROT_READ);
@@ -2596,7 +2711,7 @@ static int test_protect_max_pages_rejects_hole_in_range(void)
 
 	failures += test_expect_bool(
 		"protect max hole init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool(
@@ -2612,7 +2727,7 @@ static int test_protect_max_pages_rejects_hole_in_range(void)
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool(
 		"protect max hole rejected",
-		plane_vm_map_protect_max_pages(&test_map, first, 3,
+		test_map_protect_max_pages(&test_map, first, 3,
 					       PLANE_VM_PROT_READ),
 		false);
 	after = plane_vm_map_get_stats(&test_map);
@@ -2623,13 +2738,13 @@ static int test_protect_max_pages_rejects_hole_in_range(void)
 				    before.allocation_count);
 	failures += test_expect_bool(
 		"protect max hole first preserved",
-		plane_vm_map_lookup_allocation(&test_map, first, 1, &info),
+		test_map_lookup_allocation(&test_map, first, 1, &info),
 		true);
 	failures += test_expect_u32("protect max hole first max",
 				    info.max_prot, PLANE_VM_PROT_ALL);
 	failures += test_expect_bool(
 		"protect max hole second preserved",
-		plane_vm_map_lookup_allocation(&test_map, second, 1, &info),
+		test_map_lookup_allocation(&test_map, second, 1, &info),
 		true);
 	failures += test_expect_u32("protect max hole second max",
 				    info.max_prot, PLANE_VM_PROT_ALL);
@@ -2652,7 +2767,7 @@ static int test_protect_max_pages_rejects_exhausted_split_entries(void)
 	}
 	failures += test_expect_bool(
 		"protect max split exhausted init",
-		plane_vm_map_init(&small_map, small_entries,
+		test_map_init(&small_map, small_entries,
 				  TEST_ARRAY_SIZE(small_entries),
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
@@ -2662,13 +2777,13 @@ static int test_protect_max_pages_rejects_exhausted_split_entries(void)
 				     true);
 	failures += test_expect_bool(
 		"protect max split exhausted lookup",
-		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		test_map_lookup_allocation(&small_map, vaddr, 3, &info),
 		true);
 	object = info.object;
 	before = plane_vm_map_get_stats(&small_map);
 	failures += test_expect_bool(
 		"protect max split exhausted rejected",
-		plane_vm_map_protect_max_pages(&small_map, vaddr + PAGE_SIZE,
+		test_map_protect_max_pages(&small_map, vaddr + PAGE_SIZE,
 					       1, PLANE_VM_PROT_READ),
 		false);
 	after = plane_vm_map_get_stats(&small_map);
@@ -2679,7 +2794,7 @@ static int test_protect_max_pages_rejects_exhausted_split_entries(void)
 				    before.allocation_count);
 	failures += test_expect_bool(
 		"protect max split preserved",
-		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		test_map_lookup_allocation(&small_map, vaddr, 3, &info),
 		true);
 	failures += test_expect_u32("protect max split max unchanged",
 				    info.max_prot, PLANE_VM_PROT_ALL);
@@ -2697,7 +2812,7 @@ static int test_protect_max_pages_rejects_invalid_ranges(void)
 
 	failures += test_expect_bool(
 		"protect max reject init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool("protect max reject alloc",
@@ -2705,41 +2820,41 @@ static int test_protect_max_pages_rejects_invalid_ranges(void)
 				     true);
 	failures += test_expect_bool(
 		"protect max rejects null map",
-		plane_vm_map_protect_max_pages(NULL, vaddr, 2,
+		test_map_protect_max_pages(NULL, vaddr, 2,
 					       PLANE_VM_PROT_READ),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects none",
-		plane_vm_map_protect_max_pages(&test_map, vaddr, 2,
+		test_map_protect_max_pages(&test_map, vaddr, 2,
 					       PLANE_VM_PROT_NONE),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects unknown",
-		plane_vm_map_protect_max_pages(&test_map, vaddr, 2, BIT(8)),
+		test_map_protect_max_pages(&test_map, vaddr, 2, BIT(8)),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects zero pages",
-		plane_vm_map_protect_max_pages(&test_map, vaddr, 0,
+		test_map_protect_max_pages(&test_map, vaddr, 0,
 					       PLANE_VM_PROT_READ),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects unaligned",
-		plane_vm_map_protect_max_pages(&test_map, vaddr + 1, 1,
+		test_map_protect_max_pages(&test_map, vaddr + 1, 1,
 					       PLANE_VM_PROT_READ),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects overflow",
-		plane_vm_map_protect_max_pages(&test_map, overflow_addr, 2,
+		test_map_protect_max_pages(&test_map, overflow_addr, 2,
 					       PLANE_VM_PROT_READ),
 		false);
 	failures += test_expect_bool(
 		"protect max rejects absent",
-		plane_vm_map_protect_max_pages(&test_map, page_vaddr(10), 1,
+		test_map_protect_max_pages(&test_map, page_vaddr(10), 1,
 					       PLANE_VM_PROT_READ),
 		false);
 	failures += test_expect_bool(
 		"protect max reject lookup unchanged",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u32("protect max reject prot unchanged",
 				    info.prot, PLANE_VM_PROT_DEFAULT);
@@ -2757,45 +2872,45 @@ static int test_wire_pages_updates_exact_allocation(void)
 	int failures = 0;
 
 	failures += test_expect_bool("wire map init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("wire map alloc",
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("wire map first",
-				     plane_vm_map_wire_pages(&test_map, vaddr, 2),
+				     test_map_wire_pages(&test_map, vaddr, 2),
 				     true);
 	failures += test_expect_bool("wire map second",
-				     plane_vm_map_wire_pages(&test_map, vaddr, 2),
+				     test_map_wire_pages(&test_map, vaddr, 2),
 				     true);
 	failures += test_expect_bool("wire map lookup",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     true);
 	failures += test_expect_u64("wire map count", info.wired_count, 2);
 	failures += test_expect_bool("wire map free rejected",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     false);
 	failures += test_expect_bool("wire map unwire",
-				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     test_map_unwire_pages(&test_map, vaddr, 2),
 				     true);
 	failures += test_expect_bool("wire map lookup one",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     true);
 	failures += test_expect_u64("wire map count one",
 				    info.wired_count, 1);
 	failures += test_expect_bool("wire map unwire second",
-				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     test_map_unwire_pages(&test_map, vaddr, 2),
 				     true);
 	failures += test_expect_bool("wire map unwire zero rejected",
-				     plane_vm_map_unwire_pages(&test_map, vaddr, 2),
+				     test_map_unwire_pages(&test_map, vaddr, 2),
 				     false);
 	failures += test_expect_bool("wire map free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	return failures;
 }
@@ -2808,7 +2923,7 @@ static int test_wire_pages_clips_middle_fragment(void)
 
 	failures += test_expect_bool(
 		"wire middle init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool("wire middle object init",
@@ -2822,17 +2937,17 @@ static int test_wire_pages_clips_middle_fragment(void)
 					    PLANE_VM_PROT_ALL, &vaddr),
 		true);
 	failures += test_expect_bool("wire middle page",
-				     plane_vm_map_wire_pages(
+				     test_map_wire_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_u64("wire middle ref count",
 				    plane_vm_object_ref_count(&test_object), 4);
 	failures += test_expect_bool("wire middle original absent",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 3, NULL),
 				     false);
 	failures += test_expect_bool("wire middle left lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, &info),
 				     true);
 	failures += test_expect_ptr("wire middle left object",
@@ -2842,7 +2957,7 @@ static int test_wire_pages_clips_middle_fragment(void)
 	failures += test_expect_u64("wire middle left count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("wire middle target lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     &info),
 				     true);
@@ -2853,7 +2968,7 @@ static int test_wire_pages_clips_middle_fragment(void)
 	failures += test_expect_u64("wire middle target count",
 				    info.wired_count, 1);
 	failures += test_expect_bool("wire middle right lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
 					     &info),
 				     true);
@@ -2864,7 +2979,7 @@ static int test_wire_pages_clips_middle_fragment(void)
 	failures += test_expect_u64("wire middle right count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("wire middle free rejected",
-				     plane_vm_map_free_pages(
+				     test_map_free_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1),
 				     false);
 	failures += check_stats("wire middle stats",
@@ -2880,7 +2995,7 @@ static int test_unwire_pages_clips_middle_fragment(void)
 
 	failures += test_expect_bool(
 		"unwire middle init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool("unwire middle object init",
@@ -2894,41 +3009,41 @@ static int test_unwire_pages_clips_middle_fragment(void)
 					    PLANE_VM_PROT_ALL, &vaddr),
 		true);
 	failures += test_expect_bool("unwire middle wire all",
-				     plane_vm_map_wire_pages(&test_map, vaddr,
+				     test_map_wire_pages(&test_map, vaddr,
 							     3),
 				     true);
 	failures += test_expect_bool("unwire middle page",
-				     plane_vm_map_unwire_pages(
+				     test_map_unwire_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += test_expect_u64("unwire middle ref count",
 				    plane_vm_object_ref_count(&test_object), 4);
 	failures += test_expect_bool("unwire middle left lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 1, &info),
 				     true);
 	failures += test_expect_u64("unwire middle left count",
 				    info.wired_count, 1);
 	failures += test_expect_bool("unwire middle target lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + PAGE_SIZE, 1,
 					     &info),
 				     true);
 	failures += test_expect_u64("unwire middle target count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("unwire middle right lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr + 2 * PAGE_SIZE, 1,
 					     &info),
 				     true);
 	failures += test_expect_u64("unwire middle right count",
 				    info.wired_count, 1);
 	failures += test_expect_bool("unwire middle left free rejected",
-				     plane_vm_map_free_pages(&test_map, vaddr,
+				     test_map_free_pages(&test_map, vaddr,
 							     1),
 				     false);
 	failures += test_expect_bool("unwire middle target free",
-				     plane_vm_map_free_pages(
+				     test_map_free_pages(
 					     &test_map, vaddr + PAGE_SIZE, 1),
 				     true);
 	failures += check_stats("unwire middle free stats",
@@ -2945,7 +3060,7 @@ static int test_wire_pages_updates_contiguous_entries(void)
 
 	failures += test_expect_bool(
 		"wire contiguous init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool(
@@ -2959,33 +3074,33 @@ static int test_wire_pages_updates_contiguous_entries(void)
 				     PLANE_VM_MAP_ENTER_FIXED, &second),
 		true);
 	failures += test_expect_bool("wire contiguous range",
-				     plane_vm_map_wire_pages(&test_map, first,
+				     test_map_wire_pages(&test_map, first,
 							     2),
 				     true);
 	failures += test_expect_bool("wire contiguous first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, &info),
 				     true);
 	failures += test_expect_u64("wire contiguous first count",
 				    info.wired_count, 1);
 	failures += test_expect_bool("wire contiguous second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, &info),
 				     true);
 	failures += test_expect_u64("wire contiguous second count",
 				    info.wired_count, 1);
 	failures += test_expect_bool("unwire contiguous range",
-				     plane_vm_map_unwire_pages(&test_map, first,
+				     test_map_unwire_pages(&test_map, first,
 							       2),
 				     true);
 	failures += test_expect_bool("unwire contiguous first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, &info),
 				     true);
 	failures += test_expect_u64("unwire contiguous first count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("unwire contiguous second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, &info),
 				     true);
 	failures += test_expect_u64("unwire contiguous second count",
@@ -3001,7 +3116,7 @@ static int test_wire_pages_guarded_range_uses_user_pages(void)
 
 	failures += test_expect_bool(
 		"wire guarded init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool(
@@ -3013,16 +3128,16 @@ static int test_wire_pages_guarded_range_uses_user_pages(void)
 				    vaddr, page_vaddr(1));
 	failures += test_expect_bool(
 		"wire guarded left guard absent",
-		plane_vm_map_lookup_allocation(&test_map, page_vaddr(0), 1,
+		test_map_lookup_allocation(&test_map, page_vaddr(0), 1,
 					       NULL),
 		false);
 	failures += test_expect_bool("wire guarded user pages",
-				     plane_vm_map_wire_pages(&test_map, vaddr,
+				     test_map_wire_pages(&test_map, vaddr,
 							     2),
 				     true);
 	failures += test_expect_bool(
 		"wire guarded lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u64("wire guarded count",
 				    info.wired_count, 1);
@@ -3030,21 +3145,21 @@ static int test_wire_pages_guarded_range_uses_user_pages(void)
 				    info.reserved_pages, 4);
 	failures += test_expect_bool(
 		"wire guarded left guard still absent",
-		plane_vm_map_lookup_allocation(&test_map, page_vaddr(0), 1,
+		test_map_lookup_allocation(&test_map, page_vaddr(0), 1,
 					       NULL),
 		false);
 	failures += test_expect_bool("unwire guarded user pages",
-				     plane_vm_map_unwire_pages(&test_map,
+				     test_map_unwire_pages(&test_map,
 							       vaddr, 2),
 				     true);
 	failures += test_expect_bool(
 		"unwire guarded lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 2, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 2, &info),
 		true);
 	failures += test_expect_u64("unwire guarded count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("wire guarded free",
-				     plane_vm_map_free_pages(&test_map, vaddr,
+				     test_map_free_pages(&test_map, vaddr,
 							     2),
 				     true);
 	return failures;
@@ -3061,7 +3176,7 @@ static int test_wire_pages_rejects_hole_in_range(void)
 
 	failures += test_expect_bool(
 		"wire hole init",
-		plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
+		test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES,
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
 	failures += test_expect_bool(
@@ -3076,7 +3191,7 @@ static int test_wire_pages_rejects_hole_in_range(void)
 		true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("wire hole rejected",
-				     plane_vm_map_wire_pages(&test_map, first,
+				     test_map_wire_pages(&test_map, first,
 							     3),
 				     false);
 	after = plane_vm_map_get_stats(&test_map);
@@ -3086,13 +3201,13 @@ static int test_wire_pages_rejects_hole_in_range(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("wire hole first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first, 1, &info),
 				     true);
 	failures += test_expect_u64("wire hole first count",
 				    info.wired_count, 0);
 	failures += test_expect_bool("wire hole second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, second, 1, &info),
 				     true);
 	failures += test_expect_u64("wire hole second count",
@@ -3116,7 +3231,7 @@ static int test_wire_pages_rejects_exhausted_split_entries(void)
 	}
 	failures += test_expect_bool(
 		"wire split exhausted init",
-		plane_vm_map_init(&small_map, small_entries,
+		test_map_init(&small_map, small_entries,
 				  TEST_ARRAY_SIZE(small_entries),
 				  TEST_KERNEL_MAP_BASE, TEST_KERNEL_MAP_SIZE),
 		true);
@@ -3126,12 +3241,12 @@ static int test_wire_pages_rejects_exhausted_split_entries(void)
 				     true);
 	failures += test_expect_bool(
 		"wire split exhausted lookup",
-		plane_vm_map_lookup_allocation(&small_map, vaddr, 3, &info),
+		test_map_lookup_allocation(&small_map, vaddr, 3, &info),
 		true);
 	object = info.object;
 	before = plane_vm_map_get_stats(&small_map);
 	failures += test_expect_bool("wire split exhausted rejected",
-				     plane_vm_map_wire_pages(
+				     test_map_wire_pages(
 					     &small_map, vaddr + PAGE_SIZE, 1),
 				     false);
 	after = plane_vm_map_get_stats(&small_map);
@@ -3141,7 +3256,7 @@ static int test_wire_pages_rejects_exhausted_split_entries(void)
 				    after.allocation_count,
 				    before.allocation_count);
 	failures += test_expect_bool("wire split preserved",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &small_map, vaddr, 3, &info),
 				     true);
 	failures += test_expect_u64("wire split wired unchanged",
@@ -3159,49 +3274,49 @@ static int test_wire_pages_rejects_invalid_ranges(void)
 	int failures = 0;
 
 	failures += test_expect_bool("wire reject init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("wire reject alloc",
 				     test_map_enter_pages(&test_map, 2, &vaddr),
 				     true);
 	failures += test_expect_bool("wire reject zero pages",
-				     plane_vm_map_wire_pages(&test_map, vaddr, 0),
+				     test_map_wire_pages(&test_map, vaddr, 0),
 				     false);
 	failures += test_expect_bool("wire reject unaligned",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     vaddr + 1, 1),
 				     false);
 	failures += test_expect_bool("wire reject overflow",
-				     plane_vm_map_wire_pages(&test_map,
+				     test_map_wire_pages(&test_map,
 							     overflow_addr, 2),
 				     false);
 	failures += test_expect_bool("wire reject absent",
-				     plane_vm_map_wire_pages(&test_map, page_vaddr(10),
+				     test_map_wire_pages(&test_map, page_vaddr(10),
 							     1),
 				     false);
 	failures += test_expect_bool("unwire reject zero pages",
-				     plane_vm_map_unwire_pages(&test_map, vaddr, 0),
+				     test_map_unwire_pages(&test_map, vaddr, 0),
 				     false);
 	failures += test_expect_bool("unwire reject unaligned",
-				     plane_vm_map_unwire_pages(&test_map,
+				     test_map_unwire_pages(&test_map,
 							       vaddr + 1, 1),
 				     false);
 	failures += test_expect_bool("unwire reject overflow",
-				     plane_vm_map_unwire_pages(&test_map,
+				     test_map_unwire_pages(&test_map,
 							       overflow_addr,
 							       2),
 				     false);
 	failures += test_expect_bool("unwire reject unwired",
-				     plane_vm_map_unwire_pages(&test_map,
+				     test_map_unwire_pages(&test_map,
 							       vaddr, 2),
 				     false);
 	failures += test_expect_bool("unwire reject absent",
-				     plane_vm_map_unwire_pages(&test_map,
+				     test_map_unwire_pages(&test_map,
 							       page_vaddr(10), 1),
 				     false);
 	failures += test_expect_bool("wire reject lookup unchanged",
-				     plane_vm_map_lookup_allocation(&test_map, vaddr,
+				     test_map_lookup_allocation(&test_map, vaddr,
 								       2,
 								       &info),
 				     true);
@@ -3217,7 +3332,7 @@ static int test_object_allocation_records_object_and_offset(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object alloc init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object init",
@@ -3237,7 +3352,7 @@ static int test_object_allocation_records_object_and_offset(void)
 	failures += test_expect_u64("object alloc ref count",
 				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("object alloc lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
 	failures += test_expect_u64("object lookup ref unchanged",
@@ -3247,7 +3362,7 @@ static int test_object_allocation_records_object_and_offset(void)
 	failures += test_expect_u64("object alloc offset",
 				    info.object_offset, 4 * PAGE_SIZE);
 	failures += test_expect_bool("object alloc free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	failures += test_expect_u64("object free ref count",
 				    plane_vm_object_ref_count(&test_object), 1);
@@ -3261,7 +3376,7 @@ static int test_object_auto_offset_uses_user_range(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object auto init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object init",
@@ -3279,7 +3394,7 @@ static int test_object_auto_offset_uses_user_range(void)
 	failures += test_expect_u64("object auto user vaddr", vaddr,
 				    page_vaddr(1));
 	failures += test_expect_bool("object auto lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, vaddr, 2, &info),
 				     true);
 	failures += test_expect_ptr("object auto object",
@@ -3287,7 +3402,8 @@ static int test_object_auto_offset_uses_user_range(void)
 	failures += test_expect_u64("object auto offset",
 				    info.object_offset, page_vaddr(1));
 	failures += test_expect_u64("object auto reserved",
-				    info.reserved_start, TEST_KERNEL_MAP_BASE);
+				    test_vaddr_raw(info.reserved_start),
+				    TEST_KERNEL_MAP_BASE);
 	failures += test_expect_u64("object auto ref count",
 				    plane_vm_object_ref_count(&test_object), 2);
 	return failures;
@@ -3309,13 +3425,13 @@ static int test_object_auto_offset_uses_user_va_across_maps(void)
 	}
 
 	failures += test_expect_bool("object first map init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object second map init",
-				     plane_vm_map_init(&other_map, other_entries,
+				     test_map_init(&other_map, other_entries,
 						       TEST_MAP_ENTRIES,
 						       other_base,
 						       TEST_KERNEL_MAP_SIZE),
@@ -3340,12 +3456,12 @@ static int test_object_auto_offset_uses_user_va_across_maps(void)
 					     PLANE_VM_PROT_ALL, &second_vaddr),
 				     true);
 	failures += test_expect_bool("object first lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &test_map, first_vaddr, 1,
 					     &first_info),
 				     true);
 	failures += test_expect_bool("object second lookup",
-				     plane_vm_map_lookup_allocation(
+				     test_map_lookup_allocation(
 					     &other_map, second_vaddr, 1,
 					     &second_info),
 				     true);
@@ -3360,11 +3476,11 @@ static int test_object_auto_offset_uses_user_va_across_maps(void)
 	failures += test_expect_u64("object two map ref count",
 				    plane_vm_object_ref_count(&test_object), 3);
 	failures += test_expect_bool("object first map free",
-				     plane_vm_map_free_pages(&test_map,
+				     test_map_free_pages(&test_map,
 							     first_vaddr, 1),
 				     true);
 	failures += test_expect_bool("object second map free",
-				     plane_vm_map_free_pages(&other_map,
+				     test_map_free_pages(&other_map,
 							     second_vaddr, 1),
 				     true);
 	failures += test_expect_u64("object two map ref count freed",
@@ -3380,7 +3496,7 @@ static int test_object_allocation_rejects_invalid_offset(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object reject init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool("object init",
@@ -3419,7 +3535,7 @@ static int test_object_allocation_validates_object_range(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object range init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -3438,7 +3554,7 @@ static int test_object_allocation_validates_object_range(void)
 	failures += test_expect_u64("object range exact ref count",
 				    plane_vm_object_ref_count(&test_object), 2);
 	failures += test_expect_bool("object range exact free",
-				     plane_vm_map_free_pages(&test_map, vaddr, 2),
+				     test_map_free_pages(&test_map, vaddr, 2),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);
 	failures += test_expect_bool("object range past end",
@@ -3474,7 +3590,7 @@ static int test_object_auto_offset_validates_object_range(void)
 	}
 
 	failures += test_expect_bool("object auto range init",
-				     plane_vm_map_init(&high_map, high_entries,
+				     test_map_init(&high_map, high_entries,
 						       TEST_MAP_ENTRIES,
 						       high_base,
 						       TEST_KERNEL_MAP_SIZE),
@@ -3510,7 +3626,7 @@ static int test_object_allocation_rejects_offset_overflow(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object overflow init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -3544,7 +3660,7 @@ static int test_object_allocation_rejects_invalid_lifetime(void)
 	int failures = 0;
 
 	failures += test_expect_bool("object lifetime map init",
-				     plane_vm_map_init(&test_map, test_entries,
+				     test_map_init(&test_map, test_entries,
 						       TEST_MAP_ENTRIES,
 						       TEST_KERNEL_MAP_BASE,
 						       TEST_KERNEL_MAP_SIZE),
@@ -3582,7 +3698,7 @@ static int test_object_allocation_failures_keep_ref_count(void)
 
 	small_entries[0] = (struct plane_vm_map_entry){0};
 	failures += test_expect_bool("object failure map init",
-				     plane_vm_map_init(&small_map, small_entries,
+				     test_map_init(&small_map, small_entries,
 						       TEST_ARRAY_SIZE(small_entries),
 						       TEST_KERNEL_MAP_BASE,
 						       2 * PAGE_SIZE),
@@ -3629,7 +3745,7 @@ static int test_protected_max_allocation_records_explicit_max(void)
 	int failures = 0;
 
 	failures += test_expect_bool("max init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	failures += test_expect_bool(
@@ -3639,7 +3755,7 @@ static int test_protected_max_allocation_records_explicit_max(void)
 		true);
 	failures += test_expect_bool(
 		"max readonly lookup",
-		plane_vm_map_lookup_allocation(&test_map, vaddr, 1, &info),
+		test_map_lookup_allocation(&test_map, vaddr, 1, &info),
 		true);
 	failures += test_expect_u32("max readonly prot",
 				    info.prot, PLANE_VM_PROT_READ);
@@ -3647,15 +3763,15 @@ static int test_protected_max_allocation_records_explicit_max(void)
 				    info.max_prot, PLANE_VM_PROT_READ);
 	failures += test_expect_bool(
 		"max readonly protect read",
-		plane_vm_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_READ),
+		test_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_READ),
 		true);
 	failures += test_expect_bool(
 		"max readonly reject write",
-		plane_vm_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_WRITE),
+		test_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_WRITE),
 		false);
 	failures += test_expect_bool(
 		"max readonly reject rw",
-		plane_vm_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_DEFAULT),
+		test_map_protect_pages(&test_map, vaddr, 1, PLANE_VM_PROT_DEFAULT),
 		false);
 	return failures;
 }
@@ -3668,7 +3784,7 @@ static int test_protected_max_allocation_rejects_invalid_pairs(void)
 	int failures = 0;
 
 	failures += test_expect_bool("max reject init",
-				     plane_vm_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
+				     test_map_init(&test_map, test_entries, TEST_MAP_ENTRIES, TEST_KERNEL_MAP_BASE,
 							   TEST_KERNEL_MAP_SIZE),
 				     true);
 	before = plane_vm_map_get_stats(&test_map);

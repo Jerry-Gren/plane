@@ -22,7 +22,7 @@ struct multiboot_info_base {
 
 static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 					 struct multiboot_tag_framebuffer *fb_tag,
-					 uint64_t *framebuffer_phys_addr,
+					 plane_paddr_t *framebuffer_phys_addr,
 					 uint64_t *framebuffer_size)
 {
 	/* struct multiboot_tag_framebuffer_common
@@ -81,7 +81,8 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	video->blue_mask_size   = fb_tag->framebuffer_blue_mask_size;
 	video->blue_mask_shift  = fb_tag->framebuffer_blue_field_position;
 
-	uint64_t phys_addr = fb_common->framebuffer_addr;
+	plane_paddr_t phys_addr = plane_paddr_make(fb_common->framebuffer_addr);
+	plane_vaddr_t framebuffer_vaddr;
 	uint64_t fb_size;
 
 	BUG_ON_MSG(!plane_checked_mul_u64(video->pitch, video->height,
@@ -93,9 +94,11 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
 	BUG_ON_MSG(!boot_mb2_arch_map_framebuffer(phys_addr, fb_size,
-						  &video->framebuffer_addr),
+						  &framebuffer_vaddr),
 		   "failed to map multiboot2 framebuffer: phys=0x%016llx size=0x%016llx",
-		   (unsigned long long)phys_addr, (unsigned long long)fb_size);
+		   (unsigned long long)plane_paddr_raw(phys_addr),
+		   (unsigned long long)fb_size);
+	video->framebuffer_addr = framebuffer_vaddr;
 }
 
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag)
@@ -134,7 +137,7 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 		 * }
 		 * typedef struct multiboot_mmap_entry multiboot_memory_map_t;
 		 */
-		mem->map[index].base = entry->addr;
+		mem->map[index].base = plane_paddr_make(entry->addr);
 		mem->map[index].length = entry->len;
 
 		switch (entry->type) {
@@ -160,23 +163,25 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 }
 
 static void boot_mb2_add_reservations(struct boot_info *info,
-				      uint64_t mb2_info_addr,
+				      plane_paddr_t mb2_info_addr,
 				      uint64_t mb2_info_size,
-				      uint64_t framebuffer_phys_addr,
+				      plane_paddr_t framebuffer_phys_addr,
 				      uint64_t framebuffer_size)
 {
-	BUG_ON_MSG(!plane_memmap_reserve(&info->mem, mb2_info_addr,
+	BUG_ON_MSG(!plane_memmap_reserve(&info->mem,
+					 mb2_info_addr,
 					 mb2_info_size,
 					 PLANE_MEM_BOOTLOADER_RECLAIMABLE),
 		   "failed to reserve multiboot2 info: base=0x%016llx size=0x%016llx",
-		   (unsigned long long)mb2_info_addr,
+		   (unsigned long long)plane_paddr_raw(mb2_info_addr),
 		   (unsigned long long)mb2_info_size);
 
-	BUG_ON_MSG(!plane_memmap_reserve(&info->mem, framebuffer_phys_addr,
+	BUG_ON_MSG(!plane_memmap_reserve(&info->mem,
+					 framebuffer_phys_addr,
 					 framebuffer_size,
 					 PLANE_MEM_FRAMEBUFFER),
 		   "failed to reserve framebuffer: base=0x%016llx size=0x%016llx",
-		   (unsigned long long)framebuffer_phys_addr,
+		   (unsigned long long)plane_paddr_raw(framebuffer_phys_addr),
 		   (unsigned long long)framebuffer_size);
 }
 
@@ -190,19 +195,21 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 		   (unsigned long long)magic);
 
 	struct boot_info b_info = {0};
-	uint64_t framebuffer_phys_addr = 0;
+	plane_paddr_t mb2_info_phys = plane_paddr_make(info_addr);
+	plane_paddr_t framebuffer_phys_addr = plane_paddr_make(0);
 	uint64_t framebuffer_size = 0;
 
-	void *info_vaddr = boot_mb2_arch_phys_to_virt(info_addr);
-	struct multiboot_info_base *info_base = info_vaddr;
+	plane_vaddr_t info_vaddr = boot_mb2_arch_phys_to_virt(mb2_info_phys);
+	void *info_ptr = plane_vaddr_to_ptr(info_vaddr);
+	struct multiboot_info_base *info_base = info_ptr;
 
 	BUG_ON_MSG(info_base->total_size < sizeof(struct multiboot_info_base) +
 		   sizeof(struct multiboot_tag),
 		   "multiboot2 info too small: total_size=%u",
 		   info_base->total_size);
 
-	uint8_t *tag_cursor = (uint8_t *)info_vaddr + sizeof(struct multiboot_info_base);
-	uint8_t *info_end = (uint8_t *)info_vaddr + info_base->total_size;
+	uint8_t *tag_cursor = (uint8_t *)info_ptr + sizeof(struct multiboot_info_base);
+	uint8_t *info_end = (uint8_t *)info_ptr + info_base->total_size;
 	struct multiboot_tag *tag = (struct multiboot_tag *)tag_cursor;
 
 	while (true) {
@@ -237,11 +244,11 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 	}
 
 	/* ensure we got a framebuffer */
-	BUG_ON_MSG(b_info.video.framebuffer_addr == NULL,
+	BUG_ON_MSG(plane_vaddr_is_null(b_info.video.framebuffer_addr),
 		   "multiboot2 framebuffer tag missing");
 
 	boot_mb2_arch_reserve_kernel_image(&b_info.mem);
-	boot_mb2_add_reservations(&b_info, info_addr, info_base->total_size,
+	boot_mb2_add_reservations(&b_info, mb2_info_phys, info_base->total_size,
 				  framebuffer_phys_addr, framebuffer_size);
 
 	boot_mb2_arch_finish_handoff();

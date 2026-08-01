@@ -19,7 +19,8 @@ struct plane_vm_object;
  * heap or pageable VM.
  * By default, allocations are eagerly backed with PMM pages.
  * PLANE_KMEM_ALLOC_LAZY creates a fault-backed reservation: no resident page or
- * pmap mapping is created until plane_kmem_fault_page() handles a fault.
+ * pmap mapping is created until plane_kmem_fault_page() handles a hardware
+ * fault or plane_kmem_fault_pages() explicitly populates a range.
  * PLANE_KMEM_ALLOC_ZERO clears the complete eager backing page range; with
  * PLANE_KMEM_ALLOC_LAZY, zero-fill happens at fault time.
  * PLANE_KMEM_ALLOC_GUARD reserves one unmapped guard page before and after the
@@ -41,13 +42,20 @@ enum plane_kmem_alloc_flags {
 };
 
 bool plane_kmem_init(void);
-bool plane_kmem_alloc(uint64_t size, uint32_t flags, void **addr);
-bool plane_kmem_free(void *addr, uint64_t size);
-bool plane_kmem_protect(void *addr, uint64_t size, uint32_t prot);
-bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags, void **vaddr);
-bool plane_kmem_free_pages(void *vaddr, uint64_t page_count);
-bool plane_kmem_protect_pages(void *vaddr, uint64_t page_count, uint32_t prot);
+bool plane_kmem_alloc(uint64_t size, uint32_t flags, plane_vaddr_t *addr);
+bool plane_kmem_free(plane_vaddr_t addr, uint64_t size);
+bool plane_kmem_protect(plane_vaddr_t addr, uint64_t size, uint32_t prot);
+bool plane_kmem_alloc_pages(uint64_t page_count,
+			    uint32_t flags,
+			    plane_vaddr_t *vaddr);
+bool plane_kmem_free_pages(plane_vaddr_t vaddr, uint64_t page_count);
+bool plane_kmem_protect_pages(plane_vaddr_t vaddr,
+			      uint64_t page_count,
+			      uint32_t prot);
 bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type);
+bool plane_kmem_fault_pages(plane_vaddr_t vaddr,
+			    uint64_t page_count,
+			    uint32_t fault_type);
 
 /*
  * The in-map APIs are still kernel virtual allocation APIs. The supplied map
@@ -58,26 +66,26 @@ bool plane_kmem_alloc_in_map(struct plane_vm_map *map,
 			     struct plane_vm_object *object,
 			     uint64_t size,
 			     uint32_t flags,
-			     void **addr);
+			     plane_vaddr_t *addr);
 bool plane_kmem_free_in_map(struct plane_vm_map *map,
 			    struct plane_vm_object *object,
-			    void *addr,
+			    plane_vaddr_t addr,
 			    uint64_t size);
 bool plane_kmem_protect_in_map(struct plane_vm_map *map,
-			       void *addr,
+			       plane_vaddr_t addr,
 			       uint64_t size,
 			       uint32_t prot);
 bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 				   struct plane_vm_object *object,
 				   uint64_t page_count,
 				   uint32_t flags,
-				   void **vaddr);
+				   plane_vaddr_t *vaddr);
 bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 				  struct plane_vm_object *object,
-				  void *vaddr,
+				  plane_vaddr_t vaddr,
 				  uint64_t page_count);
 bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,
-				     void *vaddr,
+				     plane_vaddr_t vaddr,
 				     uint64_t page_count,
 				     uint32_t prot);
 

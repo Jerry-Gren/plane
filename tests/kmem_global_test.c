@@ -146,6 +146,39 @@ static struct test_mapping *find_mapping(uint64_t vaddr)
 	return NULL;
 }
 
+static plane_vaddr_t test_vaddr_from_ptr(const void *ptr)
+{
+	return plane_vaddr_make((uint64_t)(uintptr_t)ptr);
+}
+
+static void *test_ptr_from_vaddr(plane_vaddr_t vaddr)
+{
+	return (void *)(uintptr_t)plane_vaddr_raw(vaddr);
+}
+
+static bool test_kmem_alloc_pages(uint64_t page_count,
+				  uint32_t flags,
+				  void **addr)
+{
+	plane_vaddr_t vaddr;
+	bool ok;
+
+	if (addr == NULL) {
+		return false;
+	}
+
+	ok = plane_kmem_alloc_pages(page_count, flags, &vaddr);
+	if (ok) {
+		*addr = test_ptr_from_vaddr(vaddr);
+	}
+	return ok;
+}
+
+static bool test_kmem_free_pages(void *addr, uint64_t page_count)
+{
+	return plane_kmem_free_pages(test_vaddr_from_ptr(addr), page_count);
+}
+
 bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 {
 	if (base == NULL || size == NULL) {
@@ -572,6 +605,7 @@ static int test_global_kmem_init_is_one_shot(void)
 	void *addr = NULL;
 	void *guarded_addr = NULL;
 	void *lazy_addr = NULL;
+	void *lazy_range_addr = NULL;
 	void *readonly_addr = NULL;
 	struct test_mapping *mapping;
 	uint64_t mapped_phys;
@@ -593,6 +627,13 @@ static int test_global_kmem_init_is_one_shot(void)
 						     (uint64_t)(uintptr_t)
 							     test_kmem_storage),
 					     PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_bool("global range fault before init",
+				     plane_kmem_fault_pages(
+					     plane_vaddr_make(
+						     (uint64_t)(uintptr_t)
+							     test_kmem_storage),
+					     1, PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
 	init_allocated = allocated_page_count();
@@ -625,7 +666,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				    guard_page_count(), 0);
 
 	failures += test_expect_bool("global alloc",
-				     plane_kmem_alloc_pages(2, 0, &addr),
+				     test_kmem_alloc_pages(2, 0, &addr),
 				     true);
 	failures += test_expect_u64("global wired pages",
 				    wired_page_count(), init_wired + 2);
@@ -671,7 +712,7 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_bool("global repeat init",
 				     plane_kmem_init(), false);
 	failures += test_expect_bool("global preserved free",
-				     plane_kmem_free_pages(addr, 2), true);
+				     test_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("global free backing pages",
 				    allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global free wired pages",
@@ -679,20 +720,20 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_u64("global free mappings",
 				    mapping_count(), init_mappings);
 	failures += test_expect_bool("global guarded alloc",
-				     plane_kmem_alloc_pages(
+				     test_kmem_alloc_pages(
 					     2, PLANE_KMEM_ALLOC_GUARD,
 					     &guarded_addr),
 				     true);
 	failures += test_expect_u64("global guarded no resident guards",
 				    guard_page_count(), 0);
 	failures += test_expect_bool("global guarded free",
-				     plane_kmem_free_pages(guarded_addr, 2),
+				     test_kmem_free_pages(guarded_addr, 2),
 				     true);
 	failures += test_expect_u64("global guarded free guards",
 				    guard_page_count(), 0);
 
 	failures += test_expect_bool("global readonly alloc",
-				     plane_kmem_alloc_pages(
+				     test_kmem_alloc_pages(
 					     1, PLANE_KMEM_ALLOC_READONLY,
 					     &readonly_addr),
 				     true);
@@ -723,7 +764,7 @@ static int test_global_kmem_init_is_one_shot(void)
 		}
 	}
 	failures += test_expect_bool("global readonly free",
-				     plane_kmem_free_pages(readonly_addr, 1),
+				     test_kmem_free_pages(readonly_addr, 1),
 				     true);
 	failures += test_expect_u64("global readonly free backing pages",
 				    allocated_page_count(), init_allocated);
@@ -731,7 +772,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				    mapping_count(), init_mappings);
 
 	failures += test_expect_bool("global lazy alloc",
-				     plane_kmem_alloc_pages(
+				     test_kmem_alloc_pages(
 					     2, PLANE_KMEM_ALLOC_LAZY,
 					     &lazy_addr),
 				     true);
@@ -762,7 +803,7 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_u64("global lazy fault mapping count",
 				    mapping_count(), init_mappings + 1);
 	failures += test_expect_bool("global lazy free",
-				     plane_kmem_free_pages(lazy_addr, 2),
+				     test_kmem_free_pages(lazy_addr, 2),
 				     true);
 	failures += test_expect_u64("global lazy free backing",
 				    allocated_page_count(), init_allocated);
@@ -771,9 +812,49 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_u64("global lazy free mappings",
 				    mapping_count(), init_mappings);
 
+	failures += test_expect_bool("global lazy range alloc",
+				     test_kmem_alloc_pages(
+					     2, PLANE_KMEM_ALLOC_LAZY,
+					     &lazy_range_addr),
+				     true);
+	failures += test_expect_u64("global lazy range no eager backing",
+				    allocated_page_count(), init_allocated);
+	failures += test_expect_u64("global lazy range no eager wiring",
+				    wired_page_count(), init_wired);
+	failures += test_expect_u64("global lazy range no eager mapping",
+				    mapping_count(), init_mappings);
+	failures += test_expect_bool("global lazy range fault",
+				     plane_kmem_fault_pages(
+					     plane_vaddr_make(
+						     (uint64_t)(uintptr_t)
+							     lazy_range_addr),
+					     2, PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("global lazy range backing",
+				    allocated_page_count(), init_allocated + 2);
+	failures += test_expect_u64("global lazy range wired",
+				    wired_page_count(), init_wired + 2);
+	failures += test_expect_u64("global lazy range mappings",
+				    mapping_count(), init_mappings + 2);
+	failures += test_expect_not_null("global lazy range first mapped",
+					 find_mapping((uint64_t)(uintptr_t)
+							      lazy_range_addr));
+	failures += test_expect_not_null(
+		"global lazy range second mapped",
+		find_mapping((uint64_t)(uintptr_t)lazy_range_addr + PAGE_SIZE));
+	failures += test_expect_bool("global lazy range free",
+				     test_kmem_free_pages(lazy_range_addr, 2),
+				     true);
+	failures += test_expect_u64("global lazy range free backing",
+				    allocated_page_count(), init_allocated);
+	failures += test_expect_u64("global lazy range free wired",
+				    wired_page_count(), init_wired);
+	failures += test_expect_u64("global lazy range free mappings",
+				    mapping_count(), init_mappings);
+
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		failures += test_expect_bool("global small alloc",
-					     plane_kmem_alloc_pages(
+					     test_kmem_alloc_pages(
 						     1, 0, &small_allocs[i]),
 					     true);
 	}
@@ -782,7 +863,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				    init_allocated + TEST_SMALL_ALLOC_COUNT);
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		failures += test_expect_bool("global small free",
-					     plane_kmem_free_pages(
+					     test_kmem_free_pages(
 						     small_allocs[i], 1),
 					     true);
 	}

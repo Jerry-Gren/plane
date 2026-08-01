@@ -12,18 +12,21 @@ extern uint64_t x86_64_mb2_early_pml4[];
 extern uint64_t x86_64_mb2_early_pd_kernel[];
 extern uint64_t x86_64_mb2_early_pd_fb[];
 
-bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
-				      void **vaddr)
+bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
+				      plane_vaddr_t *vaddr)
 {
+	uint64_t raw_phys = plane_paddr_raw(phys_addr);
+
 	if (vaddr == NULL || size == 0) {
 		return false;
 	}
 
-	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
-	uint64_t page_offset = phys_addr - phys_base;
+	uint64_t phys_base = ALIGN_DOWN(raw_phys, ARCH_LARGE_PAGE_SIZE);
+	uint64_t page_offset = raw_phys - phys_base;
 	uint64_t fb_size_with_offset;
 	uint64_t fb_aligned_size;
 	uint64_t phys_end;
+	uint64_t mapped_vaddr;
 
 	if (!plane_checked_add_u64(size, page_offset, &fb_size_with_offset)) {
 		return false;
@@ -60,7 +63,12 @@ bool x86_64_mb2_early_map_framebuffer(uint64_t phys_addr, uint64_t size,
 		hal_mmu_invalidate_tlb(plane_vaddr_make(current_vaddr));
 	}
 
-	*vaddr = (void *)(X86_64_MB2_FRAMEBUFFER_VMA_BASE + page_offset);
+	if (!plane_checked_add_u64(X86_64_MB2_FRAMEBUFFER_VMA_BASE,
+				   page_offset, &mapped_vaddr)) {
+		return false;
+	}
+
+	*vaddr = plane_vaddr_make(mapped_vaddr);
 	return true;
 }
 

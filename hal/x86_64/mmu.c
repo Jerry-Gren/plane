@@ -33,13 +33,14 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 
 	for (uint64_t i = 0; i < mem->entry_count; i++) {
 		const struct plane_mem_region *region = &mem->map[i];
+		uint64_t region_base = plane_paddr_raw(region->base);
 		uint64_t end;
 
 		if (region->type != PLANE_MEM_USABLE || region->length == 0) {
 			continue;
 		}
 
-		if (!plane_checked_add_u64(region->base, region->length, &end) ||
+		if (!plane_checked_add_u64(region_base, region->length, &end) ||
 		    end > X86_64_DIRECT_MAP_SIZE) {
 			return false;
 		}
@@ -49,28 +50,34 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 	return true;
 }
 
-void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
 {
 	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
 }
 
-void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr, uint64_t size)
+plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+						uint64_t size)
 {
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 	uint64_t end;
+	uint64_t vaddr;
 
 	if (!direct_map_initialized || size == 0 ||
 	    !plane_checked_add_u64(raw_phys, size, &end) ||
 	    end > X86_64_DIRECT_MAP_SIZE) {
-		return NULL;
+		return plane_vaddr_make(0);
 	}
 
-	return (void *)(direct_map_base + raw_phys);
+	if (!plane_checked_add_u64(direct_map_base, raw_phys, &vaddr)) {
+		return plane_vaddr_make(0);
+	}
+
+	return plane_vaddr_make(vaddr);
 }
 
-plane_paddr_t hal_mmu_direct_virt_to_phys(const void *vaddr)
+plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr)
 {
-	uint64_t addr = (uint64_t)(uintptr_t)vaddr;
+	uint64_t addr = plane_vaddr_raw(vaddr);
 	uint64_t offset;
 
 	if (!direct_map_initialized || addr < direct_map_base) {

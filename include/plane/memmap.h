@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/address.h>
+
 #define PLANE_MAX_MEMMAP_ENTRIES 128
 
 enum plane_mem_type {
@@ -20,7 +22,7 @@ enum plane_mem_type {
 };
 
 struct plane_mem_region {
-	uint64_t base;
+	plane_paddr_t base;
 	uint64_t length;
 	uint32_t type;
 };
@@ -31,7 +33,7 @@ struct plane_mem_info {
 };
 
 bool plane_sanitize_memory_map(struct plane_mem_info *mem);
-bool plane_memmap_reserve(struct plane_mem_info *mem, uint64_t base,
+bool plane_memmap_reserve(struct plane_mem_info *mem, plane_paddr_t base,
 			  uint64_t length, uint32_t type);
 
 #endif /* PLANE_MEMMAP_H */

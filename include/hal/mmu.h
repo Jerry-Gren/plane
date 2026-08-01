@@ -36,10 +36,10 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem);
  * mutable page-table pages under kernel allocation.
  */
 bool hal_mmu_take_kernel_page_table_ownership(void);
-void *hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr);
-void *hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
-					uint64_t size);
-plane_paddr_t hal_mmu_direct_virt_to_phys(const void *vaddr);
+plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr);
+plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+						uint64_t size);
+plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr);
 
 /*
  * Kernel dynamic mapping window. The HAL reports the architecture-owned
