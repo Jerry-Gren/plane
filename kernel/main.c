@@ -1,6 +1,7 @@
 #include <plane/boot_info.h>
 #include <plane/early_video.h>
 #include <plane/entry.h>
+#include <plane/io_map.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
@@ -15,7 +16,8 @@
 void kmain(struct boot_info *info)
 {
 	hal_serial_init();
-	hal_arch_early_init();
+	BUG_ON_MSG(!hal_arch_early_init(),
+		   "failed to initialize architecture early runtime");
 	BUG_ON_MSG(!plane_smp_init_bsp(&info->smp),
 		   "failed to initialize BSP SMP topology");
 	pr_info("SMP: cpus=%u bsp=%u\n",
@@ -29,15 +31,12 @@ void kmain(struct boot_info *info)
 		   "failed to initialize physical memory manager");
 	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
-	/*
-	 * Keep local interrupt setup after PMM owns page-table allocation:
-	 * the current HAL path may need a temporary device mapping until Plane
-	 * grows a real kernel IO-map API.
-	 */
-	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
-		   "failed to initialize BSP local interrupts");
 	BUG_ON_MSG(!plane_kmem_init(),
 		   "failed to initialize kernel memory allocator");
+	BUG_ON_MSG(!plane_io_map_init(),
+		   "failed to initialize kernel IO mapper");
+	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
+		   "failed to initialize BSP local interrupts");
 	plane_pmm_log_stats();
 
 	BUG_ON_MSG(!plane_smp_prepare_ap_stacks(),

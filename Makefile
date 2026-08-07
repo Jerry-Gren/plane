@@ -67,6 +67,7 @@ PUBLIC_HEADERS := include/plane/*.h include/hal/*.h
 ARCH_TEST_HEADERS := include/hal/x86_64/*.h
 TEST_SUPPORT_HEADERS := tests/support/*.h
 INTERNAL_TEST_HEADERS := \
+	kernel/mm/kmem_internal.h \
 	kernel/mm/vm_object_internal.h \
 	kernel/mm/vm_page_internal.h \
 	kernel/mm/vm_zone_internal.h

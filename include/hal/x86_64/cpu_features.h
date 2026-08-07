@@ -143,8 +143,8 @@ struct x86_64_cpu_features {
 	bool has[X86_64_CPU_FEATURE_NR];
 };
 
-void x86_64_cpu_features_init(void);
 const struct x86_64_cpu_features *x86_64_cpu_features_get(void);
+bool x86_64_cpu_features_init(void);
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature);
 
 /*

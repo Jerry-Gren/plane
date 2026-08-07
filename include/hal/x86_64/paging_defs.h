@@ -10,12 +10,13 @@
  * Intel SDM Vol.3 Chapter 5 and AMD APM Vol.2 Chapter 5 define the
  * page-table-entry format and the 9-bit index consumed at each paging level.
  * Keep this header focused on fields that current pmap/early-MMU code uses;
- * NX, global, user, accessed/dirty, PAT, PCID, and cache policy selection are
- * later paging milestones.
+ * NX, global, user, accessed/dirty, PAT high bit, PCID, and broader cache
+ * policy selection are later paging milestones.
  */
 #define X86_64_PAGING_ENTRY_PRESENT BIT(0)
 #define X86_64_PAGING_ENTRY_WRITE   BIT(1)
 #define X86_64_PAGING_ENTRY_PWT     BIT(3)
+#define X86_64_PAGING_ENTRY_PCD     BIT(4)
 #define X86_64_PAGING_ENTRY_PS      BIT(7)
 
 #define X86_64_PAGING_TABLE_ENTRIES        512

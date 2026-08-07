@@ -693,6 +693,74 @@ static int test_fixed_enter_allocates_anonymous_object(void)
 	return failures;
 }
 
+static int test_va_only_enter_reserves_without_object_backing(void)
+{
+	struct plane_vm_map_allocation_info allocation = {0};
+	struct plane_vm_map_page_info page = {0};
+	plane_vaddr_t out;
+	uint64_t vaddr;
+	int failures = 0;
+
+	failures += test_expect_bool("va-only init",
+				     test_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"va-only enter",
+		plane_vm_map_enter(
+			&test_map,
+			&(struct plane_vm_map_enter_options){
+				.page_count = 2,
+				.prot = PLANE_VM_PROT_READ |
+					PLANE_VM_PROT_WRITE,
+				.max_prot = PLANE_VM_PROT_READ |
+					PLANE_VM_PROT_WRITE,
+				.flags = PLANE_VM_MAP_ENTER_ANYWHERE |
+					 PLANE_VM_MAP_ENTER_VA_ONLY,
+			},
+			&out),
+		true);
+	vaddr = test_vaddr_raw(out);
+	failures += test_expect_bool("va-only allocation lookup",
+				     test_map_lookup_allocation(&test_map,
+								vaddr, 2,
+								&allocation),
+				     true);
+	failures += test_expect_ptr("va-only has no object",
+				    allocation.object, NULL);
+	failures += test_expect_bool("va-only page lookup fails",
+				     test_lookup_page(&test_map, vaddr, &page),
+				     false);
+	failures += test_expect_bool("va-only free succeeds",
+				     test_map_free_pages(&test_map, vaddr, 2),
+				     true);
+
+	failures += test_expect_bool("va-only rejects explicit object",
+				     plane_vm_object_init(&test_object,
+							  PAGE_SIZE),
+				     true);
+	failures += test_expect_bool(
+		"va-only object enter rejected",
+		plane_vm_map_enter(
+			&test_map,
+			&(struct plane_vm_map_enter_options){
+				.page_count = 1,
+				.object = &test_object,
+				.prot = PLANE_VM_PROT_READ,
+				.max_prot = PLANE_VM_PROT_READ,
+				.flags = PLANE_VM_MAP_ENTER_ANYWHERE |
+					 PLANE_VM_MAP_ENTER_VA_ONLY,
+			},
+			&out),
+		false);
+	failures += test_expect_u64("explicit object ref unchanged",
+				    plane_vm_object_ref_count(&test_object), 1);
+
+	return failures;
+}
+
 static int test_lookup_page_uses_user_page_semantics(void)
 {
 	struct plane_vm_map_page_info info = {0};
@@ -3836,6 +3904,7 @@ int main(void)
 		TEST_CASE(test_alloc_and_free_pages),
 		TEST_CASE(test_anywhere_enter_allocates_anonymous_object),
 		TEST_CASE(test_fixed_enter_allocates_anonymous_object),
+		TEST_CASE(test_va_only_enter_reserves_without_object_backing),
 		TEST_CASE(test_lookup_page_uses_user_page_semantics),
 		TEST_CASE(test_lookup_page_tracks_split_object_offsets),
 		TEST_CASE(test_free_releases_anonymous_object_slot),

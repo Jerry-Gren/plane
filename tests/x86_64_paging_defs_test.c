@@ -89,6 +89,8 @@ static int test_named_constants_match_current_manual_fields(void)
 				    BIT_ULL(1));
 	failures += test_expect_u64("pwt bit", X86_64_PAGING_ENTRY_PWT,
 				    BIT_ULL(3));
+	failures += test_expect_u64("pcd bit", X86_64_PAGING_ENTRY_PCD,
+				    BIT_ULL(4));
 	failures += test_expect_u64("ps bit", X86_64_PAGING_ENTRY_PS,
 				    BIT_ULL(7));
 	failures += test_expect_u64("table entries",

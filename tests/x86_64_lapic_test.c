@@ -6,6 +6,7 @@
 #include <hal/local_interrupt.h>
 #include <hal/mmu.h>
 #include <hal/x86_64/cpu_features.h>
+#include <plane/io_map.h>
 #include <plane/smp.h>
 
 #include "support/test.h"
@@ -15,18 +16,18 @@
 static bool test_has_apic;
 static bool test_has_msr;
 static bool test_msr_write_should_fail;
-static bool test_direct_map_available;
-static bool test_existing_mapping;
-static bool test_map_should_fail;
+static bool test_io_map_should_fail;
 static bool test_irq_enabled = true;
 static uint64_t test_apic_base_msr;
-static plane_paddr_t test_mapped_phys;
 static uint32_t test_regs[ARCH_PAGE_SIZE / sizeof(uint32_t)];
-static uint32_t test_translate_count;
-static uint32_t test_map_count;
-static plane_vaddr_t test_last_map_vaddr;
-static plane_paddr_t test_last_map_phys;
-static uint32_t test_last_map_flags;
+static uint32_t test_io_map_count;
+static plane_paddr_t test_last_io_map_phys;
+static uint64_t test_last_io_map_size;
+static enum plane_io_map_cache test_last_io_map_cache;
+static uint32_t test_last_io_map_prot;
+static uint32_t test_io_unmap_count;
+static plane_vaddr_t test_last_io_unmap_vaddr;
+static uint64_t test_last_io_unmap_size;
 static uint32_t test_msr_write_count;
 static uint32_t test_msr_write_msr;
 static uint64_t test_msr_write_value;
@@ -70,56 +71,34 @@ bool x86_64_msr_write(uint32_t msr, uint64_t value)
 	return !test_msr_write_should_fail;
 }
 
-plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
-						uint64_t size)
+bool plane_io_map(plane_paddr_t phys_addr,
+		  uint64_t size,
+		  enum plane_io_map_cache cache,
+		  uint32_t prot,
+		  plane_vaddr_t *vaddr)
 {
-	if (!test_direct_map_available ||
+	test_io_map_count++;
+	test_last_io_map_phys = phys_addr;
+	test_last_io_map_size = size;
+	test_last_io_map_cache = cache;
+	test_last_io_map_prot = prot;
+	if (test_io_map_should_fail ||
 	    plane_paddr_raw(phys_addr) != TEST_APIC_PHYS ||
-	    size != ARCH_PAGE_SIZE) {
-		return plane_vaddr_make(0);
-	}
-
-	return plane_vaddr_make((uint64_t)(uintptr_t)test_regs);
-}
-
-plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
-{
-	return hal_mmu_direct_phys_range_to_virt(phys_addr, ARCH_PAGE_SIZE);
-}
-
-plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr)
-{
-	return plane_paddr_make(plane_vaddr_raw(vaddr));
-}
-
-bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
-				   plane_paddr_t *phys_addr)
-{
-	test_translate_count++;
-	if (!test_existing_mapping || phys_addr == NULL ||
-	    plane_vaddr_raw(vaddr) != (uint64_t)(uintptr_t)test_regs) {
+	    size != ARCH_PAGE_SIZE ||
+	    vaddr == NULL) {
 		return false;
 	}
 
-	*phys_addr = test_mapped_phys;
+	*vaddr = plane_vaddr_make((uint64_t)(uintptr_t)test_regs);
 	return true;
 }
 
-bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
-			     plane_paddr_t phys_addr,
-			     uint32_t flags)
+bool plane_io_unmap(plane_vaddr_t vaddr, uint64_t size)
 {
-	test_map_count++;
-	test_last_map_vaddr = vaddr;
-	test_last_map_phys = phys_addr;
-	test_last_map_flags = flags;
-	if (test_map_should_fail) {
-		return false;
-	}
-
-	test_existing_mapping = true;
-	test_mapped_phys = phys_addr;
-	return true;
+	test_io_unmap_count++;
+	test_last_io_unmap_vaddr = vaddr;
+	test_last_io_unmap_size = size;
+	return !plane_vaddr_is_null(vaddr) && size != 0;
 }
 
 plane_irq_state_t hal_irq_save(void)
@@ -153,17 +132,17 @@ static void reset_lapic_test(void)
 	test_has_apic = true;
 	test_has_msr = true;
 	test_msr_write_should_fail = false;
-	test_direct_map_available = true;
-	test_existing_mapping = false;
-	test_map_should_fail = false;
+	test_io_map_should_fail = false;
 	test_irq_enabled = true;
 	test_apic_base_msr = TEST_APIC_PHYS;
-	test_mapped_phys = plane_paddr_make(TEST_APIC_PHYS);
-	test_translate_count = 0;
-	test_map_count = 0;
-	test_last_map_vaddr = plane_vaddr_make(0);
-	test_last_map_phys = plane_paddr_make(0);
-	test_last_map_flags = 0;
+	test_io_map_count = 0;
+	test_last_io_map_phys = plane_paddr_make(0);
+	test_last_io_map_size = 0;
+	test_last_io_map_cache = (enum plane_io_map_cache)0;
+	test_last_io_map_prot = 0;
+	test_io_unmap_count = 0;
+	test_last_io_unmap_vaddr = plane_vaddr_make(0);
+	test_last_io_unmap_size = 0;
 	test_msr_write_count = 0;
 	test_msr_write_msr = 0;
 	test_msr_write_value = 0;
@@ -241,8 +220,8 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	reset_lapic_test();
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
-	test_direct_map_available = false;
-	failures += test_expect_bool("missing direct map rejected",
+	test_io_map_should_fail = true;
+	failures += test_expect_bool("io map failure rejected",
 				     hal_local_interrupt_init_bsp(&info),
 				     false);
 
@@ -274,11 +253,13 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     false);
 	failures += test_expect_bool("write failure leaves uninitialized",
 				     lapic_initialized, false);
+	failures += test_expect_u32("write failure unmaps mmio",
+				    test_io_unmap_count, 1);
 
 	reset_lapic_test();
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
-	test_map_should_fail = true;
+	test_io_map_should_fail = true;
 	failures += test_expect_bool("mmio map failure rejected",
 				     hal_local_interrupt_init_bsp(&info),
 				     false);
@@ -288,24 +269,22 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	reset_lapic_test();
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
-	test_existing_mapping = true;
-	test_mapped_phys = plane_paddr_make(0x1000);
-	failures += test_expect_bool("wrong existing mapping rejected",
-				     hal_local_interrupt_init_bsp(&info),
-				     false);
-
-	reset_lapic_test();
-	failures += test_expect_bool("build topology",
-				     build_topology(&info), true);
 	test_regs[reg_index(X86_64_LAPIC_REG_VERSION)] =
 		X86_64_LAPIC_MIN_VERSION - 1;
-	failures += test_expect_bool("old lapic version rejected",
+	failures += test_expect_bool("unsupported lapic version rejected",
 				     hal_local_interrupt_init_bsp(&info),
 				     false);
-	failures += test_expect_bool("old version leaves uninitialized",
+	failures += test_expect_bool("unsupported version leaves uninitialized",
 				     lapic_initialized, false);
-	failures += test_expect_u32("old version does not write msr",
+	failures += test_expect_u32("unsupported version does not write msr",
 				    test_msr_write_count, 0);
+	failures += test_expect_u32("unsupported version unmaps mmio",
+				    test_io_unmap_count, 1);
+	failures += test_expect_u64("unsupported version unmap vaddr",
+				    plane_vaddr_raw(test_last_io_unmap_vaddr),
+				    (uint64_t)(uintptr_t)test_regs);
+	failures += test_expect_u64("unsupported version unmap size",
+				    test_last_io_unmap_size, ARCH_PAGE_SIZE);
 	return failures;
 }
 
@@ -323,18 +302,19 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 				     true);
 	failures += test_expect_bool("lapic initialized",
 				     lapic_initialized, true);
-	failures += test_expect_u32("translate checked",
-				    test_translate_count, 1);
-	failures += test_expect_u32("absent mmio mapped",
-				    test_map_count, 1);
-	failures += test_expect_u64("map vaddr",
-				    plane_vaddr_raw(test_last_map_vaddr),
-				    (uint64_t)(uintptr_t)test_regs);
-	failures += test_expect_u64("map phys",
-				    plane_paddr_raw(test_last_map_phys),
+	failures += test_expect_u32("io map requested",
+				    test_io_map_count, 1);
+	failures += test_expect_u64("io map phys",
+				    plane_paddr_raw(test_last_io_map_phys),
 				    TEST_APIC_PHYS);
-	failures += test_expect_u32("map writable",
-				    test_last_map_flags, HAL_MMU_MAP_WRITE);
+	failures += test_expect_u64("io map size",
+				    test_last_io_map_size, ARCH_PAGE_SIZE);
+	failures += test_expect_u32("io map cache",
+				    test_last_io_map_cache,
+				    PLANE_IO_MAP_CACHE_DEVICE);
+	failures += test_expect_u32("io map prot",
+				    test_last_io_map_prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
 	failures += test_expect_u32("cpu count recorded",
 				    lapic_cpu_count, 3);
 	failures += test_expect_u32("logical 0 lapic",
@@ -363,26 +343,6 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 	failures += test_expect_u32("lint0 masked",
 				    test_regs[reg_index(X86_64_LAPIC_REG_LVT_LINT0)],
 				    X86_64_LAPIC_LVT_MASKED);
-	return failures;
-}
-
-static int test_bsp_init_reuses_existing_mmio_mapping(void)
-{
-	int failures = 0;
-	struct plane_smp_info info;
-
-	reset_lapic_test();
-	failures += test_expect_bool("build topology",
-				     build_topology(&info), true);
-	test_existing_mapping = true;
-	test_mapped_phys = plane_paddr_make(TEST_APIC_PHYS);
-	failures += test_expect_bool("bsp lapic init",
-				     hal_local_interrupt_init_bsp(&info),
-				     true);
-	failures += test_expect_u32("translate checked",
-				    test_translate_count, 1);
-	failures += test_expect_u32("existing mmio not remapped",
-				    test_map_count, 0);
 	return failures;
 }
 
@@ -499,7 +459,6 @@ int main(void)
 	static const struct test_case cases[] = {
 		TEST_CASE(test_bsp_init_rejects_invalid_inputs),
 		TEST_CASE(test_bsp_init_configures_xapic_and_cpu_map),
-		TEST_CASE(test_bsp_init_reuses_existing_mmio_mapping),
 		TEST_CASE(test_ap_init_validates_data_and_configures_current_lapic),
 		TEST_CASE(test_eoi_requires_initialization),
 		TEST_CASE(test_fixed_ipi_validates_and_writes_icr),

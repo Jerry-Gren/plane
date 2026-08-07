@@ -9,6 +9,8 @@
 
 enum x86_64_pmap_flags {
 	X86_64_PMAP_WRITE = BIT(0),
+	X86_64_PMAP_DEVICE = BIT(1),
+	X86_64_PMAP_WRITE_COMBINE = BIT(2),
 };
 
 plane_paddr_t x86_64_pmap_active_root_phys(void);

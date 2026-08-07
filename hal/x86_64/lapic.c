@@ -10,6 +10,8 @@
 #include <hal/x86_64/cpu_features.h>
 #include <hal/x86_64/msr_defs.h>
 #include <plane/address.h>
+#include <plane/io_map.h>
+#include <plane/printk.h>
 #include <plane/smp.h>
 
 #include "lapic_regs.h"
@@ -62,53 +64,11 @@ static void lapic_write(enum x86_64_lapic_reg reg, uint32_t value)
 	lapic_write_flush_value = lapic_read(X86_64_LAPIC_REG_ID);
 }
 
-static bool lapic_map_xapic_mmio(plane_paddr_t phys_base,
-				 plane_vaddr_t *mmio_base)
-{
-	plane_vaddr_t vaddr;
-	plane_paddr_t mapped_phys;
-
-	if (mmio_base == NULL || !plane_paddr_is_page_aligned(phys_base)) {
-		return false;
-	}
-
-	/*
-	 * Transitional MMIO mapping.
-	 *
-	 * Do not treat this as proof that MMIO belongs in the direct map:
-	 * bootloader HHDM/direct-map coverage is allowed to exclude reserved
-	 * device pages, which is why Limine faulted on the LAPIC TPR write.
-	 *
-	 * XNU maps LAPIC through an IO mapping path with device cache
-	 * attributes. Plane should grow a dedicated kernel IO-map API and move
-	 * LAPIC there; for now we reuse the direct-map VA slot only after
-	 * explicitly installing the missing kernel PTE.
-	 */
-	vaddr = hal_mmu_direct_phys_range_to_virt(phys_base, ARCH_PAGE_SIZE);
-	if (plane_vaddr_is_null(vaddr)) {
-		return false;
-	}
-
-	if (hal_mmu_translate_kernel_page(vaddr, &mapped_phys)) {
-		if (!plane_paddr_equal(mapped_phys, phys_base)) {
-			return false;
-		}
-		*mmio_base = vaddr;
-		return true;
-	}
-
-	if (!hal_mmu_map_kernel_page(vaddr, phys_base, HAL_MMU_MAP_WRITE)) {
-		return false;
-	}
-
-	*mmio_base = vaddr;
-	return true;
-}
-
 static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 {
 	uint64_t apic_base;
 	plane_paddr_t phys_base;
+	plane_vaddr_t mapped_base;
 
 	if (mmio_base == NULL ||
 	    !x86_64_cpu_has_feature(X86_64_CPU_FEATURE_APIC) ||
@@ -127,11 +87,17 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 		return false;
 	}
 
-	if (!lapic_map_xapic_mmio(phys_base, mmio_base)) {
+	if (!plane_paddr_is_page_aligned(phys_base) ||
+	    !plane_io_map(phys_base, ARCH_PAGE_SIZE,
+			  PLANE_IO_MAP_CACHE_DEVICE,
+			  PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
+			  &mapped_base)) {
 		return false;
 	}
-	if (!x86_64_lapic_version_supported(
-		    lapic_read_at(*mmio_base, X86_64_LAPIC_REG_VERSION))) {
+	if (!x86_64_lapic_version_supported(lapic_read_at(
+		    mapped_base, X86_64_LAPIC_REG_VERSION))) {
+		BUG_ON_MSG(!plane_io_unmap(mapped_base, ARCH_PAGE_SIZE),
+			   "failed to rollback LAPIC IO map");
 		return false;
 	}
 
@@ -139,10 +105,13 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 		if (!x86_64_msr_write(X86_64_MSR_IA32_APIC_BASE,
 				      apic_base |
 					      X86_64_MSR_IA32_APIC_BASE_ENABLE)) {
+			BUG_ON_MSG(!plane_io_unmap(mapped_base, ARCH_PAGE_SIZE),
+				   "failed to rollback LAPIC IO map");
 			return false;
 		}
 	}
 
+	*mmio_base = mapped_base;
 	return true;
 }
 

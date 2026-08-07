@@ -3,7 +3,6 @@
 #include <hal/x86_64/cpuid_defs.h>
 #include <hal/x86_64/cpu_features.h>
 #include <klib/string.h>
-#include <plane/printk.h>
 
 /*
  * CPUID decoding follows the common Intel SDM Vol.1/Vol.2 and AMD APM Vol.3
@@ -588,18 +587,14 @@ static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw)
 	}
 }
 
-void x86_64_cpu_features_init(void)
+bool x86_64_cpu_features_init(void)
 {
 	struct x86_64_cpuid_raw raw;
 
 	collect_cpuid_raw(&raw);
 	x86_64_cpu_features_decode(&boot_cpu_features, &raw);
 
-	BUG_ON_MSG(!cpu_features_have_required(),
-		   "required CPU features missing: msr=%d pat=%d long_mode=%d",
-		   boot_cpu_features.has[X86_64_CPU_FEATURE_MSR],
-		   boot_cpu_features.has[X86_64_CPU_FEATURE_PAT],
-		   boot_cpu_features.has[X86_64_CPU_FEATURE_LONG_MODE]);
+	return cpu_features_have_required();
 }
 
 const struct x86_64_cpu_features *x86_64_cpu_features_get(void)

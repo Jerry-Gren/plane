@@ -14,6 +14,7 @@
 #include "vm_object_internal.h"
 #include "vm_page_internal.h"
 #include "vm_zone_internal.h"
+#include "kmem_internal.h"
 
 #define PLANE_KERNEL_MAP_MAX_ENTRIES 128
 #define PLANE_KERNEL_MAP_RUNTIME_ENTRIES 256
@@ -100,6 +101,61 @@ static uint32_t kmem_prot_to_map_flags(uint32_t prot)
 	}
 
 	return map_flags;
+}
+
+bool plane_kmem_reserve_va_pages(uint64_t page_count,
+				 uint32_t prot,
+				 plane_vaddr_t *vaddr)
+{
+	if (!kmem_initialized ||
+	    vaddr == NULL ||
+	    page_count == 0 ||
+	    !plane_vm_prot_valid(prot)) {
+		return false;
+	}
+
+	return plane_vm_map_enter(
+		&kernel_map,
+		&(struct plane_vm_map_enter_options){
+			.page_count = page_count,
+			.prot = prot,
+			.max_prot = prot,
+			.flags = PLANE_VM_MAP_ENTER_ANYWHERE |
+				 PLANE_VM_MAP_ENTER_VA_ONLY,
+		},
+		vaddr);
+}
+
+bool plane_kmem_release_va_pages(plane_vaddr_t vaddr, uint64_t page_count)
+{
+	if (!kmem_initialized ||
+	    plane_vaddr_is_null(vaddr) ||
+	    page_count == 0 ||
+	    !plane_vaddr_is_page_aligned(vaddr) ||
+	    !plane_kmem_va_pages_reserved(vaddr, page_count)) {
+		return false;
+	}
+
+	return plane_vm_map_free_pages(&kernel_map, vaddr, page_count);
+}
+
+bool plane_kmem_va_pages_reserved(plane_vaddr_t vaddr, uint64_t page_count)
+{
+	struct plane_vm_map_allocation_info info;
+
+	if (!kmem_initialized ||
+	    plane_vaddr_is_null(vaddr) ||
+	    page_count == 0 ||
+	    !plane_vaddr_is_page_aligned(vaddr)) {
+		return false;
+	}
+
+	if (!plane_vm_map_lookup_allocation(&kernel_map, vaddr, page_count,
+					    &info)) {
+		return false;
+	}
+
+	return info.object == NULL;
 }
 
 static bool expand_kmem_metadata(void)

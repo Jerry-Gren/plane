@@ -2,6 +2,7 @@
 
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/pat.h>
 #include <hal/x86_64/pmap.h>
 #include <plane/mm.h>
 #include <plane/printk.h>
@@ -167,11 +168,37 @@ static uint64_t pmap_flags_to_entry_flags(uint32_t flags)
 	if ((flags & X86_64_PMAP_WRITE) != 0) {
 		entry_flags |= X86_64_PAGING_ENTRY_WRITE;
 	}
+	if ((flags & X86_64_PMAP_DEVICE) != 0) {
+		entry_flags |= X86_64_PAGING_ENTRY_PCD |
+			       X86_64_PAGING_ENTRY_PWT;
+	}
+	if ((flags & X86_64_PMAP_WRITE_COMBINE) != 0) {
+		entry_flags |= X86_64_PAGING_ENTRY_PWT;
+	}
 
 	return entry_flags;
 }
 
-static bool pmap_flags_valid(uint32_t flags)
+static bool pmap_map_flags_valid(uint32_t flags)
+{
+	const uint32_t known = X86_64_PMAP_WRITE |
+			       X86_64_PMAP_DEVICE |
+			       X86_64_PMAP_WRITE_COMBINE;
+
+	if ((flags & ~known) != 0) {
+		return false;
+	}
+	if ((flags & X86_64_PMAP_WRITE_COMBINE) != 0 &&
+	    !x86_64_pat_write_combine_ready()) {
+		return false;
+	}
+
+	return (flags & (X86_64_PMAP_DEVICE |
+			 X86_64_PMAP_WRITE_COMBINE)) !=
+	       (X86_64_PMAP_DEVICE | X86_64_PMAP_WRITE_COMBINE);
+}
+
+static bool pmap_protect_flags_valid(uint32_t flags)
 {
 	return (flags & ~X86_64_PMAP_WRITE) == 0;
 }
@@ -247,7 +274,7 @@ bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 
 	if (!plane_vaddr_is_page_aligned(vaddr) ||
 	    !plane_paddr_is_page_aligned(phys_addr) ||
-	    !pmap_flags_valid(flags) ||
+	    !pmap_map_flags_valid(flags) ||
 	    !plane_paddr_is_page_aligned(root_pml4_phys)) {
 		return false;
 	}
@@ -451,7 +478,8 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 	uint64_t entry;
 	uint64_t index;
 
-	if (!plane_vaddr_is_page_aligned(vaddr) || !pmap_flags_valid(flags)) {
+	if (!plane_vaddr_is_page_aligned(vaddr) ||
+	    !pmap_protect_flags_valid(flags)) {
 		return false;
 	}
 
@@ -498,11 +526,22 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 {
 	uint32_t pmap_flags = 0;
 
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
+	if ((flags & ~(HAL_MMU_MAP_WRITE |
+		       HAL_MMU_MAP_DEVICE |
+		       HAL_MMU_MAP_WRITE_COMBINE)) != 0 ||
+	    (flags & (HAL_MMU_MAP_DEVICE |
+		      HAL_MMU_MAP_WRITE_COMBINE)) ==
+		    (HAL_MMU_MAP_DEVICE | HAL_MMU_MAP_WRITE_COMBINE)) {
 		return false;
 	}
 	if ((flags & HAL_MMU_MAP_WRITE) != 0) {
 		pmap_flags |= X86_64_PMAP_WRITE;
+	}
+	if ((flags & HAL_MMU_MAP_DEVICE) != 0) {
+		pmap_flags |= X86_64_PMAP_DEVICE;
+	}
+	if ((flags & HAL_MMU_MAP_WRITE_COMBINE) != 0) {
+		pmap_flags |= X86_64_PMAP_WRITE_COMBINE;
 	}
 
 	return x86_64_pmap_map_kernel_page(vaddr, phys_addr, pmap_flags);

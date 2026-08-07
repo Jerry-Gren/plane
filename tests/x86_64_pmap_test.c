@@ -23,6 +23,7 @@ static uint64_t direct_map_blocked_phys;
 static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
 static uint64_t flush_count;
+static bool test_pat_wc_ready;
 
 static uint64_t test_page_phys(uint64_t page)
 {
@@ -87,6 +88,7 @@ static void reset_pmap_test(void)
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
 	flush_count = 0;
+	test_pat_wc_ready = true;
 }
 
 plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
@@ -172,6 +174,11 @@ bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 
 	page_allocated[page] = false;
 	return true;
+}
+
+bool x86_64_pat_write_combine_ready(void)
+{
+	return test_pat_wc_ready;
 }
 
 static void *test_direct_phys_to_virt(uint64_t phys_addr)
@@ -281,6 +288,22 @@ static bool test_hal_unmap_kernel_page(uint64_t vaddr)
 static bool test_hal_protect_kernel_page(uint64_t vaddr, uint32_t flags)
 {
 	return hal_mmu_protect_kernel_page(test_vaddr(vaddr), flags);
+}
+
+static uint64_t *test_kernel_pte(uint64_t vaddr)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t *pdpt;
+	uint64_t *pd;
+	uint64_t *pt;
+
+	pdpt = test_direct_phys_to_virt(
+		pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
+	pd = test_direct_phys_to_virt(
+		pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
+	pt = test_direct_phys_to_virt(
+		pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
+	return &pt[X86_64_PAGING_PT_INDEX(vaddr)];
 }
 
 #define hal_mmu_direct_phys_to_virt(phys_addr) \
@@ -400,11 +423,7 @@ static int test_active_kernel_map_invalidates(void)
 
 static int test_active_kernel_protect_updates_writable_bit(void)
 {
-	uint64_t *pml4 = test_table(0);
 	uint64_t vaddr = 0xffff800000402000ull;
-	uint64_t *pdpt;
-	uint64_t *pd;
-	uint64_t *pt;
 	uint64_t *pte;
 	int failures = 0;
 
@@ -413,10 +432,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 					     vaddr, 0x12345000ull,
 					     X86_64_PMAP_WRITE),
 				     true);
-	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
-	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
-	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
-	pte = &pt[X86_64_PAGING_PT_INDEX(vaddr)];
+	pte = test_kernel_pte(vaddr);
 	failures += test_expect_u64("protect setup writable",
 				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
 
@@ -440,6 +456,99 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("protect writable invalidates again",
 				    invalidate_count, 2);
+	return failures;
+}
+
+static int test_cache_map_flags_encode_pte_cache_bits(void)
+{
+	uint64_t device_vaddr = 0xffff800000402000ull;
+	uint64_t wc_vaddr = device_vaddr + PAGE_SIZE;
+	uint64_t *device_pte;
+	uint64_t *wc_pte;
+	int failures = 0;
+
+	failures += test_expect_bool("map device",
+				     x86_64_pmap_map_kernel_page(
+					     device_vaddr, 0x12345000ull,
+					     X86_64_PMAP_WRITE |
+						     X86_64_PMAP_DEVICE),
+				     true);
+	device_pte = test_kernel_pte(device_vaddr);
+	failures += test_expect_u64("device pcd",
+				    *device_pte & X86_64_PAGING_ENTRY_PCD,
+				    X86_64_PAGING_ENTRY_PCD);
+	failures += test_expect_u64("device pwt",
+				    *device_pte & X86_64_PAGING_ENTRY_PWT,
+				    X86_64_PAGING_ENTRY_PWT);
+	failures += test_expect_u64("device writable",
+				    *device_pte & X86_64_PAGING_ENTRY_WRITE,
+				    X86_64_PAGING_ENTRY_WRITE);
+
+	failures += test_expect_bool("map wc",
+				     hal_mmu_map_kernel_page(
+					     wc_vaddr, 0x12346000ull,
+					     HAL_MMU_MAP_WRITE_COMBINE),
+				     true);
+	wc_pte = test_kernel_pte(wc_vaddr);
+	failures += test_expect_u64("wc pwt",
+				    *wc_pte & X86_64_PAGING_ENTRY_PWT,
+				    X86_64_PAGING_ENTRY_PWT);
+	failures += test_expect_u64("wc no pcd",
+				    *wc_pte & X86_64_PAGING_ENTRY_PCD, 0);
+	failures += test_expect_u64("wc readonly",
+				    *wc_pte & X86_64_PAGING_ENTRY_WRITE, 0);
+
+	return failures;
+}
+
+static int test_cache_flags_validate_and_protect_preserves_cache_bits(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t *pte;
+	int failures = 0;
+
+	failures += test_expect_bool("reject pmap cache conflict",
+				     x86_64_pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     X86_64_PMAP_DEVICE |
+						     X86_64_PMAP_WRITE_COMBINE),
+				     false);
+	failures += test_expect_bool("reject hal cache conflict",
+				     hal_mmu_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     HAL_MMU_MAP_DEVICE |
+						     HAL_MMU_MAP_WRITE_COMBINE),
+				     false);
+	failures += test_expect_bool("reject hal unknown cache flag",
+				     hal_mmu_map_kernel_page(
+					     vaddr, 0x12345000ull, BIT(8)),
+				     false);
+	test_pat_wc_ready = false;
+	failures += test_expect_bool("reject wc before pat init",
+				     hal_mmu_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     HAL_MMU_MAP_WRITE_COMBINE),
+				     false);
+	test_pat_wc_ready = true;
+	failures += test_expect_bool("map device writable",
+				     hal_mmu_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     HAL_MMU_MAP_WRITE |
+						     HAL_MMU_MAP_DEVICE),
+				     true);
+	pte = test_kernel_pte(vaddr);
+	failures += test_expect_bool("protect readonly",
+				     hal_mmu_protect_kernel_page(vaddr, 0),
+				     true);
+	failures += test_expect_u64("protect preserves pcd",
+				    *pte & X86_64_PAGING_ENTRY_PCD,
+				    X86_64_PAGING_ENTRY_PCD);
+	failures += test_expect_u64("protect preserves pwt",
+				    *pte & X86_64_PAGING_ENTRY_PWT,
+				    X86_64_PAGING_ENTRY_PWT);
+	failures += test_expect_u64("protect clears write",
+				    *pte & X86_64_PAGING_ENTRY_WRITE, 0);
+
 	return failures;
 }
 
@@ -916,6 +1025,8 @@ int main(void)
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
 		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
+		TEST_CASE(test_cache_map_flags_encode_pte_cache_bits),
+		TEST_CASE(test_cache_flags_validate_and_protect_preserves_cache_bits),
 		TEST_CASE(test_hal_kernel_page_wrappers),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),

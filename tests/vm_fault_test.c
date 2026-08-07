@@ -196,6 +196,23 @@ static bool enter_object(uint64_t address,
 	return ok;
 }
 
+static bool enter_va_only(uint64_t address, uint64_t page_count)
+{
+	plane_vaddr_t out;
+
+	return plane_vm_map_enter(
+		&test_map,
+		&(struct plane_vm_map_enter_options){
+			.address = test_vaddr(address),
+			.page_count = page_count,
+			.prot = PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
+			.max_prot = PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
+			.flags = PLANE_VM_MAP_ENTER_FIXED |
+				 PLANE_VM_MAP_ENTER_VA_ONLY,
+		},
+		&out);
+}
+
 static bool test_map_wire_pages(struct plane_vm_map *map,
 				uint64_t vaddr,
 				uint64_t page_count)
@@ -930,6 +947,32 @@ static int test_fault_miss_rejects_stale_pmap_mapping(void)
 				    protect_call_count, 0);
 	failures += test_expect_u64("fault stale mapping kept",
 				    mapping_count(), 1);
+	return failures;
+}
+
+static int test_fault_rejects_va_only_reservation(void)
+{
+	uint64_t vaddr = page_vaddr(1);
+	int failures = 0;
+
+	failures += test_expect_bool("va-only fault map init",
+				     plane_vm_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       test_vaddr(TEST_MAP_BASE),
+						       TEST_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("va-only fault enter",
+				     enter_va_only(vaddr, 1), true);
+	failures += test_expect_bool("va-only fault rejected",
+				     test_fault_page(&test_map, vaddr,
+						     PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("va-only no grab flags",
+				    last_grab_flags, 0);
+	failures += test_expect_u64("va-only no pages",
+				    allocated_page_count(), 0);
+	failures += test_expect_u64("va-only no mappings",
+				    mapping_count(), 0);
 	return failures;
 }
 
@@ -1815,6 +1858,7 @@ int main(void)
 		TEST_CASE(test_fault_resident_hit_rejects_wrong_pmap_phys),
 		TEST_CASE(test_fault_resident_hit_rejects_invalid_phys),
 		TEST_CASE(test_fault_miss_rejects_stale_pmap_mapping),
+		TEST_CASE(test_fault_rejects_va_only_reservation),
 		TEST_CASE(test_fault_wired_entry_wires_new_page),
 		TEST_CASE(test_fault_multi_wired_entry_wires_new_page),
 		TEST_CASE(test_fault_multi_wire_failure_rolls_back_all_wires),

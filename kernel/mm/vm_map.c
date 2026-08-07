@@ -51,7 +51,8 @@ static bool enter_flags_valid(uint32_t flags)
 
 	if ((flags & ~(PLANE_VM_MAP_ENTER_ANYWHERE |
 		       PLANE_VM_MAP_ENTER_FIXED |
-		       PLANE_VM_MAP_ENTER_OVERWRITE)) != 0) {
+		       PLANE_VM_MAP_ENTER_OVERWRITE |
+		       PLANE_VM_MAP_ENTER_VA_ONLY)) != 0) {
 		return false;
 	}
 
@@ -992,6 +993,7 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 	struct plane_vm_object *entry_object;
 	bool fixed;
 	bool overwrite;
+	bool va_only;
 
 	if (vaddr == NULL ||
 	    map == NULL ||
@@ -1009,10 +1011,15 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 
 	fixed = (options->flags & PLANE_VM_MAP_ENTER_FIXED) != 0;
 	overwrite = (options->flags & PLANE_VM_MAP_ENTER_OVERWRITE) != 0;
+	va_only = (options->flags & PLANE_VM_MAP_ENTER_VA_ONLY) != 0;
 	entry_object = options->object;
 	entry_object_offset = options->object_offset;
 	raw_address = plane_vaddr_raw(options->address);
 	zap_init(&zap);
+
+	if (va_only && entry_object != NULL) {
+		return false;
+	}
 
 	if (!plane_checked_mul_u64(options->guard_pages, 2, &guard_total) ||
 	    !plane_checked_add_u64(options->page_count, guard_total,
@@ -1073,7 +1080,7 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 	    !plane_vm_object_reference(entry_object)) {
 		return false;
 	}
-	if (entry_object == NULL) {
+	if (entry_object == NULL && !va_only) {
 		if (!plane_vm_object_allocate(user_size, &entry_object)) {
 			return false;
 		}
@@ -1082,7 +1089,9 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 
 	entry_index = alloc_entry_index(map);
 	if ((!overwrite || delete_plan.count == 0) && entry_index < 0) {
-		plane_vm_object_deallocate(entry_object);
+		if (entry_object != NULL) {
+			plane_vm_object_deallocate(entry_object);
+		}
 		return false;
 	}
 
@@ -1091,7 +1100,9 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 		entry_index = (int64_t)zap.reusable;
 		zap_dispose(map, &zap);
 		if (entry_index < 0) {
-			plane_vm_object_deallocate(entry_object);
+			if (entry_object != NULL) {
+				plane_vm_object_deallocate(entry_object);
+			}
 			return false;
 		}
 	}

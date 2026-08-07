@@ -13,6 +13,7 @@
 #define PLANE_VM_MAP_ENTER_ANYWHERE BIT(0)
 #define PLANE_VM_MAP_ENTER_FIXED BIT(1)
 #define PLANE_VM_MAP_ENTER_OVERWRITE BIT(2)
+#define PLANE_VM_MAP_ENTER_VA_ONLY BIT(3)
 
 struct plane_vm_object;
 
@@ -116,8 +117,11 @@ bool plane_vm_map_rehome_entries(struct plane_vm_map *map,
 				 struct plane_vm_map_entry *entries,
 				 uint64_t entry_capacity);
 /*
- * Enter stores one object reference in the map entry. A NULL object creates an
- * anonymous internal object and transfers its initial reference to the entry.
+ * Enter stores one object reference in the map entry. A NULL object normally
+ * creates an anonymous internal object and transfers its initial reference to
+ * the entry. PLANE_VM_MAP_ENTER_VA_ONLY opts out for non-faultable device-style
+ * reservations; such entries are lookup-allocation visible but lookup-page
+ * invisible.
  */
 bool plane_vm_map_enter(struct plane_vm_map *map,
 			const struct plane_vm_map_enter_options *options,

@@ -12,6 +12,8 @@ struct plane_mem_info;
 
 enum hal_mmu_map_flags {
 	HAL_MMU_MAP_WRITE = BIT(0),
+	HAL_MMU_MAP_DEVICE = BIT(1),
+	HAL_MMU_MAP_WRITE_COMBINE = BIT(2),
 };
 
 #define HAL_MMU_INVALID_PHYS UINT64_MAX
