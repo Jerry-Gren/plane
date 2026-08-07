@@ -7,12 +7,6 @@
 
 #include "support/test.h"
 
-#define X86_EXCEPTION_PF 14
-#define X86_PF_WRITE 0x2
-#define X86_PF_USER 0x4
-#define X86_PF_RSVD 0x8
-#define X86_PF_EXECUTE 0x10
-
 char __kernel_text_start[1];
 char __kernel_text_end[1];
 
@@ -52,7 +46,8 @@ static int test_kernel_read_fault_enters_kmem_fault(void)
 
 	failures += test_expect_bool("read fault handled",
 				     test_try_handle_page_fault(
-					     X86_EXCEPTION_PF, addr, 0),
+					     X86_64_INTR_VECTOR_PAGE_FAULT,
+					     addr, 0),
 				     true);
 	failures += test_expect_u64("read fault calls",
 				    kmem_fault_calls, 1);
@@ -71,9 +66,9 @@ static int test_kernel_write_fault_adds_write_protection(void)
 
 	failures += test_expect_bool("write fault handled",
 				     test_try_handle_page_fault(
-					     X86_EXCEPTION_PF,
+					     X86_64_INTR_VECTOR_PAGE_FAULT,
 					     addr,
-					     X86_PF_WRITE),
+					     X86_64_INTR_PF_ERROR_WRITE),
 				     true);
 	failures += test_expect_u64("write fault calls",
 				    kmem_fault_calls, 1);
@@ -94,7 +89,8 @@ static int test_kmem_fault_failure_is_not_swallowed(void)
 	kmem_fault_result = false;
 	failures += test_expect_bool("kmem failure",
 				     test_try_handle_page_fault(
-					     X86_EXCEPTION_PF, addr, 0),
+					     X86_64_INTR_VECTOR_PAGE_FAULT,
+					     addr, 0),
 				     false);
 	failures += test_expect_u64("kmem failure calls",
 				    kmem_fault_calls, 1);
@@ -106,9 +102,9 @@ static int test_kmem_fault_failure_is_not_swallowed(void)
 static int test_unsupported_page_faults_are_rejected(void)
 {
 	static const uint64_t unsupported_errors[] = {
-		X86_PF_USER,
-		X86_PF_RSVD,
-		X86_PF_EXECUTE,
+		X86_64_INTR_PF_ERROR_USER,
+		X86_64_INTR_PF_ERROR_RSVD,
+		X86_64_INTR_PF_ERROR_EXECUTE,
 		0x20,
 	};
 	int failures = 0;
@@ -117,7 +113,7 @@ static int test_unsupported_page_faults_are_rejected(void)
 		reset_exception_test();
 		failures += test_expect_bool("unsupported fault",
 					     test_try_handle_page_fault(
-						     X86_EXCEPTION_PF,
+						     X86_64_INTR_VECTOR_PAGE_FAULT,
 						     0xffff900000002000ull,
 						     unsupported_errors[i]),
 					     false);

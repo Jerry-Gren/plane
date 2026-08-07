@@ -1,21 +1,9 @@
 #include <hal/x86_64/exception.h>
 #include <hal/x86_64/linkage.h>
-#include <plane/bits.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
-#include <plane/vm_prot.h>
 
-#define X86_EXCEPTION_BP 3
-#define X86_EXCEPTION_PF 14
 #define CODE_DUMP_BYTES 16
-#define X86_PF_ERROR_PRESENT BIT(0)
-#define X86_PF_ERROR_WRITE BIT(1)
-#define X86_PF_ERROR_USER BIT(2)
-#define X86_PF_ERROR_RSVD BIT(3)
-#define X86_PF_ERROR_EXECUTE BIT(4)
-#define X86_PF_ERROR_SUPPORTED \
-	(X86_PF_ERROR_PRESENT | X86_PF_ERROR_WRITE | X86_PF_ERROR_USER | \
-	 X86_PF_ERROR_RSVD | X86_PF_ERROR_EXECUTE)
 
 static const char *exception_names[32] = {
     "Divide Error (#DE)",                       /* 0 */
@@ -72,7 +60,7 @@ static void dump_code(uint64_t rip, uint64_t int_no)
 {
 	uint64_t code_addr = rip;
 
-	if (int_no == X86_EXCEPTION_BP) {
+	if (int_no == X86_64_INTR_VECTOR_BREAKPOINT) {
 		code_addr--;
 	}
 	uint64_t marker_addr = code_addr;
@@ -98,13 +86,8 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 				  plane_vaddr_t fault_addr,
 				  uint64_t error_code)
 {
-	uint32_t fault_type = PLANE_VM_PROT_READ;
-
-	if (int_no != X86_EXCEPTION_PF ||
-	    (error_code & ~X86_PF_ERROR_SUPPORTED) != 0 ||
-	    (error_code & (X86_PF_ERROR_USER |
-			   X86_PF_ERROR_RSVD |
-			   X86_PF_ERROR_EXECUTE)) != 0) {
+	if (int_no != X86_64_INTR_VECTOR_PAGE_FAULT ||
+	    !x86_64_intr_pf_error_plane_supported(error_code)) {
 		return false;
 	}
 
@@ -113,23 +96,20 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 	 * translated into VM protection bits, then VM decides whether the
 	 * kernel-map fault can be satisfied.
 	 */
-	if ((error_code & X86_PF_ERROR_WRITE) != 0) {
-		fault_type |= PLANE_VM_PROT_WRITE;
-	}
-
-	return plane_kmem_fault_page(fault_addr, fault_type);
+	return plane_kmem_fault_page(
+		fault_addr, x86_64_intr_pf_error_fault_type(error_code));
 }
 
-void x86_64_exception_handler(struct interrupt_frame *frame)
+void x86_64_exception_handler(struct x86_64_intr_frame *frame)
 {
 	uint64_t cr2 = 0;
 
-	if (frame->int_no >= 32) {
+	if (!x86_64_intr_vector_is_exception(frame->int_no)) {
 		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
 		return;
 	}
 
-	if (frame->int_no == X86_EXCEPTION_PF) {
+	if (frame->int_no == X86_64_INTR_VECTOR_PAGE_FAULT) {
 		cr2 = read_cr2();
 		if (x86_64_try_handle_page_fault(frame->int_no,
 						 plane_vaddr_make(cr2),
@@ -152,7 +132,7 @@ void x86_64_exception_handler(struct interrupt_frame *frame)
 	printk(" r13: 0x%016llx   r14: 0x%016llx\n", frame->r13, frame->r14);
 	printk(" r15: 0x%016llx\n", frame->r15);
 
-	if (frame->int_no == X86_EXCEPTION_PF) {
+	if (frame->int_no == X86_64_INTR_VECTOR_PAGE_FAULT) {
 		printk(" cr2: 0x%016llx\n", cr2);
 	}
 

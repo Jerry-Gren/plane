@@ -3,7 +3,7 @@
 
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 #include <hal/x86_64/cpuid_defs.h>
-#include <hal/x86_64/gdt.h>
+#include <hal/x86_64/descriptor_defs.h>
 #include <plane/bits.h>
 
 /* Macros */
@@ -22,14 +22,6 @@
 #define EFER_LM_ENABLE     BIT(8)
 #define CR0_PAGING_ENABLE  BIT(31)
 #define CR0_PROTECTED_MODE BIT(0)
-
-#define GDT_PRESENT        BIT(7)
-#define GDT_NOT_SYS        BIT(4)
-#define GDT_EXEC           BIT(3)
-#define GDT_RW             BIT(1)
-#define GDT_GRAN_4K        BIT(7)
-#define GDT_LONG_MODE      BIT(5)
-#define GDT_SZ_32          BIT(6)
 
 #define MSR_IA32_CR_PAT       0x277
 #define PAT_WC                0x01
@@ -268,7 +260,7 @@ _start:
 
     /* load 64-bit gdt */
     lgdt gdt64_pointer
-    ljmp $SELECTOR_KERNEL_CS, $.Ltrampoline64
+    ljmp $X86_64_DESC_SELECTOR_KERNEL_CS, $.Ltrampoline64
 
 .Lno_long_mode:
     cli
@@ -278,7 +270,7 @@ _start:
 
 .code64
 .Ltrampoline64:
-    mov $SELECTOR_KERNEL_DS, %ax
+    mov $X86_64_DESC_SELECTOR_KERNEL_DS, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
@@ -331,8 +323,8 @@ gdt64:
         .word 0x0000      /* limit, ignored in 64 bit mode */
         .word 0x0000      /* base, ignored in 64 bit mode */
         .byte 0x00        /* base */
-        .byte (GDT_PRESENT | GDT_NOT_SYS | GDT_EXEC | GDT_RW) /* access byte */
-        .byte (GDT_GRAN_4K | GDT_LONG_MODE)                   /* flags & limit */
+        .byte (X86_64_DESC_ACCESS_PRESENT | X86_64_DESC_ACCESS_CODE_DATA | X86_64_DESC_TYPE_CODE_XR)
+        .byte (X86_64_DESC_FLAGS_GRAN_4K | X86_64_DESC_FLAGS_LONG_MODE)
         .byte 0x00        /* base */
 
     /* data 0x10 */
@@ -340,8 +332,8 @@ gdt64:
         .word 0x0000      /* limit, ignored in 64 bit mode */
         .word 0x0000      /* base, ignored in 64 bit mode */
         .byte 0x00        /* base */
-        .byte (GDT_PRESENT | GDT_NOT_SYS | GDT_RW)            /* access byte */
-        .byte (GDT_GRAN_4K | GDT_SZ_32)                       /* flags & limit */
+        .byte (X86_64_DESC_ACCESS_PRESENT | X86_64_DESC_ACCESS_CODE_DATA | X86_64_DESC_TYPE_DATA_RW)
+        .byte (X86_64_DESC_FLAGS_GRAN_4K | X86_64_DESC_FLAGS_DEFAULT_BIG)
         .byte 0x00        /* base */
 
 gdt64_pointer:

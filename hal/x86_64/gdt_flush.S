@@ -1,4 +1,4 @@
-#include <hal/x86_64/gdt.h>
+#include <hal/x86_64/descriptor_defs.h>
 
 .global x86_64_gdt_flush
 .global x86_64_tss_flush
@@ -14,7 +14,7 @@ x86_64_gdt_flush:
     lgdt (%rdi)
 
     /* flush kernel data */
-    mov $SELECTOR_KERNEL_DS, %ax
+    mov $X86_64_DESC_SELECTOR_KERNEL_DS, %ax
     mov %ax, %ds
     mov %ax, %es
     mov %ax, %fs
@@ -23,7 +23,7 @@ x86_64_gdt_flush:
 
     /* flush kernel code */
     pop %rdi
-    push $SELECTOR_KERNEL_CS
+    push $X86_64_DESC_SELECTOR_KERNEL_CS
     push %rdi
     lretq
 
@@ -31,6 +31,6 @@ x86_64_gdt_flush:
  * void x86_64_tss_flush(void);
  */
 x86_64_tss_flush:
-    mov $SELECTOR_TSS, %ax
+    mov $X86_64_DESC_SELECTOR_TSS, %ax
     ltr %ax
     ret

@@ -1,9 +1,7 @@
-#include <hal/x86_64/gdt.h>
+#include <hal/x86_64/descriptor_defs.h>
+#include <hal/x86_64/interrupt_defs.h>
 #include <hal/x86_64/idt.h>
 #include <hal/x86_64/pio.h>
-
-#define IDT_NR_DESCRIPTORS  256
-_Static_assert(IDT_NR_DESCRIPTORS <= IDT_MAX_DESCRIPTORS, "idt descriptors exceed hardware limit!");
 
 /* in idt_flush.S */
 extern void x86_64_idt_flush(uint64_t idtr_addr);
@@ -14,8 +12,8 @@ static void legacy_pic_disable(void)
 	outb(0xa1, 0xff);  /* 0xa1 pic2 data */
 }
 
-static struct idt_descriptor idt[IDT_NR_DESCRIPTORS];
-static struct idt_ptr idtr;
+static struct x86_64_intr_idt_entry idt[X86_64_INTR_IDT_ENTRIES];
+static struct x86_64_intr_idt_ptr idtr;
 
 #define DECL_ISR(n) extern void x86_64_isr##n(void);
 DECL_ISR(0)  DECL_ISR(1)  DECL_ISR(2)  DECL_ISR(3)  DECL_ISR(4)  DECL_ISR(5)  DECL_ISR(6)  DECL_ISR(7)
@@ -39,13 +37,9 @@ static void *x86_64_isr_stub_table[32] = {
 
 static void set_idt_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes)
 {
-	idt[vector].offset_low    = (uint16_t)(isr & 0xffff);
-	idt[vector].selector      = SELECTOR_KERNEL_CS;
-	idt[vector].ist           = 0;
-	idt[vector].attributes    = attributes;
-	idt[vector].offset_middle = (uint16_t)((isr >> 16) & 0xffff);
-	idt[vector].offset_high   = (uint32_t)(isr >> 32);
-	idt[vector].reserved      = 0;
+	x86_64_intr_set_idt_entry(&idt[vector], isr,
+				  X86_64_DESC_SELECTOR_KERNEL_CS, 0,
+				  attributes);
 }
 
 void x86_64_idt_init(void)
@@ -55,13 +49,21 @@ void x86_64_idt_init(void)
 	idtr.base  = (uint64_t)&idt;
 
 	/* fill all entries with default isr handler */
-	for (int i = 0; i < IDT_NR_DESCRIPTORS; i++) {
-		set_idt_descriptor(i, (uintptr_t)x86_64_isr_default, IDT_ATTR(1, DPL_KERNEL, IDT_TYPE_INTR64));
+	for (int i = 0; i < X86_64_INTR_IDT_ENTRIES; i++) {
+		set_idt_descriptor(
+			i, (uintptr_t)x86_64_isr_default,
+			x86_64_intr_idt_attr(
+				true, X86_64_DESC_DPL_KERNEL,
+				X86_64_INTR_GATE_TYPE_INTERRUPT64));
 	}
 
 	/* override entries for first 32 vectors */
 	for (int i = 0; i < 32; i++) {
-		set_idt_descriptor(i, (uintptr_t)x86_64_isr_stub_table[i], IDT_ATTR(1, DPL_KERNEL, IDT_TYPE_INTR64));
+		set_idt_descriptor(
+			i, (uintptr_t)x86_64_isr_stub_table[i],
+			x86_64_intr_idt_attr(
+				true, X86_64_DESC_DPL_KERNEL,
+				X86_64_INTR_GATE_TYPE_INTERRUPT64));
 	}
 
 	/* disabling 8259 pic */

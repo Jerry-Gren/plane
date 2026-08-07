@@ -1,4 +1,5 @@
 #include <hal/cpu.h>
+#include <hal/x86_64/descriptor_defs.h>
 #include <hal/x86_64/gdt.h>
 #include <hal/x86_64/idt.h>
 
@@ -6,15 +7,13 @@
 
 #include <klib/string.h>
 
-/* 1 null descriptor + 4 flat code/data descriptors + 2 TSS descriptors. */
-#define GDT_NR_DESCRIPTORS 7
-_Static_assert(GDT_NR_DESCRIPTORS <= GDT_MAX_DESCRIPTORS,
+_Static_assert(X86_64_DESC_GDT_NR <= X86_64_DESC_GDT_MAX_ENTRIES,
 	       "gdt descriptors exceed hardware limit!");
 
 struct x86_64_cpu_desc_context {
-	struct gdt_descriptor gdt[GDT_NR_DESCRIPTORS];
-	struct gdt_ptr gdtr;
-	struct tss64 tss;
+	struct x86_64_desc_gdt_entry gdt[X86_64_DESC_GDT_NR];
+	struct x86_64_desc_ptr gdtr;
+	struct x86_64_desc_tss64 tss;
 	bool prepared;
 };
 
@@ -40,38 +39,17 @@ desc_context_for_data(const struct plane_cpu_data *data)
 	return &cpu_desc_contexts[data->logical_id];
 }
 
-static void set_gdt_descriptor(struct x86_64_cpu_desc_context *ctx,
-			       int index,
-			       uint32_t base,
-			       uint32_t limit,
-			       uint8_t access,
-			       uint8_t flags)
+static void set_flat_descriptor(struct x86_64_cpu_desc_context *ctx,
+				uint8_t slot,
+				uint8_t dpl,
+				uint8_t type,
+				bool long_mode,
+				bool default_big)
 {
-	ctx->gdt[index].base_low = (base & 0xffff);
-	ctx->gdt[index].base_middle = (base >> 16) & 0xff;
-	ctx->gdt[index].base_high = (base >> 24) & 0xff;
-
-	ctx->gdt[index].limit_low = (limit & 0xffff);
-	ctx->gdt[index].flags_limit = (flags & 0xf0) |
-				      ((limit >> 16) & 0x0f);
-
-	ctx->gdt[index].access = access;
-}
-
-static void set_tss_descriptor(struct x86_64_cpu_desc_context *ctx,
-			       int index,
-			       uintptr_t base,
-			       uint32_t limit)
-{
-	struct tss_descriptor *tss_desc;
-
-	set_gdt_descriptor(ctx, index, (uint32_t)base, limit,
-			   GDT_ACCESS(1, DPL_KERNEL, 0, TYPE_TSS_AVAILABLE),
-			   GDT_FLAGS(0, 0, 0, 0));
-
-	tss_desc = (struct tss_descriptor *)&ctx->gdt[index];
-	tss_desc->base_upper32 = (uint32_t)(base >> 32);
-	tss_desc->reserved = 0;
+	x86_64_desc_set_gdt_entry(
+		&ctx->gdt[slot], 0, 0xfffff,
+		x86_64_desc_access(true, dpl, true, type),
+		x86_64_desc_flags(true, default_big, long_mode, false));
 }
 
 static void x86_64_desc_context_build(struct x86_64_cpu_desc_context *ctx,
@@ -82,24 +60,31 @@ static void x86_64_desc_context_build(struct x86_64_cpu_desc_context *ctx,
 	ctx->gdtr.limit = sizeof(ctx->gdt) - 1;
 	ctx->gdtr.base = (uint64_t)&ctx->gdt;
 
-	set_gdt_descriptor(ctx, 0, 0, 0, 0, 0);
-	set_gdt_descriptor(ctx, 1, 0, 0xfffff,
-			   GDT_ACCESS(1, DPL_KERNEL, 1, TYPE_CODE_XR),
-			   GDT_FLAGS(1, 0, 1, 0));
-	set_gdt_descriptor(ctx, 2, 0, 0xfffff,
-			   GDT_ACCESS(1, DPL_KERNEL, 1, TYPE_DATA_RW),
-			   GDT_FLAGS(1, 1, 0, 0));
-	set_gdt_descriptor(ctx, 3, 0, 0xfffff,
-			   GDT_ACCESS(1, DPL_USER, 1, TYPE_DATA_RW),
-			   GDT_FLAGS(1, 1, 0, 0));
-	set_gdt_descriptor(ctx, 4, 0, 0xfffff,
-			   GDT_ACCESS(1, DPL_USER, 1, TYPE_CODE_XR),
-			   GDT_FLAGS(1, 0, 1, 0));
+	set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_CODE,
+			    X86_64_DESC_DPL_KERNEL,
+			    X86_64_DESC_TYPE_CODE_XR, true, false);
+	set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_DATA,
+			    X86_64_DESC_DPL_KERNEL,
+			    X86_64_DESC_TYPE_DATA_RW, false, true);
+	set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_DATA,
+			    X86_64_DESC_DPL_USER,
+			    X86_64_DESC_TYPE_DATA_RW, false, true);
+	set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_CODE,
+			    X86_64_DESC_DPL_USER,
+			    X86_64_DESC_TYPE_CODE_XR, true, false);
 
+	/*
+	 * Plane currently uses the 64-bit TSS only for rsp0 and the I/O map
+	 * boundary. IST, syscall/sysenter stacks, and user transitions are
+	 * future descriptor milestones.
+	 */
 	ctx->tss.rsp0 = rsp0;
 	ctx->tss.iopb_offset = sizeof(ctx->tss);
-	set_tss_descriptor(ctx, 5, (uintptr_t)&ctx->tss,
-			   sizeof(ctx->tss) - 1);
+	x86_64_desc_set_tss_entry(
+		(struct x86_64_desc_tss_entry *)
+			&ctx->gdt[X86_64_DESC_GDT_TSS],
+		(uintptr_t)&ctx->tss,
+		sizeof(ctx->tss) - 1);
 	ctx->prepared = true;
 }
 

@@ -51,13 +51,16 @@ static void reset_gdt_test(void)
 
 static uint64_t tss_descriptor_base(const struct x86_64_cpu_desc_context *ctx)
 {
-	const struct tss_descriptor *desc =
-		(const struct tss_descriptor *)&ctx->gdt[5];
+	const struct x86_64_desc_tss_entry *desc =
+		(const struct x86_64_desc_tss_entry *)
+			&ctx->gdt[X86_64_DESC_GDT_TSS];
 
-	return (uint64_t)desc->base_low |
-	       ((uint64_t)desc->base_middle << 16) |
-	       ((uint64_t)desc->base_high << 24) |
-	       ((uint64_t)desc->base_upper32 << 32);
+	return x86_64_desc_tss_entry_base(desc);
+}
+
+static uint8_t gdt_flags(const struct x86_64_desc_gdt_entry *entry)
+{
+	return entry->flags_limit & X86_64_DESC_FLAGS_MASK;
 }
 
 static int test_bsp_gdt_init_builds_and_loads_cpu0_context(void)
@@ -79,6 +82,42 @@ static int test_bsp_gdt_init_builds_and_loads_cpu0_context(void)
 	failures += test_expect_u64("tss descriptor base",
 				    tss_descriptor_base(ctx),
 				    (uint64_t)(uintptr_t)&ctx->tss);
+	failures += test_expect_u32("kernel cs access",
+				    ctx->gdt[X86_64_DESC_GDT_KERNEL_CODE].access,
+				    x86_64_desc_access(
+					    true, X86_64_DESC_DPL_KERNEL,
+					    true, X86_64_DESC_TYPE_CODE_XR));
+	failures += test_expect_u32("kernel cs flags",
+				    gdt_flags(&ctx->gdt[
+					    X86_64_DESC_GDT_KERNEL_CODE]),
+				    x86_64_desc_flags(true, false, true,
+						      false));
+	failures += test_expect_u32("kernel ds access",
+				    ctx->gdt[X86_64_DESC_GDT_KERNEL_DATA].access,
+				    x86_64_desc_access(
+					    true, X86_64_DESC_DPL_KERNEL,
+					    true, X86_64_DESC_TYPE_DATA_RW));
+	failures += test_expect_u32("kernel ds flags",
+				    gdt_flags(&ctx->gdt[
+					    X86_64_DESC_GDT_KERNEL_DATA]),
+				    x86_64_desc_flags(true, true, false,
+						      false));
+	failures += test_expect_u32("user ds access",
+				    ctx->gdt[X86_64_DESC_GDT_USER_DATA].access,
+				    x86_64_desc_access(
+					    true, X86_64_DESC_DPL_USER,
+					    true, X86_64_DESC_TYPE_DATA_RW));
+	failures += test_expect_u32("user cs access",
+				    ctx->gdt[X86_64_DESC_GDT_USER_CODE].access,
+				    x86_64_desc_access(
+					    true, X86_64_DESC_DPL_USER,
+					    true, X86_64_DESC_TYPE_CODE_XR));
+	failures += test_expect_u32("tss access",
+				    ctx->gdt[X86_64_DESC_GDT_TSS].access,
+				    x86_64_desc_access(
+					    true, X86_64_DESC_DPL_KERNEL,
+					    false,
+					    X86_64_DESC_TYPE_TSS_AVAILABLE));
 	failures += test_expect_u32("gdt loaded once", gdt_flush_count, 1);
 	failures += test_expect_u64("loaded gdtr", last_gdtr,
 				    (uint64_t)(uintptr_t)&ctx->gdtr);

@@ -140,10 +140,11 @@ x86_64_isr_default:
     pushq $256
     jmp isr_common_stub
 
-/* 
+/*
  * common stub
  * stack status now: [int_no][error_code][hardware-handled regs] <- stack bottom
  *                   ^ sp
+ * The pushes below complete struct x86_64_intr_frame.
  */
 isr_common_stub:
     pushq %rax
@@ -162,7 +163,7 @@ isr_common_stub:
     pushq %r14
     pushq %r15
 
-    /* rsp now points to the interrupt_frame structure */
+    /* rsp now points to the x86_64_intr_frame structure */
     movq %rsp, %rdi
     call x86_64_exception_handler
 
