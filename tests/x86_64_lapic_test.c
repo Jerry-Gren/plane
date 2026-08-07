@@ -55,7 +55,7 @@ bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 
 uint64_t x86_64_msr_read(uint32_t msr)
 {
-	if (msr == X86_64_MSR_APIC_BASE) {
+	if (msr == X86_64_MSR_IA32_APIC_BASE) {
 		return test_apic_base_msr;
 	}
 
@@ -343,7 +343,8 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 	failures += test_expect_u32("apic base msr write once",
 				    test_msr_write_count, 1);
 	failures += test_expect_u32("apic base msr",
-				    test_msr_write_msr, X86_64_MSR_APIC_BASE);
+				    test_msr_write_msr,
+				    X86_64_MSR_IA32_APIC_BASE);
 	failures += test_expect_u64("apic base enabled",
 				    test_msr_write_value,
 				    TEST_APIC_PHYS | X86_64_APIC_BASE_ENABLE);

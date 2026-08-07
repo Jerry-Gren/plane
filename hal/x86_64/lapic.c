@@ -8,6 +8,7 @@
 #include <hal/mmu.h>
 #include <hal/page.h>
 #include <hal/x86_64/cpu_features.h>
+#include <hal/x86_64/msr_defs.h>
 #include <plane/address.h>
 #include <plane/smp.h>
 
@@ -115,7 +116,7 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 		return false;
 	}
 
-	apic_base = x86_64_msr_read(X86_64_MSR_APIC_BASE);
+	apic_base = x86_64_msr_read(X86_64_MSR_IA32_APIC_BASE);
 	if ((apic_base & X86_64_APIC_BASE_X2APIC) != 0) {
 		return false;
 	}
@@ -134,7 +135,7 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 	}
 
 	if ((apic_base & X86_64_APIC_BASE_ENABLE) == 0) {
-		if (!x86_64_msr_write(X86_64_MSR_APIC_BASE,
+		if (!x86_64_msr_write(X86_64_MSR_IA32_APIC_BASE,
 				      apic_base | X86_64_APIC_BASE_ENABLE)) {
 			return false;
 		}

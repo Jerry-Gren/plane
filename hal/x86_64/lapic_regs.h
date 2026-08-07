@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/x86_64/arch_mmu.h>
 #include <plane/bits.h>
 
 /*
@@ -19,12 +18,6 @@
  * ESR, and x2APIC MSR-space details should be added with the feature that
  * consumes them, not preloaded as an APIC constant dump.
  */
-
-#define X86_64_MSR_APIC_BASE 0x1bu
-
-#define X86_64_APIC_BASE_X2APIC BIT_ULL(10)
-#define X86_64_APIC_BASE_ENABLE BIT_ULL(11)
-#define X86_64_APIC_BASE_ADDR   X86_64_PAGING_ENTRY_ADDR_MASK
 
 enum x86_64_lapic_reg {
 	X86_64_LAPIC_REG_ID = 0x02u,

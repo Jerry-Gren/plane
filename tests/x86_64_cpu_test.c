@@ -3,6 +3,7 @@
 
 #include <hal/cpu.h>
 #include <hal/x86_64/cpu_features.h>
+#include <hal/x86_64/msr_defs.h>
 #include <plane/smp.h>
 
 #include "support/test.h"
@@ -12,8 +13,6 @@ static bool test_msr_write_should_fail;
 static uint32_t last_msr;
 static uint64_t last_msr_value;
 static uint32_t msr_write_count;
-
-#define X86_64_MSR_GS_BASE 0xc0000101u
 
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 {
@@ -79,7 +78,7 @@ static int test_set_current_data_writes_gs_base(void)
 				     hal_cpu_set_current_data(&data), true);
 	failures += test_expect_u32("writes once", msr_write_count, 1);
 	failures += test_expect_u32("writes gs base msr",
-				    last_msr, X86_64_MSR_GS_BASE);
+				    last_msr, X86_64_MSR_IA32_GS_BASE);
 	failures += test_expect_u64("writes data pointer",
 				    last_msr_value,
 				    (uint64_t)(uintptr_t)&data);
@@ -99,7 +98,7 @@ static int test_set_current_data_propagates_msr_write_failure(void)
 	failures += test_expect_u32("write attempted once",
 				    msr_write_count, 1);
 	failures += test_expect_u32("write failure uses gs base",
-				    last_msr, X86_64_MSR_GS_BASE);
+				    last_msr, X86_64_MSR_IA32_GS_BASE);
 	return failures;
 }
 

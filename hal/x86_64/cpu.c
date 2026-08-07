@@ -1,5 +1,6 @@
 #include <hal/cpu.h>
 #include <hal/x86_64/cpu_features.h>
+#include <hal/x86_64/msr_defs.h>
 
 #include "msr_internal.h"
 
@@ -7,8 +8,6 @@
 #include <stdint.h>
 
 #include <plane/smp.h>
-
-#define X86_64_MSR_GS_BASE 0xc0000101u
 
 void hal_cpu_hang(void)
 {
@@ -29,6 +28,6 @@ bool hal_cpu_set_current_data(struct plane_cpu_data *data)
 		return false;
 	}
 
-	return x86_64_msr_write(X86_64_MSR_GS_BASE,
+	return x86_64_msr_write(X86_64_MSR_IA32_GS_BASE,
 				(uint64_t)(uintptr_t)data);
 }

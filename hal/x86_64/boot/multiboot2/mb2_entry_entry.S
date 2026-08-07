@@ -4,29 +4,17 @@
 #include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
 #include <hal/x86_64/cpuid_defs.h>
 #include <hal/x86_64/descriptor_defs.h>
+#include <hal/x86_64/msr_defs.h>
+#include <hal/x86_64/processor_defs.h>
 #include <plane/bits.h>
 
 /* Macros */
-#define EFLAGS_ID_BIT_NR   21
-#define EFLAGS_ID_BIT      BIT(EFLAGS_ID_BIT_NR)
-
 #define MB2_FB_TAG_SIZE    20
 #define MB2_END_TAG_SIZE   8
 #define MB2_FB_DEPTH       32
 
 #define X86_64_MB2_BOOT_STACK_SIZE 16384
 #define X86_64_MB2_GDT_ALIGN       8
-
-#define CR4_PAE_ENABLE     BIT(5)
-#define EFER_MSR           0xc0000080
-#define EFER_LM_ENABLE     BIT(8)
-#define CR0_PAGING_ENABLE  BIT(31)
-#define CR0_PROTECTED_MODE BIT(0)
-
-#define MSR_IA32_CR_PAT       0x277
-#define PAT_WC                0x01
-#define PAT1_SHIFT            8
-#define PAT1_MASK_CLEAR       0xffff00ff
 
 /* Multiboot2 header */
 .code32
@@ -112,7 +100,7 @@ _start:
     pushfl
     popl %eax
     movl %eax, %ecx
-    xorl $EFLAGS_ID_BIT, %eax
+    xorl $X86_64_RFLAGS_ID, %eax
     pushl %eax
     popfl
     pushfl
@@ -240,22 +228,29 @@ _start:
     mov %eax, %cr3
     /* enable PAE */
     mov %cr4, %eax
-    or $CR4_PAE_ENABLE, %eax
+    or $X86_64_CR4_PAE, %eax
     mov %eax, %cr4
     /* enable long mode */
-    mov $EFER_MSR, %ecx
+    mov $X86_64_MSR_IA32_EFER, %ecx
     rdmsr
-    or $EFER_LM_ENABLE, %eax
+    or $X86_64_EFER_LME, %eax
     wrmsr
-    /* enable write-combining */
-    mov $MSR_IA32_CR_PAT, %ecx
+    /*
+     * Early framebuffer write-combining setup.
+     *
+     * Plane currently gives framebuffer PDEs PWT=1, selecting PAT entry 1.
+     * Program that entry as WC here as a boot-time shortcut. This should move
+     * behind a real cache-attribute / kernel IO-map policy when pmap grows
+     * PAT-aware mappings.
+     */
+    mov $X86_64_MSR_IA32_CR_PAT, %ecx
     rdmsr
-    and $PAT1_MASK_CLEAR, %eax
-    or  $(PAT_WC << PAT1_SHIFT), %eax
+    and $~X86_64_PAT_ENTRY_MASK(1), %eax
+    or  $(X86_64_PAT_MEMORY_WC << X86_64_PAT_ENTRY_SHIFT(1)), %eax
     wrmsr
     /* enable paging and protected mode */
     mov %cr0, %eax
-    or $(CR0_PAGING_ENABLE | CR0_PROTECTED_MODE), %eax
+    or $(X86_64_CR0_PG | X86_64_CR0_PE), %eax
     mov %eax, %cr0
 
     /* load 64-bit gdt */
