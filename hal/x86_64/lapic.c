@@ -117,11 +117,12 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 	}
 
 	apic_base = x86_64_msr_read(X86_64_MSR_IA32_APIC_BASE);
-	if ((apic_base & X86_64_APIC_BASE_X2APIC) != 0) {
+	if ((apic_base & X86_64_MSR_IA32_APIC_BASE_X2APIC) != 0) {
 		return false;
 	}
 
-	phys_base = plane_paddr_make(apic_base & X86_64_APIC_BASE_ADDR);
+	phys_base = plane_paddr_make(apic_base &
+				     X86_64_MSR_IA32_APIC_BASE_ADDR);
 	if (plane_paddr_is_null(phys_base)) {
 		return false;
 	}
@@ -134,9 +135,10 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 		return false;
 	}
 
-	if ((apic_base & X86_64_APIC_BASE_ENABLE) == 0) {
+	if ((apic_base & X86_64_MSR_IA32_APIC_BASE_ENABLE) == 0) {
 		if (!x86_64_msr_write(X86_64_MSR_IA32_APIC_BASE,
-				      apic_base | X86_64_APIC_BASE_ENABLE)) {
+				      apic_base |
+					      X86_64_MSR_IA32_APIC_BASE_ENABLE)) {
 			return false;
 		}
 	}

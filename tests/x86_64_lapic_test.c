@@ -249,7 +249,8 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	reset_lapic_test();
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
-	test_apic_base_msr = TEST_APIC_PHYS | X86_64_APIC_BASE_X2APIC;
+	test_apic_base_msr =
+		TEST_APIC_PHYS | X86_64_MSR_IA32_APIC_BASE_X2APIC;
 	failures += test_expect_bool("x2apic rejected",
 				     hal_local_interrupt_init_bsp(&info),
 				     false);
@@ -347,7 +348,8 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 				    X86_64_MSR_IA32_APIC_BASE);
 	failures += test_expect_u64("apic base enabled",
 				    test_msr_write_value,
-				    TEST_APIC_PHYS | X86_64_APIC_BASE_ENABLE);
+				    TEST_APIC_PHYS |
+					    X86_64_MSR_IA32_APIC_BASE_ENABLE);
 	failures += test_expect_u32("tpr accepts all",
 				    test_regs[reg_index(X86_64_LAPIC_REG_TPR)],
 				    0);

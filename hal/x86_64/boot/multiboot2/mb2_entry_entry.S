@@ -233,7 +233,7 @@ _start:
     /* enable long mode */
     mov $X86_64_MSR_IA32_EFER, %ecx
     rdmsr
-    or $X86_64_EFER_LME, %eax
+    or $X86_64_MSR_IA32_EFER_LME, %eax
     wrmsr
     /*
      * Early framebuffer write-combining setup.
@@ -245,8 +245,10 @@ _start:
      */
     mov $X86_64_MSR_IA32_CR_PAT, %ecx
     rdmsr
-    and $~X86_64_PAT_ENTRY_MASK(1), %eax
-    or  $(X86_64_PAT_MEMORY_WC << X86_64_PAT_ENTRY_SHIFT(1)), %eax
+    and $~X86_64_MSR_IA32_CR_PAT_ENTRY_MASK(1), %eax
+    mov $X86_64_MSR_IA32_CR_PAT_MEMORY_WC, %esi
+    shl $X86_64_MSR_IA32_CR_PAT_ENTRY_SHIFT(1), %esi
+    or  %esi, %eax
     wrmsr
     /* enable paging and protected mode */
     mov %cr0, %eax

@@ -1,8 +1,7 @@
 #include <hal/irq.h>
+#include <hal/x86_64/processor_defs.h>
 
 #include <stdint.h>
-
-#define X86_64_RFLAGS_IF (1ull << 9)
 
 static uint64_t x86_64_read_rflags(void)
 {
