@@ -3,6 +3,14 @@
 
 #include <plane/bits.h>
 
+/*
+ * CPUID leaf, subleaf, and register field definitions used by Plane today.
+ *
+ * Intel SDM Vol.2 CPUID and AMD APM Vol.3 CPUID define the architectural
+ * leaves and bit assignments below. Keep this header limited to fields that
+ * current boot CPU decoding consumes; cache descriptors, topology leaves,
+ * SGX, AVX-512 details, and xstate enable policy are later milestones.
+ */
 #define X86_64_CPUID_LEAF_BASIC_MAX     0x00000000
 #define X86_64_CPUID_LEAF_FEATURES      0x00000001
 #define X86_64_CPUID_LEAF_STRUCTURED    0x00000007
@@ -11,6 +19,19 @@
 #define X86_64_CPUID_LEAF_EXT_FEATURES  0x80000001
 #define X86_64_CPUID_LEAF_BRAND_FIRST   0x80000002
 #define X86_64_CPUID_LEAF_BRAND_LAST    0x80000004
+
+#define X86_64_CPUID_1_EAX_STEPPING       GENMASK(3, 0)
+#define X86_64_CPUID_1_EAX_BASE_MODEL     GENMASK(7, 4)
+#define X86_64_CPUID_1_EAX_BASE_FAMILY    GENMASK(11, 8)
+#define X86_64_CPUID_1_EAX_PROCESSOR_TYPE GENMASK(13, 12)
+#define X86_64_CPUID_1_EAX_EXT_MODEL      GENMASK(19, 16)
+#define X86_64_CPUID_1_EAX_EXT_FAMILY     GENMASK(27, 20)
+
+#define X86_64_CPUID_DISPLAY_EXT_MODEL GENMASK(7, 4)
+
+#define X86_64_CPUID_1_EBX_CLFLUSH_LINE_SIZE  GENMASK(15, 8)
+#define X86_64_CPUID_1_EBX_LOGICAL_PROCESSORS GENMASK(23, 16)
+#define X86_64_CPUID_1_EBX_INITIAL_APIC_ID    GENMASK(31, 24)
 
 #define X86_64_CPUID_1_EDX_FPU          BIT(0)
 #define X86_64_CPUID_1_EDX_TSC          BIT(4)
@@ -78,5 +99,12 @@
 #define X86_64_CPUID_EXT_1_ECX_LAHF_LM  BIT(0)
 #define X86_64_CPUID_EXT_1_ECX_LZCNT    BIT(5)
 #define X86_64_CPUID_EXT_1_ECX_PREFETCHW BIT(8)
+
+#ifndef __ASSEMBLER__
+
+#define X86_64_CPUID_D_0_XCR0_LOW  GENMASK_ULL(31, 0)
+#define X86_64_CPUID_D_0_XCR0_HIGH GENMASK_ULL(63, 32)
+
+#endif /* !__ASSEMBLER__ */
 
 #endif /* HAL_X86_64_CPUID_DEFS_H */

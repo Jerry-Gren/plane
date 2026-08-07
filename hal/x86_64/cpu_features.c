@@ -3,28 +3,12 @@
 #include <hal/x86_64/cpuid_defs.h>
 #include <hal/x86_64/cpu_features.h>
 #include <klib/string.h>
-#include <plane/bits.h>
 #include <plane/printk.h>
 
 /*
  * CPUID decoding follows the common Intel SDM Vol.1/Vol.2 and AMD APM Vol.3
  * CPUID leaves. vendor-specific leaves must be gated by vendor before use.
  */
-
-#define CPUID_SIGNATURE_STEPPING        GENMASK(3, 0)
-#define CPUID_SIGNATURE_BASE_MODEL      GENMASK(7, 4)
-#define CPUID_SIGNATURE_BASE_FAMILY     GENMASK(11, 8)
-#define CPUID_SIGNATURE_PROCESSOR_TYPE  GENMASK(13, 12)
-#define CPUID_SIGNATURE_EXT_MODEL       GENMASK(19, 16)
-#define CPUID_SIGNATURE_EXT_FAMILY      GENMASK(27, 20)
-#define CPUID_DISPLAY_EXT_MODEL         GENMASK(7, 4)
-
-#define CPUID_1_EBX_CLFLUSH_LINE_SIZE   GENMASK(15, 8)
-#define CPUID_1_EBX_LOGICAL_PROCESSORS  GENMASK(23, 16)
-#define CPUID_1_EBX_INITIAL_APIC_ID     GENMASK(31, 24)
-
-#define CPUID_XSAVE_XCR0_LOW            GENMASK_ULL(31, 0)
-#define CPUID_XSAVE_XCR0_HIGH           GENMASK_ULL(63, 32)
 
 static struct x86_64_cpu_features boot_cpu_features;
 
@@ -95,15 +79,18 @@ static void decode_signature(struct x86_64_cpu_features *features,
 			     const struct x86_64_cpuid_leaf *leaf1) {
 	uint32_t signature = leaf1->eax;
 
-	features->stepping = FIELD_GET(CPUID_SIGNATURE_STEPPING, signature);
-	features->base_model = FIELD_GET(CPUID_SIGNATURE_BASE_MODEL, signature);
-	features->base_family = FIELD_GET(CPUID_SIGNATURE_BASE_FAMILY, signature);
+	features->stepping =
+		FIELD_GET(X86_64_CPUID_1_EAX_STEPPING, signature);
+	features->base_model =
+		FIELD_GET(X86_64_CPUID_1_EAX_BASE_MODEL, signature);
+	features->base_family =
+		FIELD_GET(X86_64_CPUID_1_EAX_BASE_FAMILY, signature);
 	features->processor_type =
-		FIELD_GET(CPUID_SIGNATURE_PROCESSOR_TYPE, signature);
+		FIELD_GET(X86_64_CPUID_1_EAX_PROCESSOR_TYPE, signature);
 	features->extended_model =
-		FIELD_GET(CPUID_SIGNATURE_EXT_MODEL, signature);
+		FIELD_GET(X86_64_CPUID_1_EAX_EXT_MODEL, signature);
 	features->extended_family =
-		FIELD_GET(CPUID_SIGNATURE_EXT_FAMILY, signature);
+		FIELD_GET(X86_64_CPUID_1_EAX_EXT_FAMILY, signature);
 
 	features->display_family = features->base_family;
 	if (features->base_family == 0xf) {
@@ -114,7 +101,7 @@ static void decode_signature(struct x86_64_cpu_features *features,
 	if (should_extend_display_model(features->vendor_id,
 					features->base_family)) {
 		features->display_model |=
-			FIELD_PREP(CPUID_DISPLAY_EXT_MODEL,
+			FIELD_PREP(X86_64_CPUID_DISPLAY_EXT_MODEL,
 				   features->extended_model);
 	}
 }
@@ -193,11 +180,12 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 	decode_signature(features, leaf1);
 
 	features->initial_apic_id =
-		FIELD_GET(CPUID_1_EBX_INITIAL_APIC_ID, leaf1->ebx);
+		FIELD_GET(X86_64_CPUID_1_EBX_INITIAL_APIC_ID, leaf1->ebx);
 	features->logical_processor_count =
-		FIELD_GET(CPUID_1_EBX_LOGICAL_PROCESSORS, leaf1->ebx);
+		FIELD_GET(X86_64_CPUID_1_EBX_LOGICAL_PROCESSORS,
+			  leaf1->ebx);
 	features->clflush_line_size =
-		(uint16_t)(FIELD_GET(CPUID_1_EBX_CLFLUSH_LINE_SIZE,
+		(uint16_t)(FIELD_GET(X86_64_CPUID_1_EBX_CLFLUSH_LINE_SIZE,
 				     leaf1->ebx) * 8);
 
 	features->has[X86_64_CPU_FEATURE_FPU] =
@@ -431,8 +419,8 @@ static void decode_leaf7_0(struct x86_64_cpu_features *features,
 static void decode_xsave(struct x86_64_cpu_features *features,
 			 const struct x86_64_cpuid_raw *raw) {
 	features->xcr0_supported_mask =
-		FIELD_PREP(CPUID_XSAVE_XCR0_HIGH, raw->leafd_0.edx) |
-		FIELD_PREP(CPUID_XSAVE_XCR0_LOW, raw->leafd_0.eax);
+		FIELD_PREP(X86_64_CPUID_D_0_XCR0_HIGH, raw->leafd_0.edx) |
+		FIELD_PREP(X86_64_CPUID_D_0_XCR0_LOW, raw->leafd_0.eax);
 	features->xsave_area_size_enabled = raw->leafd_0.ebx;
 	features->xsave_area_size_supported = raw->leafd_0.ecx;
 	features->xsave_leaf1 = raw->leafd_1;
