@@ -56,12 +56,12 @@ static uint64_t *test_table(uint64_t page)
 
 static uint64_t pte_flags(uint64_t entry)
 {
-	return entry & ~X86_64_PAGE_ENTRY_ADDR_MASK;
+	return x86_64_paging_entry_flags(entry);
 }
 
 static uint64_t pte_phys(uint64_t entry)
 {
-	return entry & X86_64_PAGE_ENTRY_ADDR_MASK;
+	return x86_64_paging_entry_phys(entry);
 }
 
 static uint64_t allocated_page_count(void)
@@ -331,21 +331,21 @@ static int test_map_page_allocates_missing_path(void)
 	failures += test_expect_u64("root map leaves invalidated vaddr",
 				    invalidated_vaddr, UINTPTR_MAX);
 
-	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[PML4_INDEX(vaddr)]));
-	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[PDPT_INDEX(vaddr)]));
-	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[PD_INDEX(vaddr)]));
+	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
+	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
+	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
 	failures += test_expect_u64("map pml4 flags",
-				    pte_flags(pml4[PML4_INDEX(vaddr)]),
-				    PAGE_PRESENT | PAGE_RW);
+				    pte_flags(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]),
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("map pdpt flags",
-				    pte_flags(pdpt[PDPT_INDEX(vaddr)]),
-				    PAGE_PRESENT | PAGE_RW);
+				    pte_flags(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]),
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("map pd flags",
-				    pte_flags(pd[PD_INDEX(vaddr)]),
-				    PAGE_PRESENT | PAGE_RW);
+				    pte_flags(pd[X86_64_PAGING_PD_INDEX(vaddr)]),
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("map pte",
-				    pt[PT_INDEX(vaddr)],
-				    phys | PAGE_PRESENT | PAGE_RW);
+				    pt[X86_64_PAGING_PT_INDEX(vaddr)],
+				    phys | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_bool("map translate",
 				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr, &out),
@@ -413,12 +413,12 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 					     vaddr, 0x12345000ull,
 					     X86_64_PMAP_WRITE),
 				     true);
-	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[PML4_INDEX(vaddr)]));
-	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[PDPT_INDEX(vaddr)]));
-	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[PD_INDEX(vaddr)]));
-	pte = &pt[PT_INDEX(vaddr)];
+	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
+	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
+	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
+	pte = &pt[X86_64_PAGING_PT_INDEX(vaddr)];
 	failures += test_expect_u64("protect setup writable",
-				    *pte & PAGE_RW, PAGE_RW);
+				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
 
 	invalidate_count = 0;
 	invalidated_vaddr = UINTPTR_MAX;
@@ -426,7 +426,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 				     x86_64_pmap_protect_kernel_page(vaddr, 0),
 				     true);
 	failures += test_expect_u64("protect readonly clears write",
-				    *pte & PAGE_RW, 0);
+				    *pte & X86_64_PAGING_ENTRY_WRITE, 0);
 	failures += test_expect_u64("protect readonly invalidates",
 				    invalidate_count, 1);
 	failures += test_expect_u64("protect readonly vaddr",
@@ -437,7 +437,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 					     vaddr, X86_64_PMAP_WRITE),
 				     true);
 	failures += test_expect_u64("protect writable sets write",
-				    *pte & PAGE_RW, PAGE_RW);
+				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("protect writable invalidates again",
 				    invalidate_count, 2);
 	return failures;
@@ -500,9 +500,9 @@ static int test_protect_page_rejects_invalid_paths(void)
 				     x86_64_pmap_protect_kernel_page(vaddr, 0),
 				     false);
 
-	pml4[PML4_INDEX(vaddr)] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[PDPT_INDEX(vaddr)] = 0x40000000ull | PAGE_PRESENT | PAGE_RW |
-				  PAGE_PS;
+	pml4[X86_64_PAGING_PML4_INDEX(vaddr)] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)] = 0x40000000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE |
+				  X86_64_PAGING_ENTRY_PS;
 	failures += test_expect_bool("protect reject huge",
 				     x86_64_pmap_protect_kernel_page(vaddr, 0),
 				     false);
@@ -571,9 +571,9 @@ static int test_map_page_rejects_huge_intermediate(void)
 	uint64_t vaddr = 0xffff800000402000ull;
 	int failures = 0;
 
-	pml4[PML4_INDEX(vaddr)] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[PDPT_INDEX(vaddr)] = 0x40000000ull | PAGE_PRESENT | PAGE_RW |
-				  PAGE_PS;
+	pml4[X86_64_PAGING_PML4_INDEX(vaddr)] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)] = 0x40000000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE |
+				  X86_64_PAGING_ENTRY_PS;
 
 	failures += test_expect_bool("map reject huge intermediate",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
@@ -615,15 +615,15 @@ static int test_translate_handles_leaf_sizes(void)
 	uint64_t out = UINT64_MAX;
 	int failures = 0;
 
-	pml4[PML4_INDEX(vaddr_4k)] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[PDPT_INDEX(vaddr_4k)] = test_page_phys(2) | PAGE_PRESENT | PAGE_RW;
-	pd[PD_INDEX(vaddr_4k)] = test_page_phys(3) | PAGE_PRESENT | PAGE_RW;
-	pt[PT_INDEX(vaddr_4k)] = 0x12345000ull | PAGE_PRESENT | PAGE_RW;
-	pd[PD_INDEX(vaddr_2m)] = 0x200000ull | BIT_ULL(12) | PAGE_PRESENT |
-				 PAGE_RW | PAGE_PS;
-	pdpt[PDPT_INDEX(vaddr_1g)] =
-		0x40000000ull | BIT_ULL(12) | PAGE_PRESENT | PAGE_RW |
-		PAGE_PS;
+	pml4[X86_64_PAGING_PML4_INDEX(vaddr_4k)] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr_4k)] = test_page_phys(2) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pd[X86_64_PAGING_PD_INDEX(vaddr_4k)] = test_page_phys(3) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pt[X86_64_PAGING_PT_INDEX(vaddr_4k)] = 0x12345000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pd[X86_64_PAGING_PD_INDEX(vaddr_2m)] = 0x200000ull | BIT_ULL(12) | X86_64_PAGING_ENTRY_PRESENT |
+				 X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS;
+	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr_1g)] =
+		0x40000000ull | BIT_ULL(12) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE |
+		X86_64_PAGING_ENTRY_PS;
 
 	failures += test_expect_bool("translate 4k leaf",
 				     x86_64_pmap_translate_in_root(test_page_phys(0),
@@ -767,9 +767,9 @@ static int test_unmap_page_rejects_invalid_paths(void)
 							    vaddr),
 				     false);
 
-	pml4[PML4_INDEX(vaddr)] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[PDPT_INDEX(vaddr)] = 0x40000000ull | PAGE_PRESENT | PAGE_RW |
-				  PAGE_PS;
+	pml4[X86_64_PAGING_PML4_INDEX(vaddr)] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)] = 0x40000000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE |
+				  X86_64_PAGING_ENTRY_PS;
 	failures += test_expect_bool("unmap reject huge leaf",
 				     x86_64_pmap_unmap_page_in_owned_root(test_page_phys(0),
 							    vaddr),
@@ -794,10 +794,10 @@ static int test_clone_copies_4k_leaf_path(void)
 	uint64_t *new_pt;
 	int failures = 0;
 
-	pml4[1] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[2] = test_page_phys(2) | PAGE_PRESENT | PAGE_RW;
-	pd[3] = test_page_phys(3) | PAGE_PRESENT | PAGE_RW;
-	pt[4] = 0x12345000ull | PAGE_PRESENT | PAGE_RW;
+	pml4[1] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[2] = test_page_phys(2) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pd[3] = test_page_phys(3) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pt[4] = 0x12345000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
 
 	failures += test_expect_bool("clone 4k leaf",
 				     x86_64_pmap_clone_kernel_page_tables(
@@ -821,11 +821,11 @@ static int test_clone_copies_4k_leaf_path(void)
 	failures += test_expect_bool("clone pd child replaced",
 				     new_pt_phys != test_page_phys(3), true);
 	failures += test_expect_u64("clone pml4 flags", pte_flags(new_pml4[1]),
-				    PAGE_PRESENT | PAGE_RW);
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("clone pdpt flags", pte_flags(new_pdpt[2]),
-				    PAGE_PRESENT | PAGE_RW);
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("clone pd flags", pte_flags(new_pd[3]),
-				    PAGE_PRESENT | PAGE_RW);
+				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("clone 4k leaf entry", new_pt[4], pt[4]);
 	failures += test_expect_u64("clone absent entry", new_pml4[5], 0);
 
@@ -843,10 +843,10 @@ static int test_clone_preserves_huge_leaf_entries(void)
 	uint64_t *new_pd;
 	int failures = 0;
 
-	pml4[0] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[1] = 0x40000000ull | PAGE_PRESENT | PAGE_RW | PAGE_PS;
-	pdpt[2] = test_page_phys(2) | PAGE_PRESENT | PAGE_RW;
-	pd[7] = 0x200000ull | PAGE_PRESENT | PAGE_RW | PAGE_PS;
+	pml4[0] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[1] = 0x40000000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS;
+	pdpt[2] = test_page_phys(2) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pd[7] = 0x200000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS;
 
 	failures += test_expect_bool("clone huge leaves",
 				     x86_64_pmap_clone_kernel_page_tables(
@@ -874,10 +874,10 @@ static int test_clone_failure_releases_allocated_tables(void)
 	uint64_t new_pml4_phys = UINT64_MAX;
 	int failures = 0;
 
-	pml4[1] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
-	pdpt[2] = test_page_phys(2) | PAGE_PRESENT | PAGE_RW;
-	pd[3] = test_page_phys(3) | PAGE_PRESENT | PAGE_RW;
-	pt[4] = 0x12345000ull | PAGE_PRESENT | PAGE_RW;
+	pml4[1] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pdpt[2] = test_page_phys(2) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pd[3] = test_page_phys(3) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
+	pt[4] = 0x12345000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
 	alloc_fail_after = 2;
 
 	failures += test_expect_bool("clone allocation failure",
@@ -896,7 +896,7 @@ static int test_clone_direct_map_failure_releases_allocated_tables(void)
 	uint64_t new_pml4_phys = UINT64_MAX;
 	int failures = 0;
 
-	pml4[0] = test_page_phys(1) | PAGE_PRESENT | PAGE_RW;
+	pml4[0] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
 	direct_map_blocked_phys = test_page_phys(1);
 
 	failures += test_expect_bool("clone direct-map failure",

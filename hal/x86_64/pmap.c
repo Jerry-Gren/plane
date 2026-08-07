@@ -14,37 +14,11 @@ static plane_paddr_t pmap_current_root_phys(void)
 
 static void write_cr3_phys(plane_paddr_t phys_addr)
 {
+	/*
+	 * CR3 holds the physical base of the active top-level paging
+	 * structure. Plane switches here after cloning PMM-owned kernel tables.
+	 */
 	__asm__ volatile ("mov %0, %%cr3" : : "r" (plane_paddr_raw(phys_addr)) : "memory");
-}
-
-static bool page_table_entry_present(uint64_t entry)
-{
-	return (entry & PAGE_PRESENT) != 0;
-}
-
-static bool page_table_entry_is_leaf(uint64_t entry, uint8_t level)
-{
-	return level == 1 || (level < 4 && (entry & PAGE_PS) != 0);
-}
-
-static uint64_t page_table_entry_phys(uint64_t entry)
-{
-	return entry & X86_64_PAGE_ENTRY_ADDR_MASK;
-}
-
-static uint64_t page_table_entry_flags(uint64_t entry)
-{
-	return entry & ~X86_64_PAGE_ENTRY_ADDR_MASK;
-}
-
-static uint64_t page_table_replace_phys(uint64_t entry, uint64_t phys_addr)
-{
-	return page_table_entry_flags(entry) | phys_addr;
-}
-
-static uint64_t page_table_entry_make(uint64_t phys_addr, uint64_t flags)
-{
-	return (phys_addr & X86_64_PAGE_ENTRY_ADDR_MASK) | flags;
 }
 
 static uint64_t *direct_map_page_table(plane_paddr_t phys_addr)
@@ -67,15 +41,15 @@ static bool free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)
 		return false;
 	}
 
-	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
+	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
 		uint64_t entry = table[i];
 
-		if (!page_table_entry_present(entry) ||
-		    page_table_entry_is_leaf(entry, level)) {
+		if (!x86_64_paging_entry_present(entry) ||
+		    x86_64_paging_entry_leaf(entry, level)) {
 			continue;
 		}
 
-		if (!free_cloned_page_table(plane_paddr_make(page_table_entry_phys(entry)),
+		if (!free_cloned_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
 					    level - 1)) {
 			return false;
 		}
@@ -114,20 +88,20 @@ static bool clone_page_table(plane_paddr_t source_phys,
 		return false;
 	}
 
-	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
+	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
 		uint64_t entry = source[i];
 		plane_paddr_t child_clone_phys;
 
-		if (!page_table_entry_present(entry)) {
+		if (!x86_64_paging_entry_present(entry)) {
 			continue;
 		}
 
-		if (page_table_entry_is_leaf(entry, level)) {
+		if (x86_64_paging_entry_leaf(entry, level)) {
 			clone[i] = entry;
 			continue;
 		}
 
-		if (!clone_page_table(plane_paddr_make(page_table_entry_phys(entry)),
+		if (!clone_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
 				      level - 1,
 				      &child_clone_phys)) {
 			if (!free_cloned_page_table(new_phys, level)) {
@@ -136,8 +110,8 @@ static bool clone_page_table(plane_paddr_t source_phys,
 			return false;
 		}
 
-		clone[i] = page_table_replace_phys(entry,
-						   plane_paddr_raw(child_clone_phys));
+		clone[i] = x86_64_paging_entry_flags(entry) |
+			   plane_paddr_raw(child_clone_phys);
 	}
 
 	*clone_phys = new_phys;
@@ -167,20 +141,6 @@ struct pmap_walk_entry {
 	plane_paddr_t phys_addr;
 };
 
-static uint64_t pmap_level_index(uint64_t vaddr, uint8_t level)
-{
-	switch (level) {
-	case 4:
-		return PML4_INDEX(vaddr);
-	case 3:
-		return PDPT_INDEX(vaddr);
-	case 2:
-		return PD_INDEX(vaddr);
-	default:
-		return PT_INDEX(vaddr);
-	}
-}
-
 static uint64_t pmap_leaf_size(uint8_t level)
 {
 	switch (level) {
@@ -197,15 +157,15 @@ static uint64_t pmap_leaf_phys(uint64_t entry, uint8_t level)
 {
 	uint64_t leaf_size = pmap_leaf_size(level);
 
-	return page_table_entry_phys(entry) & ~(leaf_size - 1);
+	return x86_64_paging_entry_phys(entry) & ~(leaf_size - 1);
 }
 
 static uint64_t pmap_flags_to_entry_flags(uint32_t flags)
 {
-	uint64_t entry_flags = PAGE_PRESENT;
+	uint64_t entry_flags = X86_64_PAGING_ENTRY_PRESENT;
 
 	if ((flags & X86_64_PMAP_WRITE) != 0) {
-		entry_flags |= PAGE_RW;
+		entry_flags |= X86_64_PAGING_ENTRY_WRITE;
 	}
 
 	return entry_flags;
@@ -231,8 +191,8 @@ static void pmap_free_allocated_tables(struct pmap_allocated_table *tables,
 
 static bool pmap_table_empty(uint64_t *table)
 {
-	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
-		if (page_table_entry_present(table[i])) {
+	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
+		if (x86_64_paging_entry_present(table[i])) {
 			return false;
 		}
 	}
@@ -262,8 +222,9 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 		return false;
 	}
 
-	parent[index] = page_table_entry_make(plane_paddr_raw(phys_addr),
-					      PAGE_PRESENT | PAGE_RW);
+	parent[index] = x86_64_paging_entry_make(
+		plane_paddr_raw(phys_addr),
+		X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
 	allocated[*allocated_count].parent = parent;
 	allocated[*allocated_count].index = index;
 	allocated[*allocated_count].phys_addr = phys_addr;
@@ -302,15 +263,16 @@ bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 			return false;
 		}
 
-		index = pmap_level_index(raw_vaddr, level);
+		index = x86_64_paging_index(level, raw_vaddr);
 		entry = table[index];
-		if (page_table_entry_present(entry)) {
-			if (page_table_entry_is_leaf(entry, level)) {
+		if (x86_64_paging_entry_present(entry)) {
+			if (x86_64_paging_entry_leaf(entry, level)) {
 				pmap_free_allocated_tables(allocated,
 							   allocated_count);
 				return false;
 			}
-			current_phys = plane_paddr_make(page_table_entry_phys(entry));
+			current_phys = plane_paddr_make(
+				x86_64_paging_entry_phys(entry));
 			continue;
 		}
 
@@ -328,13 +290,16 @@ bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 		return false;
 	}
 
-	if (page_table_entry_present(table[PT_INDEX(raw_vaddr)])) {
+	uint64_t pt_index = x86_64_paging_index(1, raw_vaddr);
+
+	if (x86_64_paging_entry_present(table[pt_index])) {
 		pmap_free_allocated_tables(allocated, allocated_count);
 		return false;
 	}
 
-	table[PT_INDEX(raw_vaddr)] =
-		page_table_entry_make(raw_phys, pmap_flags_to_entry_flags(flags));
+	table[pt_index] =
+		x86_64_paging_entry_make(raw_phys,
+					 pmap_flags_to_entry_flags(flags));
 	return true;
 }
 
@@ -360,33 +325,36 @@ bool x86_64_pmap_unmap_page_in_owned_root(plane_paddr_t root_pml4_phys,
 			return false;
 		}
 
-		index = pmap_level_index(raw_vaddr, level);
+		index = x86_64_paging_index(level, raw_vaddr);
 		path[depth].table = table;
 		path[depth].index = index;
 		path[depth].phys_addr = current_phys;
 		depth++;
 
 		entry = table[index];
-		if (!page_table_entry_present(entry) ||
-		    page_table_entry_is_leaf(entry, level)) {
+		if (!x86_64_paging_entry_present(entry) ||
+		    x86_64_paging_entry_leaf(entry, level)) {
 			return false;
 		}
 
-		current_phys = plane_paddr_make(page_table_entry_phys(entry));
+		current_phys = plane_paddr_make(
+			x86_64_paging_entry_phys(entry));
 	}
 
 	uint64_t *table = direct_map_page_table(current_phys);
+	uint64_t pt_index = x86_64_paging_index(1, raw_vaddr);
+
 	if (table == NULL ||
-	    !page_table_entry_present(table[PT_INDEX(raw_vaddr)])) {
+	    !x86_64_paging_entry_present(table[pt_index])) {
 		return false;
 	}
 
 	path[depth].table = table;
-	path[depth].index = PT_INDEX(raw_vaddr);
+	path[depth].index = pt_index;
 	path[depth].phys_addr = current_phys;
 	depth++;
 
-	table[PT_INDEX(raw_vaddr)] = 0;
+	table[pt_index] = 0;
 
 	for (uint64_t i = depth - 1; i > 0; i--) {
 		struct pmap_walk_entry *child = &path[i];
@@ -423,12 +391,12 @@ bool x86_64_pmap_translate_in_root(plane_paddr_t root_pml4_phys,
 			return false;
 		}
 
-		entry = table[pmap_level_index(raw_vaddr, level)];
-		if (!page_table_entry_present(entry)) {
+		entry = table[x86_64_paging_index(level, raw_vaddr)];
+		if (!x86_64_paging_entry_present(entry)) {
 			return false;
 		}
 
-		if (page_table_entry_is_leaf(entry, level)) {
+		if (x86_64_paging_entry_leaf(entry, level)) {
 			uint64_t leaf_size = pmap_leaf_size(level);
 			uint64_t offset = raw_vaddr & (leaf_size - 1);
 
@@ -437,7 +405,8 @@ bool x86_64_pmap_translate_in_root(plane_paddr_t root_pml4_phys,
 			return true;
 		}
 
-		current_phys = plane_paddr_make(page_table_entry_phys(entry));
+		current_phys = plane_paddr_make(
+			x86_64_paging_entry_phys(entry));
 	}
 
 	return false;
@@ -492,14 +461,15 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 			return false;
 		}
 
-		index = pmap_level_index(raw_vaddr, level);
+		index = x86_64_paging_index(level, raw_vaddr);
 		entry = table[index];
-		if (!page_table_entry_present(entry) ||
-		    page_table_entry_is_leaf(entry, level)) {
+		if (!x86_64_paging_entry_present(entry) ||
+		    x86_64_paging_entry_leaf(entry, level)) {
 			return false;
 		}
 
-		current_phys = plane_paddr_make(page_table_entry_phys(entry));
+		current_phys = plane_paddr_make(
+			x86_64_paging_entry_phys(entry));
 	}
 
 	table = direct_map_page_table(current_phys);
@@ -507,15 +477,15 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 		return false;
 	}
 
-	index = PT_INDEX(raw_vaddr);
+	index = x86_64_paging_index(1, raw_vaddr);
 	entry = table[index];
-	if (!page_table_entry_present(entry)) {
+	if (!x86_64_paging_entry_present(entry)) {
 		return false;
 	}
 
-	entry &= ~PAGE_RW;
+	entry &= ~X86_64_PAGING_ENTRY_WRITE;
 	if ((flags & X86_64_PMAP_WRITE) != 0) {
-		entry |= PAGE_RW;
+		entry |= X86_64_PAGING_ENTRY_WRITE;
 	}
 	table[index] = entry;
 	hal_mmu_invalidate_tlb(vaddr);

@@ -30,9 +30,9 @@ void kmain(struct boot_info *info)
 	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
 	/*
-	 * Keep LAPIC init after PMM owns page-table allocation: the current
-	 * xAPIC path may install a transitional MMIO PTE until Plane grows a
-	 * real kernel IO-map API.
+	 * Keep local interrupt setup after PMM owns page-table allocation:
+	 * the current HAL path may need a temporary device mapping until Plane
+	 * grows a real kernel IO-map API.
 	 */
 	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
 		   "failed to initialize BSP local interrupts");

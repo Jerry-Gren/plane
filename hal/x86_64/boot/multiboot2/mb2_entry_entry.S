@@ -157,37 +157,37 @@ _start:
     mov $x86_64_mb2_early_pml4, %edi
 
     mov $early_pdpt_ident, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, 0(%edi) /* PML4[0] -> early_pdpt_ident */
 
     mov $early_pdpt_high, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, (PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
+    mov %eax, (X86_64_PAGING_PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
 
     mov $early_pdpt_direct, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, (PML4_INDEX(X86_64_DIRECT_MAP_BASE) * 8)(%edi)
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
+    mov %eax, (X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE) * 8)(%edi)
 
     /* PDPT */
     mov $early_pdpt_ident, %edi
     mov $early_pd_ident, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, 0(%edi) /* early_pdpt_ident[0] -> early_pd_ident */
 
     mov $early_pdpt_high, %edi
     mov $x86_64_mb2_early_pd_kernel, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, (PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
+    mov %eax, (X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
 
-#if PDPT_INDEX(KERNEL_VMA_BASE) != PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
+#if X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) != X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
     mov $x86_64_mb2_early_pd_fb, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
-    mov %eax, (PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
+    mov %eax, (X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
 
     mov $early_pdpt_direct, %edi
     mov $early_pd_direct, %eax
-    or $(PAGE_PRESENT | PAGE_RW), %eax
+    or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov $(X86_64_DIRECT_MAP_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
 .Lfill_direct_pdpt:
     mov %eax, (%edi)
@@ -209,14 +209,14 @@ _start:
     shr $ARCH_LARGE_PAGE_SHIFT, %eax
     mov %eax, %ecx
 
-    cmp $X86_64_PAGE_TABLE_ENTRIES, %ecx
+    cmp $X86_64_PAGING_TABLE_ENTRIES, %ecx
     jbe .Lpages_ok
-    mov $X86_64_PAGE_TABLE_ENTRIES, %ecx
+    mov $X86_64_PAGING_TABLE_ENTRIES, %ecx
 .Lpages_ok:
 
     push %ecx
     mov $early_pd_ident, %edi
-    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
+    mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
 .Lfill_ident_pd:
     mov %eax, (%edi)
     add $ARCH_LARGE_PAGE_SIZE, %eax
@@ -225,8 +225,8 @@ _start:
     pop %ecx
 
     mov $x86_64_mb2_early_pd_kernel, %edi
-    add $(PD_INDEX(KERNEL_VMA_BASE) * 8), %edi
-    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
+    add $(X86_64_PAGING_PD_INDEX(KERNEL_VMA_BASE) * 8), %edi
+    mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
 .Lfill_kernel_pd:
     mov %eax, (%edi)
     add $ARCH_LARGE_PAGE_SIZE, %eax
@@ -234,7 +234,7 @@ _start:
     loop .Lfill_kernel_pd
 
     mov $early_pd_direct, %edi
-    mov $(PAGE_PRESENT | PAGE_RW | PAGE_PS), %eax
+    mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
     mov $(X86_64_DIRECT_MAP_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
 .Lfill_direct_pd:
     mov %eax, (%edi)

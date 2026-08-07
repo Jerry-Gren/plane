@@ -12,7 +12,9 @@
  * VMA, not a general MMIO mapper. The long-term IO-map path should own
  * device/cache attributes consistently for framebuffer and LAPIC mappings.
  */
-#define FB_PAGE_FLAGS (PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS)
+#define FB_PAGE_FLAGS \
+	(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | \
+	 X86_64_PAGING_ENTRY_PWT | X86_64_PAGING_ENTRY_PS)
 
 /* in mb2_entry_entry.S */
 extern uint64_t x86_64_mb2_early_pml4[];
@@ -53,12 +55,14 @@ bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
 	uint64_t pages_needed = fb_aligned_size / ARCH_LARGE_PAGE_SIZE;
 
 	uint64_t *target_pd = x86_64_mb2_early_pd_fb;
-#if PDPT_INDEX(KERNEL_VMA_BASE) == PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
+#if X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) == \
+	X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
 	target_pd = x86_64_mb2_early_pd_kernel;
 #endif
 
-	uint64_t start_idx = PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
-	if (pages_needed > X86_64_PAGE_TABLE_ENTRIES - start_idx) {
+	uint64_t start_idx =
+		X86_64_PAGING_PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
+	if (pages_needed > X86_64_PAGING_TABLE_ENTRIES - start_idx) {
 		return false;
 	}
 

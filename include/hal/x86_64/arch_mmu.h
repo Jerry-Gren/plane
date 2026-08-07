@@ -1,34 +1,7 @@
 #ifndef HAL_ARCH_MMU_H
 #define HAL_ARCH_MMU_H
 
-#include <hal/x86_64/page.h>
-#include <plane/bits.h>
-
-/* Page flags */
-#define PAGE_PRESENT         BIT(0)
-#define PAGE_RW              BIT(1)
-#define PAGE_PWT             BIT(3)
-#define PAGE_PS              BIT(7)
-
-#define X86_64_PAGE_TABLE_ENTRIES 512
-#define X86_64_PAGE_ENTRY_ADDR_LOW_BIT  12
-#define X86_64_PAGE_ENTRY_ADDR_HIGH_BIT 51
-#define X86_64_PAGE_TABLE_INDEX_BITS    9
-#define X86_64_PAGE_TABLE_INDEX_MASK \
-	((1 << X86_64_PAGE_TABLE_INDEX_BITS) - 1)
-
-#ifndef __ASSEMBLER__
-	/* Physical address field in CR3 and page-table entries. */
-	#define X86_64_PAGE_ENTRY_ADDR_MASK \
-		GENMASK_ULL(X86_64_PAGE_ENTRY_ADDR_HIGH_BIT, \
-			    X86_64_PAGE_ENTRY_ADDR_LOW_BIT)
-#endif /* !__ASSEMBLER__ */
-
-/* Page table indices */
-#define PML4_INDEX(vaddr) (((vaddr) >> 39) & X86_64_PAGE_TABLE_INDEX_MASK)
-#define PDPT_INDEX(vaddr) (((vaddr) >> 30) & X86_64_PAGE_TABLE_INDEX_MASK)
-#define PD_INDEX(vaddr)   (((vaddr) >> 21) & X86_64_PAGE_TABLE_INDEX_MASK)
-#define PT_INDEX(vaddr)   (((vaddr) >> 12) & X86_64_PAGE_TABLE_INDEX_MASK)
+#include <hal/x86_64/paging_defs.h>
 
 #ifdef __ASSEMBLER__
 	#define KERNEL_VMA_BASE        0xffffffff80000000

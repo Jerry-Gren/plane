@@ -8,17 +8,17 @@
 
 #include "support/test.h"
 
-uint64_t x86_64_mb2_early_pml4[X86_64_PAGE_TABLE_ENTRIES];
-uint64_t x86_64_mb2_early_pd_kernel[X86_64_PAGE_TABLE_ENTRIES];
-uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGE_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pml4[X86_64_PAGING_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pd_kernel[X86_64_PAGING_TABLE_ENTRIES];
+uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGING_TABLE_ENTRIES];
 
-static uintptr_t invalidated_vaddrs[X86_64_PAGE_TABLE_ENTRIES];
+static uintptr_t invalidated_vaddrs[X86_64_PAGING_TABLE_ENTRIES];
 static uint64_t invalidate_count;
 static uint64_t flush_count;
 
 void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
-	if (invalidate_count < X86_64_PAGE_TABLE_ENTRIES) {
+	if (invalidate_count < X86_64_PAGING_TABLE_ENTRIES) {
 		invalidated_vaddrs[invalidate_count] = plane_vaddr_raw(vaddr);
 	}
 	invalidate_count++;
@@ -42,7 +42,7 @@ static void reset_state(void)
 
 static int page_directory_untouched(void)
 {
-	for (uint64_t i = 0; i < X86_64_PAGE_TABLE_ENTRIES; i++) {
+	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
 		if (x86_64_mb2_early_pd_fb[i] != 0 ||
 		    x86_64_mb2_early_pd_kernel[i] != 0) {
 			return 0;
@@ -59,8 +59,8 @@ static int test_maps_unaligned_framebuffer(void)
 	uint64_t phys_addr = 0x123450;
 	uint64_t phys_base = ALIGN_DOWN(phys_addr, ARCH_LARGE_PAGE_SIZE);
 	uint64_t page_offset = phys_addr - phys_base;
-	uint64_t start_idx = PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
-	uint64_t flags = PAGE_PRESENT | PAGE_RW | PAGE_PWT | PAGE_PS;
+	uint64_t start_idx = X86_64_PAGING_PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
+	uint64_t flags = X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PWT | X86_64_PAGING_ENTRY_PS;
 
 	reset_state();
 
@@ -127,7 +127,7 @@ static int test_rejects_invalid_mappings(void)
 				       ARCH_LARGE_PAGE_SIZE);
 	failures += check_map_failure("reject framebuffer beyond pd capacity",
 				       0,
-				       (X86_64_PAGE_TABLE_ENTRIES + 1) *
+				       (X86_64_PAGING_TABLE_ENTRIES + 1) *
 					       ARCH_LARGE_PAGE_SIZE);
 
 	return failures;
