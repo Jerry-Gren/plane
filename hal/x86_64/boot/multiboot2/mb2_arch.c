@@ -27,6 +27,12 @@ bool boot_mb2_arch_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
 	return x86_64_mb2_early_map_framebuffer(phys_addr, size, vaddr);
 }
 
+bool boot_mb2_arch_release_framebuffer_mapping(plane_vaddr_t vaddr,
+					       uint64_t size)
+{
+	return x86_64_mb2_early_unmap_framebuffer(vaddr, size);
+}
+
 void boot_mb2_arch_reserve_kernel_image(struct plane_mem_info *mem)
 {
 	uint64_t kernel_phys_start = (uint64_t)__kernel_phys_start;

@@ -13,12 +13,20 @@ static plane_paddr_t pmap_current_root_phys(void)
 	return x86_64_pmap_active_root_phys();
 }
 
+static void pmap_assert_page_table_phys(plane_paddr_t phys_addr)
+{
+	BUG_ON_MSG(plane_paddr_is_null(phys_addr),
+		   "PMM allocated null physical page for page table");
+}
+
 static void write_cr3_phys(plane_paddr_t phys_addr)
 {
 	/*
 	 * CR3 holds the physical base of the active top-level paging
-	 * structure. Plane switches here after cloning PMM-owned kernel tables.
+	 * structure. Plane treats physical zero as reserved/null, so reaching
+	 * this point with a null paddr means PMM ownership policy was violated.
 	 */
+	pmap_assert_page_table_phys(phys_addr);
 	__asm__ volatile ("mov %0, %%cr3" : : "r" (plane_paddr_raw(phys_addr)) : "memory");
 }
 
@@ -78,6 +86,7 @@ static bool clone_page_table(plane_paddr_t source_phys,
 					      &new_phys)) {
 		return false;
 	}
+	pmap_assert_page_table_phys(new_phys);
 
 	clone = direct_map_page_table(new_phys);
 	if (clone == NULL) {
@@ -239,6 +248,7 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 					      &phys_addr)) {
 		return false;
 	}
+	pmap_assert_page_table_phys(phys_addr);
 
 	if (direct_map_page_table(phys_addr) == NULL) {
 		BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),

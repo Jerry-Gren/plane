@@ -24,6 +24,7 @@ enum pmm_page_queue_state {
 	PMM_PAGE_QUEUE_FREE,
 };
 
+#define PLANE_PMM_NULL_PHYS_GUARD_SIZE PAGE_SIZE
 #define PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE 64
 
 struct plane_page {
@@ -139,6 +140,28 @@ static bool account_unusable_region(uint32_t type, uint64_t pages)
 	default:
 		return add_pages_to_stat(&pmm_stats.memtype.invalid_pages, pages);
 	}
+}
+
+static bool reserve_low_usable_pages(uint64_t *start, uint64_t aligned_end)
+{
+	uint64_t reserve_end;
+	uint64_t pages;
+
+	if (start == NULL || *start >= aligned_end ||
+	    *start >= PLANE_PMM_NULL_PHYS_GUARD_SIZE) {
+		return true;
+	}
+
+	reserve_end = aligned_end < PLANE_PMM_NULL_PHYS_GUARD_SIZE ?
+		      aligned_end : PLANE_PMM_NULL_PHYS_GUARD_SIZE;
+	pages = page_count_for_region(*start, reserve_end);
+	if (pages != 0 &&
+	    !account_unusable_region(PLANE_MEM_RESERVED, pages)) {
+		return false;
+	}
+
+	*start = reserve_end;
+	return true;
 }
 
 static bool managed_range_contains(uint64_t base, uint64_t page_count)
@@ -952,6 +975,18 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 				return false;
 			}
 			aligned_end = ALIGN_DOWN(end, PAGE_SIZE);
+			if (start >= aligned_end) {
+				continue;
+			}
+			/*
+			 * Firmware memory maps are input, not Plane's final
+			 * allocation policy. Keep physical page zero reserved so
+			 * null physical addresses never become page tables,
+			 * metadata storage, or VM backing pages.
+			 */
+			if (!reserve_low_usable_pages(&start, aligned_end)) {
+				return false;
+			}
 			if (start >= aligned_end) {
 				continue;
 			}

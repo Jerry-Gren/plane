@@ -912,6 +912,8 @@ static int test_clone_copies_4k_leaf_path(void)
 				     x86_64_pmap_clone_kernel_page_tables(
 					     test_page_phys(0), &new_pml4_phys),
 				     true);
+	failures += test_expect_bool("clone pml4 phys nonzero",
+				     new_pml4_phys != 0, true);
 	failures += test_expect_u64("clone 4k allocated tables",
 				    allocated_page_count(), 4);
 
@@ -961,6 +963,8 @@ static int test_clone_preserves_huge_leaf_entries(void)
 				     x86_64_pmap_clone_kernel_page_tables(
 					     test_page_phys(0), &new_pml4_phys),
 				     true);
+	failures += test_expect_bool("clone huge pml4 phys nonzero",
+				     new_pml4_phys != 0, true);
 	failures += test_expect_u64("clone huge allocated tables",
 				    allocated_page_count(), 3);
 

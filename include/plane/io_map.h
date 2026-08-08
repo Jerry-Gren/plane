@@ -16,8 +16,10 @@ enum plane_io_map_cache {
  * Kernel-only IO mapping.
  *
  * IO-map reserves kernel VA and installs pmap mappings with explicit cache
- * attributes. It does not create vm_object backing; faults into this range
- * fail instead of zero-filling anonymous pages.
+ * attributes. DEVICE is used for MMIO register pages such as the local APIC;
+ * WRITE_COMBINE is used for linear device memory such as the framebuffer. It
+ * does not create vm_object backing; faults into this range fail instead of
+ * zero-filling anonymous pages.
  */
 bool plane_io_map_init(void);
 bool plane_io_map(plane_paddr_t phys_addr,

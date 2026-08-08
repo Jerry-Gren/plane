@@ -5,6 +5,8 @@ LD := x86_64-elf-ld
 HOSTCC ?= gcc
 GENERATED_DIR := include/generated
 AUTOCONF_HEADER := $(GENERATED_DIR)/autoconf.h
+BUILD_MODE := $(if $(filter 1,$(DEBUG)),debug,release)
+BUILD_MODE_FILE := build/.build_mode
 .DEFAULT_GOAL := all
 
 override CFLAGS += \
@@ -32,6 +34,11 @@ override HOSTCFLAGS += \
 	-Wall -Wextra -Werror
 
 override ASFLAGS += -Wa,--divide
+
+ifeq ($(DEBUG),1)
+override CFLAGS += -g3 -Og -fno-omit-frame-pointer
+override HOSTCFLAGS += -g3 -O0
+endif
 
 -include .config
 
@@ -77,24 +84,35 @@ INTERNAL_TEST_HEADERS := \
 
 .SECONDEXPANSION:
 
-.PHONY: all clean menuconfig iso qemu check unit-check
+.PHONY: all clean debug debug-iso debug-clean menuconfig iso qemu qemu-gdb check unit-check FORCE
 
 all: $(KERNEL)
+
+$(BUILD_MODE_FILE): FORCE
+	@mkdir -p $(dir $@)
+	@if [ ! -f $@ ] || [ "$$(cat $@)" != "$(BUILD_MODE)" ]; then \
+		echo "  CLEAN   $(BUILD_MODE) objects"; \
+		find kernel klib hal boot drivers -type f -name "*.o" -delete; \
+		find kernel klib hal boot drivers -type f -name "*.d" -delete; \
+		find hal -type f -name "*.lds" -delete; \
+		rm -f $(KERNEL); \
+		echo "$(BUILD_MODE)" > $@; \
+	fi
 
 $(KERNEL): $(OBJS) $(LINKER_SCRIPT)
 	@echo "  LD      $@"
 	@$(LD) -T $(LINKER_SCRIPT) $(OBJS) -o $@
 
-%.lds: %.lds.S
+%.lds: %.lds.S $(BUILD_MODE_FILE)
 	@echo "  CPP     $@"
 	@$(CC) -E -P -x c -D__ASSEMBLER__ $(CFLAGS) \
 		-MMD -MP -MT $@ -MF $@.d $< -o $@
 
-%.o: %.c $(AUTOCONF_HEADER)
+%.o: %.c $(AUTOCONF_HEADER) $(BUILD_MODE_FILE)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-%.o: %.S
+%.o: %.S $(BUILD_MODE_FILE)
 	@echo "  AS      $<"
 	@$(CC) $(CFLAGS) $(ASFLAGS) -MMD -MP -c $< -o $@
 
@@ -108,6 +126,19 @@ menuconfig:
 	@genconfig --header-path $(AUTOCONF_HEADER)
 
 check: unit-check
+
+debug:
+	@$(MAKE) DEBUG=1 all
+
+debug-iso:
+	@$(MAKE) DEBUG=1 iso
+
+debug-clean:
+	@echo "  CLEAN   debug objects"
+	@find kernel klib hal boot drivers -type f -name "*.o" -delete
+	@find kernel klib hal boot drivers -type f -name "*.d" -delete
+	@find hal -type f -name "*.lds" -delete
+	@rm -f $(KERNEL)
 
 unit-check: $(TEST_BINS)
 	@for test in $(TEST_BINS); do \
@@ -172,6 +203,11 @@ endif
 qemu: iso
 	@echo "  QEMU    $(ISO_NAME)"
 	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d -serial stdio
+
+qemu-gdb: debug-iso
+	@echo "  QEMU    $(ISO_NAME) [GDB]"
+	@qemu-system-x86_64 -M q35 -m 2G -cdrom $(ISO_NAME) -boot d \
+		-serial stdio -display none -no-reboot -S -s
 
 clean:
 	@echo "  CLEAN"

@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include <plane/early_video.h>
+#include <plane/io_map.h>
 
 static uint32_t scale_color(uint8_t value, uint8_t mask_size)
 {
@@ -14,7 +15,8 @@ static uint32_t scale_color(uint8_t value, uint8_t mask_size)
 }
 
 static uint32_t pack_rgb(const struct plane_video_info *video,
-			 uint8_t red, uint8_t green, uint8_t blue) {
+			 uint8_t red, uint8_t green, uint8_t blue)
+{
 	return (scale_color(red, video->red_mask_size) << video->red_mask_shift) |
 	       (scale_color(green, video->green_mask_size) << video->green_mask_shift) |
 	       (scale_color(blue, video->blue_mask_size) << video->blue_mask_shift);
@@ -53,6 +55,29 @@ bool plane_early_video_format_supported(const struct plane_video_info *video)
 	return true;
 }
 
+bool plane_early_video_remap_framebuffer(struct plane_video_info *video)
+{
+	plane_vaddr_t mapped_addr;
+
+	if (video == NULL ||
+	    plane_vaddr_is_null(video->framebuffer_addr) ||
+	    plane_paddr_is_null(video->framebuffer_phys_addr) ||
+	    video->framebuffer_size == 0) {
+		return false;
+	}
+
+	if (!plane_io_map(video->framebuffer_phys_addr,
+			  video->framebuffer_size,
+			  PLANE_IO_MAP_CACHE_WRITE_COMBINE,
+			  PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
+			  &mapped_addr)) {
+		return false;
+	}
+
+	video->framebuffer_addr = mapped_addr;
+	return true;
+}
+
 bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
 {
 	if (!plane_early_video_format_supported(video) ||
@@ -64,7 +89,7 @@ bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
 
 	uint8_t *fb_ptr = plane_vaddr_to_ptr(video->framebuffer_addr);
 	uint8_t bytes_per_pixel = video->bpp / 8;
-	
+
 	/* reject pitch values that cannot hold one full framebuffer row */
 	if (video->width > SIZE_MAX / bytes_per_pixel ||
 	    video->pitch < video->width * bytes_per_pixel) {
@@ -73,10 +98,10 @@ bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
 
 	for (size_t y = 0; y < video->height; y++) {
 		for (size_t x = 0; x < video->width; x++) {
-			uint8_t nX = (uint8_t)(x * 255 / video->width);
-			uint8_t nY = (uint8_t)(y * 255 / video->height);
+			uint8_t nx = (uint8_t)(x * 255 / video->width);
+			uint8_t ny = (uint8_t)(y * 255 / video->height);
 			size_t pixel_offset = (y * video->pitch) + (x * bytes_per_pixel);
-			uint32_t pixel = pack_rgb(video, 0, nY, nX);
+			uint32_t pixel = pack_rgb(video, 0, ny, nx);
 
 			write_pixel(&fb_ptr[pixel_offset], bytes_per_pixel, pixel);
 		}

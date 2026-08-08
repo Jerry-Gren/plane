@@ -44,6 +44,7 @@
 
 bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
 				      plane_vaddr_t *vaddr);
+bool x86_64_mb2_early_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size);
 void x86_64_mb2_early_remove_identity_mapping(void);
 #endif /* !__ASSEMBLER__ */
 

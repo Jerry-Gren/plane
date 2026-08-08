@@ -93,6 +93,8 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
+	video->framebuffer_phys_addr = phys_addr;
+	video->framebuffer_size = fb_size;
 	BUG_ON_MSG(!boot_mb2_arch_map_framebuffer(phys_addr, fb_size,
 						  &framebuffer_vaddr),
 		   "failed to map multiboot2 framebuffer: phys=0x%016llx size=0x%016llx",
@@ -255,6 +257,8 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 				  framebuffer_phys_addr, framebuffer_size);
 
 	boot_mb2_arch_finish_handoff();
+	b_info.release_framebuffer_boot_mapping =
+		boot_mb2_arch_release_framebuffer_mapping;
 
 	kmain(&b_info);
 

@@ -289,6 +289,70 @@ static int test_init_accounts_all_memmap_types(void)
 	return failures;
 }
 
+static int test_usable_region_reserves_null_physical_page(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	plane_paddr_t phys = {0};
+	int failures = 0;
+
+	add_region(&mem, 0, 0x5000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("null guard init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_null("null phys unmanaged",
+				     plane_vm_page_from_phys(test_paddr(0)));
+	failures += test_expect_bool("null guard first alloc",
+				     plane_pmm_alloc_page_phys(&phys), true);
+	failures += test_expect_u64("null guard first alloc phys",
+				    test_paddr_raw(phys), 0x2000);
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("null guard stats", &stats,
+				 4, 2, 4, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1);
+
+	return failures;
+}
+
+static int test_usable_region_inside_null_page_is_reserved(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	plane_paddr_t phys = {0};
+	int failures = 0;
+
+	add_region(&mem, 0, PAGE_SIZE, PLANE_MEM_USABLE);
+	failures += test_expect_bool("null-only init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_null("null-only page unmanaged",
+				     plane_vm_page_from_phys(test_paddr(0)));
+	failures += test_expect_bool("null-only alloc rejected",
+				     plane_pmm_alloc_page_phys(&phys), false);
+
+	stats = plane_pmm_get_stats();
+	failures += check_stats("null-only stats", &stats,
+				 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0);
+
+	return failures;
+}
+
+static int test_run_allocation_skips_null_physical_page(void)
+{
+	struct plane_mem_info mem = {0};
+	plane_paddr_t phys = {0};
+	int failures = 0;
+
+	add_region(&mem, 0, 0x7000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("null run init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("null run alloc",
+				     plane_pmm_alloc_pages_phys(2, 1, &phys),
+				     true);
+	failures += test_expect_u64("null run alloc phys",
+				    test_paddr_raw(phys), 0x2000);
+
+	return failures;
+}
+
 static int test_vm_page_grab_allocates_and_releases_metadata(void)
 {
 	struct plane_mem_info mem = {0};
@@ -1208,6 +1272,9 @@ int main(void)
 {
 	static const struct test_case cases[] = {
 		TEST_CASE(test_init_accounts_all_memmap_types),
+		TEST_CASE(test_usable_region_reserves_null_physical_page),
+		TEST_CASE(test_usable_region_inside_null_page_is_reserved),
+		TEST_CASE(test_run_allocation_skips_null_physical_page),
 		TEST_CASE(test_phys_to_page_metadata),
 		TEST_CASE(test_vm_page_grab_allocates_and_releases_metadata),
 		TEST_CASE(test_page_wire_count_tracks_allocated_pages),

@@ -29,12 +29,20 @@ void kmain(struct boot_info *info)
 		   "failed to enable kernel direct map");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
+	if (info->release_framebuffer_boot_mapping != NULL) {
+		BUG_ON_MSG(!info->release_framebuffer_boot_mapping(
+				   info->video.framebuffer_addr,
+				   info->video.framebuffer_size),
+			   "failed to release framebuffer boot mapping");
+	}
 	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
 	BUG_ON_MSG(!plane_kmem_init(),
 		   "failed to initialize kernel memory allocator");
 	BUG_ON_MSG(!plane_io_map_init(),
 		   "failed to initialize kernel IO mapper");
+	BUG_ON_MSG(!plane_early_video_remap_framebuffer(&info->video),
+		   "failed to remap early framebuffer through IO map");
 	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
 		   "failed to initialize BSP local interrupts");
 	plane_pmm_log_stats();

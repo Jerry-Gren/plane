@@ -2,8 +2,48 @@
 #include <string.h>
 
 #include <plane/early_video.h>
+#include <plane/io_map.h>
 
 #include "support/test.h"
+
+static bool io_map_should_fail;
+static uint64_t io_map_call_count;
+static plane_paddr_t io_map_last_phys_addr;
+static uint64_t io_map_last_size;
+static enum plane_io_map_cache io_map_last_cache;
+static uint32_t io_map_last_prot;
+static plane_vaddr_t io_map_return_vaddr;
+
+bool plane_io_map(plane_paddr_t phys_addr,
+		  uint64_t size,
+		  enum plane_io_map_cache cache,
+		  uint32_t prot,
+		  plane_vaddr_t *vaddr)
+{
+	io_map_call_count++;
+	io_map_last_phys_addr = phys_addr;
+	io_map_last_size = size;
+	io_map_last_cache = cache;
+	io_map_last_prot = prot;
+
+	if (io_map_should_fail) {
+		return false;
+	}
+
+	*vaddr = io_map_return_vaddr;
+	return true;
+}
+
+static void reset_io_map_stub(void)
+{
+	io_map_should_fail = false;
+	io_map_call_count = 0;
+	io_map_last_phys_addr = plane_paddr_make(0);
+	io_map_last_size = 0;
+	io_map_last_cache = PLANE_IO_MAP_CACHE_DEVICE;
+	io_map_last_prot = 0;
+	io_map_return_vaddr = plane_vaddr_make(0xffff900000200000ull);
+}
 
 static struct plane_video_info rgb_video(uint8_t bpp,
 					 uint8_t red_shift,
@@ -215,9 +255,148 @@ static int test_draw_rejects_short_pitch(void)
 	return 0;
 }
 
+static int test_remap_framebuffer_uses_write_combine(void)
+{
+	struct plane_video_info video = {
+		.framebuffer_addr = plane_vaddr_make(0xffff800000100123ull),
+		.framebuffer_phys_addr = plane_paddr_make(0x00000000e0000123ull),
+		.framebuffer_size = 0x1000,
+	};
+	int failures = 0;
+
+	reset_io_map_stub();
+	io_map_return_vaddr = plane_vaddr_make(0xffff900000300123ull);
+
+	failures += test_expect_bool("remap succeeds",
+				     plane_early_video_remap_framebuffer(&video),
+				     true);
+	failures += test_expect_u64("remap calls io map",
+				    io_map_call_count, 1);
+	failures += test_expect_u64("remap phys",
+				    plane_paddr_raw(io_map_last_phys_addr),
+				    0x00000000e0000123ull);
+	failures += test_expect_u64("remap size",
+				    io_map_last_size, 0x1000);
+	failures += test_expect_u32("remap cache",
+				    io_map_last_cache,
+				    PLANE_IO_MAP_CACHE_WRITE_COMBINE);
+	failures += test_expect_u32("remap prot",
+				    io_map_last_prot,
+				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
+	failures += test_expect_u64("remap updates vaddr",
+				    plane_vaddr_raw(video.framebuffer_addr),
+				    0xffff900000300123ull);
+
+	return failures;
+}
+
+static int test_remap_framebuffer_rejects_missing_handoff(void)
+{
+	struct plane_video_info valid = {
+		.framebuffer_addr = plane_vaddr_make(0xffff800000100000ull),
+		.framebuffer_phys_addr = plane_paddr_make(0x00000000e0000000ull),
+		.framebuffer_size = 0x1000,
+	};
+	struct plane_video_info missing_vaddr = valid;
+	struct plane_video_info missing_phys = valid;
+	struct plane_video_info missing_size = valid;
+	int failures = 0;
+
+	reset_io_map_stub();
+	failures += test_expect_bool("remap rejects null video",
+				     plane_early_video_remap_framebuffer(NULL),
+				     false);
+	missing_vaddr.framebuffer_addr = plane_vaddr_make(0);
+	failures += test_expect_bool("remap rejects missing va",
+				     plane_early_video_remap_framebuffer(&missing_vaddr),
+				     false);
+	missing_phys.framebuffer_phys_addr = plane_paddr_make(0);
+	failures += test_expect_bool("remap rejects missing phys",
+				     plane_early_video_remap_framebuffer(&missing_phys),
+				     false);
+	missing_size.framebuffer_size = 0;
+	failures += test_expect_bool("remap rejects missing size",
+				     plane_early_video_remap_framebuffer(&missing_size),
+				     false);
+	failures += test_expect_u64("remap rejects before io map",
+				    io_map_call_count, 0);
+
+	return failures;
+}
+
+static int test_remap_framebuffer_preserves_va_on_failure(void)
+{
+	struct plane_video_info video = {
+		.framebuffer_addr = plane_vaddr_make(0xffff800000100000ull),
+		.framebuffer_phys_addr = plane_paddr_make(0x00000000e0000000ull),
+		.framebuffer_size = 0x1000,
+	};
+	int failures = 0;
+
+	reset_io_map_stub();
+	io_map_should_fail = true;
+
+	failures += test_expect_bool("remap io map failure",
+				     plane_early_video_remap_framebuffer(&video),
+				     false);
+	failures += test_expect_u64("failed remap calls io map",
+				    io_map_call_count, 1);
+	failures += test_expect_u64("failed remap preserves vaddr",
+				    plane_vaddr_raw(video.framebuffer_addr),
+				    0xffff800000100000ull);
+
+	return failures;
+}
+
+static int test_draw_pattern_uses_remapped_framebuffer(void)
+{
+	uint8_t old_framebuffer[16] = {0};
+	uint8_t runtime_framebuffer[16] = {0};
+	struct plane_video_info video = rgb_video(32, 16, 8, 0, 8, 8, 8);
+
+	video.framebuffer_addr = plane_vaddr_from_ptr(old_framebuffer);
+	video.framebuffer_phys_addr = plane_paddr_make(0x00000000e0000000ull);
+	video.framebuffer_size = sizeof(runtime_framebuffer);
+	video.width = 2;
+	video.height = 2;
+	video.pitch = 8;
+
+	reset_io_map_stub();
+	io_map_return_vaddr = plane_vaddr_from_ptr(runtime_framebuffer);
+
+	if (!plane_early_video_remap_framebuffer(&video)) {
+		test_fail("remap before draw returned false");
+		return 1;
+	}
+	if (!plane_early_video_draw_test_pattern(&video)) {
+		test_fail("draw after remap returned false");
+		return 1;
+	}
+
+	if (runtime_framebuffer[12] == 0 && runtime_framebuffer[13] == 0 &&
+	    runtime_framebuffer[14] == 0 && runtime_framebuffer[15] == 0) {
+		test_fail("draw did not write remapped framebuffer");
+		return 1;
+	}
+
+	for (uint64_t i = 0; i < sizeof(old_framebuffer); i++) {
+		if (old_framebuffer[i] != 0) {
+			test_fail("draw wrote old framebuffer byte %llu",
+				  (unsigned long long)i);
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 int main(void)
 {
 	static const struct test_case cases[] = {
+		TEST_CASE(test_remap_framebuffer_uses_write_combine),
+		TEST_CASE(test_remap_framebuffer_rejects_missing_handoff),
+		TEST_CASE(test_remap_framebuffer_preserves_va_on_failure),
+		TEST_CASE(test_draw_pattern_uses_remapped_framebuffer),
 		TEST_CASE(test_draw_pattern_packs_rgb_formats),
 		TEST_CASE(test_format_supported),
 		TEST_CASE(test_draw_pattern_honors_pitch),

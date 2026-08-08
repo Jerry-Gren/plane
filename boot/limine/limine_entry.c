@@ -10,6 +10,7 @@
 #include <plane/boot_info.h>
 #include <plane/compiler.h>
 #include <plane/entry.h>
+#include <plane/overflow.h>
 #include <plane/printk.h>
 
 #include "limine_smp_internal.h"
@@ -60,6 +61,26 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 __used __section(".limine_requests_end")
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
+static plane_paddr_t boot_limine_framebuffer_phys_addr(plane_vaddr_t vaddr)
+{
+	uint64_t hhdm_offset = hhdm_request.response->offset;
+	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
+
+	/*
+	 * Runtime framebuffer access is handed off to plane_io_map(), but
+	 * Limine only gives Plane a framebuffer VA. The current handoff assumes
+	 * that VA lives in the HHDM/direct-map window, making phys = va - HHDM.
+	 * If a future boot environment violates that, use the memmap framebuffer
+	 * entry to resolve the physical address instead of silently guessing.
+	 */
+	BUG_ON_MSG(raw_vaddr < hhdm_offset,
+		   "limine framebuffer VA is not in HHDM: vaddr=0x%016llx hhdm=0x%016llx",
+		   (unsigned long long)raw_vaddr,
+		   (unsigned long long)hhdm_offset);
+
+	return plane_paddr_make(raw_vaddr - hhdm_offset);
+}
+
 static void boot_limine_collect_framebuffer(struct plane_video_info *video)
 {
 	BUG_ON_MSG(framebuffer_request.response == NULL,
@@ -100,7 +121,17 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video)
 		   fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX,
 		   "limine framebuffer fields exceed plane_video_info limits");
 
+	uint64_t fb_size;
+	BUG_ON_MSG(!plane_checked_mul_u64(fb->pitch, fb->height, &fb_size),
+		   "limine framebuffer size overflow: pitch=%llu height=%llu",
+		   (unsigned long long)fb->pitch,
+		   (unsigned long long)fb->height);
+	BUG_ON_MSG(fb_size == 0, "limine framebuffer size is zero");
+
 	video->framebuffer_addr = plane_vaddr_make((uint64_t)fb->address);
+	video->framebuffer_phys_addr =
+		boot_limine_framebuffer_phys_addr(video->framebuffer_addr);
+	video->framebuffer_size = fb_size;
 	video->width            = fb->width;
 	video->height           = fb->height;
 	video->pitch            = fb->pitch;

@@ -16,6 +16,9 @@
  * PLANE_PMM_ALLOC_ZERO is requested.
  * Each managed physical page has a small struct plane_page. Page metadata
  * queries and resident-page operations live in the VM page layer.
+ * Physical page zero is reserved by Plane's own ownership policy even if a
+ * bootloader reports it as usable; null physical addresses must not be
+ * returned by the allocator.
  */
 
 enum plane_pmm_alloc_flags {

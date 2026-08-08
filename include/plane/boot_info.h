@@ -10,6 +10,8 @@
 /* Video */
 struct plane_video_info {
 	plane_vaddr_t framebuffer_addr;
+	plane_paddr_t framebuffer_phys_addr;
+	uint64_t framebuffer_size;
 	uint32_t width;
 	uint32_t height;
 	uint32_t pitch;
@@ -28,6 +30,8 @@ struct boot_info {
 	struct plane_mem_info   mem;
 	struct plane_smp_info   smp;
 	bool (*start_aps)(void);
+	bool (*release_framebuffer_boot_mapping)(plane_vaddr_t vaddr,
+						 uint64_t size);
 	
 	/*
 	 * and more ...
