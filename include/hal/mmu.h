@@ -27,16 +27,17 @@ enum hal_mmu_map_flags {
  *
  * Setting the base disables the conversion helpers until the direct map is
  * enabled again. Enabling derives the runtime coverage required by the memory
- * map and validates it against the architecture maximum, but does not create
- * or modify page table mappings.
+ * map and validates it against the architecture window. Boot-protocol direct
+ * maps remain temporary bridges until page-table ownership rebuilds the
+ * Plane-owned direct-map subtree.
  */
 void hal_mmu_set_direct_map_base(plane_vaddr_t base);
 bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem);
 
 /*
  * Take ownership of the active kernel page-table tree after the direct map
- * and PMM are available. This preserves existing mappings, but moves the
- * mutable page-table pages under kernel allocation.
+ * and PMM are available. This preserves ordinary kernel mappings, skips
+ * boot-protocol direct-map bridges, and installs Plane's owned direct map.
  */
 bool hal_mmu_take_kernel_page_table_ownership(void);
 plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr);

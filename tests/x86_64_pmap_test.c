@@ -24,6 +24,9 @@ static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
 static uint64_t flush_count;
 static bool test_pat_wc_ready;
+static plane_vaddr_t test_direct_map_base;
+static uint64_t test_direct_map_size;
+static bool test_direct_map_initialized;
 
 static uint64_t test_page_phys(uint64_t page)
 {
@@ -89,6 +92,9 @@ static void reset_pmap_test(void)
 	invalidate_count = 0;
 	flush_count = 0;
 	test_pat_wc_ready = true;
+	test_direct_map_base = test_vaddr(X86_64_DIRECT_MAP_BASE);
+	test_direct_map_size = ARCH_HUGE_PAGE_SIZE;
+	test_direct_map_initialized = true;
 }
 
 plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
@@ -181,6 +187,22 @@ bool x86_64_pat_write_combine_ready(void)
 	return test_pat_wc_ready;
 }
 
+bool x86_64_mmu_direct_map_runtime(plane_vaddr_t *base, uint64_t *size)
+{
+	if (base == NULL || size == NULL || !test_direct_map_initialized) {
+		return false;
+	}
+
+	*base = test_direct_map_base;
+	*size = test_direct_map_size;
+	return true;
+}
+
+void x86_64_mmu_commit_owned_direct_map(void)
+{
+	test_direct_map_base = test_vaddr(X86_64_DIRECT_MAP_BASE);
+}
+
 static void *test_direct_phys_to_virt(uint64_t phys_addr)
 {
 	plane_vaddr_t vaddr = hal_mmu_direct_phys_to_virt(
@@ -232,7 +254,25 @@ static bool test_pmap_clone_kernel_page_tables(uint64_t source_pml4_phys,
 
 	if (new_pml4_phys == NULL ||
 	    !x86_64_pmap_clone_kernel_page_tables(test_paddr(source_pml4_phys),
-						  &out)) {
+						  NULL, 0, &out)) {
+		return false;
+	}
+
+	*new_pml4_phys = test_paddr_raw(out);
+	return true;
+}
+
+static bool test_pmap_clone_kernel_page_tables_skipping(
+	uint64_t source_pml4_phys,
+	const struct x86_64_pmap_skip_range *skip,
+	uint64_t skip_count,
+	uint64_t *new_pml4_phys)
+{
+	plane_paddr_t out;
+
+	if (new_pml4_phys == NULL ||
+	    !x86_64_pmap_clone_kernel_page_tables(test_paddr(source_pml4_phys),
+						  skip, skip_count, &out)) {
 		return false;
 	}
 
@@ -978,6 +1018,174 @@ static int test_clone_preserves_huge_leaf_entries(void)
 	return failures;
 }
 
+static int test_clone_skips_direct_map_pml4_ranges(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t *ordinary_pdpt = test_table(3);
+	uint64_t new_pml4_phys = UINT64_MAX;
+	uint64_t *new_pml4;
+	struct x86_64_pmap_skip_range skip[2] = {
+		{
+			.base = test_vaddr(X86_64_DIRECT_MAP_BASE),
+			.size = ARCH_HUGE_PAGE_SIZE,
+		},
+		{
+			.base = test_vaddr(X86_64_DIRECT_MAP_BASE +
+					   X86_64_DIRECT_MAP_WINDOW_SIZE),
+			.size = ARCH_HUGE_PAGE_SIZE,
+		},
+	};
+	uint64_t final_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+	uint64_t boot_index = X86_64_PAGING_PML4_INDEX(
+		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_WINDOW_SIZE);
+	int failures = 0;
+
+	pml4[final_index] = test_page_phys(1) |
+			    X86_64_PAGING_ENTRY_PRESENT |
+			    X86_64_PAGING_ENTRY_WRITE;
+	pml4[boot_index] = test_page_phys(2) |
+			   X86_64_PAGING_ENTRY_PRESENT |
+			   X86_64_PAGING_ENTRY_WRITE;
+	pml4[0] = test_page_phys(3) |
+		  X86_64_PAGING_ENTRY_PRESENT |
+		  X86_64_PAGING_ENTRY_WRITE;
+	ordinary_pdpt[0] = 0x40000000ull |
+			   X86_64_PAGING_ENTRY_PRESENT |
+			   X86_64_PAGING_ENTRY_WRITE |
+			   X86_64_PAGING_ENTRY_PS;
+
+	failures += test_expect_bool(
+		"clone skip direct ranges",
+		test_pmap_clone_kernel_page_tables_skipping(
+			test_page_phys(0), skip, 2, &new_pml4_phys),
+		true);
+	new_pml4 = hal_mmu_direct_phys_to_virt(new_pml4_phys);
+
+	failures += test_expect_u64("clone skips final direct map",
+				    new_pml4[final_index], 0);
+	failures += test_expect_u64("clone skips boot direct map",
+				    new_pml4[boot_index], 0);
+	failures += test_expect_bool("clone keeps ordinary pml4",
+				     x86_64_paging_entry_present(new_pml4[0]),
+				     true);
+
+	return failures;
+}
+
+static int test_direct_map_builder_uses_2m_leaves(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t *pdpt;
+	uint64_t *pd0;
+	uint64_t *pd1;
+	uint64_t size = ARCH_HUGE_PAGE_SIZE + ARCH_LARGE_PAGE_SIZE;
+	uint64_t pml4_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"build direct map",
+		x86_64_pmap_build_direct_map_in_owned_root(
+			test_paddr(test_page_phys(0)),
+			test_vaddr(X86_64_DIRECT_MAP_BASE), size),
+		true);
+	failures += test_expect_u64("build direct map allocations",
+				    allocated_page_count(), 3);
+
+	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[pml4_index]));
+	pd0 = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[0]));
+	pd1 = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[1]));
+
+	failures += test_expect_u64(
+		"build first 2m leaf",
+		pd0[0],
+		X86_64_PAGING_ENTRY_PRESENT |
+		X86_64_PAGING_ENTRY_WRITE |
+		X86_64_PAGING_ENTRY_PS);
+	failures += test_expect_u64(
+		"build last 2m leaf",
+		pd1[0],
+		ARCH_HUGE_PAGE_SIZE |
+		X86_64_PAGING_ENTRY_PRESENT |
+		X86_64_PAGING_ENTRY_WRITE |
+		X86_64_PAGING_ENTRY_PS);
+	failures += test_expect_u64("build stops after requested size",
+				    pd1[1], 0);
+
+	return failures;
+}
+
+static int test_direct_map_builder_failure_rolls_back(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t pml4_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+	int failures = 0;
+
+	alloc_fail_after = 1;
+	failures += test_expect_bool(
+		"build direct map allocation failure",
+		x86_64_pmap_build_direct_map_in_owned_root(
+			test_paddr(test_page_phys(0)),
+			test_vaddr(X86_64_DIRECT_MAP_BASE),
+			ARCH_HUGE_PAGE_SIZE),
+		false);
+	failures += test_expect_u64("build direct map rollback entry",
+				    pml4[pml4_index], 0);
+	failures += test_expect_u64("build direct map rollback allocations",
+				    allocated_page_count(), 0);
+
+	return failures;
+}
+
+static int test_direct_map_builder_rejects_existing_range(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t pml4_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+	int failures = 0;
+
+	pml4[pml4_index] = test_page_phys(1) |
+			   X86_64_PAGING_ENTRY_PRESENT |
+			   X86_64_PAGING_ENTRY_WRITE;
+
+	failures += test_expect_bool(
+		"build direct map existing range",
+		x86_64_pmap_build_direct_map_in_owned_root(
+			test_paddr(test_page_phys(0)),
+			test_vaddr(X86_64_DIRECT_MAP_BASE),
+			ARCH_HUGE_PAGE_SIZE),
+		false);
+	failures += test_expect_u64("build direct map preserves existing",
+				    pml4[pml4_index],
+				    test_page_phys(1) |
+				    X86_64_PAGING_ENTRY_PRESENT |
+				    X86_64_PAGING_ENTRY_WRITE);
+	failures += test_expect_u64("build direct map existing no alloc",
+				    allocated_page_count(), 0);
+
+	return failures;
+}
+
+static int test_direct_map_builder_rejects_non_final_base(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"build direct map rejects non-final base",
+		x86_64_pmap_build_direct_map_in_owned_root(
+			test_paddr(test_page_phys(0)),
+			test_vaddr(X86_64_DIRECT_MAP_BASE +
+				   X86_64_DIRECT_MAP_WINDOW_SIZE),
+			ARCH_HUGE_PAGE_SIZE),
+		false);
+	failures += test_expect_u64("build non-final base no alloc",
+				    allocated_page_count(), 0);
+
+	return failures;
+}
+
 static int test_clone_failure_releases_allocated_tables(void)
 {
 	uint64_t *pml4 = test_table(0);
@@ -1044,6 +1252,11 @@ int main(void)
 		TEST_CASE(test_unmap_page_rejects_invalid_paths),
 		TEST_CASE(test_clone_copies_4k_leaf_path),
 		TEST_CASE(test_clone_preserves_huge_leaf_entries),
+		TEST_CASE(test_clone_skips_direct_map_pml4_ranges),
+		TEST_CASE(test_direct_map_builder_uses_2m_leaves),
+		TEST_CASE(test_direct_map_builder_failure_rolls_back),
+		TEST_CASE(test_direct_map_builder_rejects_existing_range),
+		TEST_CASE(test_direct_map_builder_rejects_non_final_base),
 		TEST_CASE(test_clone_failure_releases_allocated_tables),
 		TEST_CASE(test_clone_direct_map_failure_releases_allocated_tables),
 	};

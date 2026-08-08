@@ -95,6 +95,9 @@ static int test_named_constants_match_current_manual_fields(void)
 				    BIT_ULL(7));
 	failures += test_expect_u64("table entries",
 				    X86_64_PAGING_TABLE_ENTRIES, 512);
+	failures += test_expect_u64("pml4 slot size",
+				    X86_64_PAGING_PML4_SLOT_SIZE,
+				    0x8000000000ull);
 	failures += test_expect_u64("address mask",
 				    X86_64_PAGING_ENTRY_ADDR_MASK,
 				    0x000ffffffffff000ull);

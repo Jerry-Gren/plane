@@ -2,12 +2,20 @@
 
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/mmu_internal.h>
 #include <plane/memmap.h>
 #include <plane/overflow.h>
 
 static uint64_t direct_map_base = X86_64_DIRECT_MAP_BASE;
 static uint64_t direct_map_size;
 static bool direct_map_initialized;
+
+static bool direct_map_covers_region_type(uint32_t type)
+{
+	return type == PLANE_MEM_USABLE ||
+	       type == PLANE_MEM_BOOTLOADER_RECLAIMABLE ||
+	       type == PLANE_MEM_EXECUTABLE_AND_MODULES;
+}
 
 void hal_mmu_set_direct_map_base(plane_vaddr_t base)
 {
@@ -28,7 +36,8 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 		return false;
 	}
 
-	if (!plane_checked_add_u64(direct_map_base, X86_64_DIRECT_MAP_MAX_SIZE,
+	if (!plane_checked_add_u64(direct_map_base,
+				   X86_64_DIRECT_MAP_WINDOW_SIZE,
 				   &direct_map_end) ||
 	    (KERNEL_VMA_BASE >= direct_map_base &&
 	     KERNEL_VMA_BASE < direct_map_end)) {
@@ -40,7 +49,8 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 		uint64_t region_base = plane_paddr_raw(region->base);
 		uint64_t end;
 
-		if (region->type != PLANE_MEM_USABLE || region->length == 0) {
+		if (!direct_map_covers_region_type(region->type) ||
+		    region->length == 0) {
 			continue;
 		}
 
@@ -54,13 +64,29 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 
 	if (!plane_checked_align_up_u64(required_size, ARCH_LARGE_PAGE_SIZE,
 					&required_size) ||
-	    required_size > X86_64_DIRECT_MAP_MAX_SIZE) {
+	    required_size > X86_64_DIRECT_MAP_WINDOW_SIZE) {
 		return false;
 	}
 
 	direct_map_size = required_size;
 	direct_map_initialized = true;
 	return true;
+}
+
+bool x86_64_mmu_direct_map_runtime(plane_vaddr_t *base, uint64_t *size)
+{
+	if (base == NULL || size == NULL || !direct_map_initialized) {
+		return false;
+	}
+
+	*base = plane_vaddr_make(direct_map_base);
+	*size = direct_map_size;
+	return true;
+}
+
+void x86_64_mmu_commit_owned_direct_map(void)
+{
+	direct_map_base = X86_64_DIRECT_MAP_BASE;
 }
 
 plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
