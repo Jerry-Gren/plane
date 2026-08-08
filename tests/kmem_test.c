@@ -44,7 +44,7 @@ struct plane_page {
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
-	uint32_t flags;
+	uint32_t prot;
 	bool used;
 };
 
@@ -357,11 +357,12 @@ bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     uint32_t flags)
+			     struct hal_mmu_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 ||
+	if (!plane_vm_prot_valid(options.prot) ||
+	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL ||
 	    map_attempts++ >= map_fail_after) {
 		return false;
@@ -371,7 +372,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 		if (!test_mappings[i].used) {
 			test_mappings[i].vaddr = raw_vaddr;
 			test_mappings[i].phys_addr = plane_paddr_raw(phys_addr);
-			test_mappings[i].flags = flags;
+			test_mappings[i].prot = options.prot;
 			test_mappings[i].used = true;
 			return true;
 		}
@@ -392,11 +393,11 @@ bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
+	if (!plane_vm_prot_valid(prot)) {
 		return false;
 	}
 
@@ -405,7 +406,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 		return false;
 	}
 
-	mapping->flags = flags;
+	mapping->prot = prot;
 	return true;
 }
 
@@ -821,7 +822,9 @@ static int test_alloc_and_free_pages(void)
 		failures += test_expect_u64("first mapping phys",
 					    first->phys_addr, 0);
 		failures += test_expect_u32("first mapping writable",
-					    first->flags, HAL_MMU_MAP_WRITE);
+					    first->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 
 	failures += test_expect_bool("free pages",
@@ -859,7 +862,7 @@ static int test_readonly_alloc_maps_without_write_flag(void)
 	failures += test_expect_not_null("readonly mapping", mapping);
 	if (mapping != NULL) {
 		failures += test_expect_u32("readonly mapping flags",
-					    mapping->flags, 0);
+					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("readonly backing pages",
 				    allocated_page_count(), 1);
@@ -884,11 +887,15 @@ static int test_protect_pages_updates_mapping_flags(void)
 	failures += test_expect_not_null("protect second mapping", second);
 	if (first != NULL) {
 		failures += test_expect_u32("protect first writable",
-					    first->flags, HAL_MMU_MAP_WRITE);
+					    first->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("protect second writable",
-					    second->flags, HAL_MMU_MAP_WRITE);
+					    second->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 
 	failures += test_expect_bool("protect readonly",
@@ -897,11 +904,11 @@ static int test_protect_pages_updates_mapping_flags(void)
 				     true);
 	if (first != NULL) {
 		failures += test_expect_u32("protect first readonly",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("protect second readonly",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 
 	failures += test_expect_bool("protect writable",
@@ -910,11 +917,15 @@ static int test_protect_pages_updates_mapping_flags(void)
 				     true);
 	if (first != NULL) {
 		failures += test_expect_u32("protect first writable again",
-					    first->flags, HAL_MMU_MAP_WRITE);
+					    first->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("protect second writable again",
-					    second->flags, HAL_MMU_MAP_WRITE);
+					    second->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	return failures;
 }
@@ -933,7 +944,7 @@ static int test_readonly_allocation_can_be_promoted_to_writable(void)
 	failures += test_expect_not_null("readonly promote mapping", mapping);
 	if (mapping != NULL) {
 		failures += test_expect_u32("readonly promote starts ro",
-					    mapping->flags, 0);
+					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_bool("readonly promote writable",
 				     test_kmem_protect_pages_in_map(&test_map,
@@ -941,7 +952,9 @@ static int test_readonly_allocation_can_be_promoted_to_writable(void)
 				     true);
 	if (mapping != NULL) {
 		failures += test_expect_u32("readonly promote flags",
-					    mapping->flags, HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	return failures;
 }
@@ -964,11 +977,15 @@ static int test_protect_bytes_rounds_to_exact_allocation(void)
 				     false);
 	if (first != NULL) {
 		failures += test_expect_u32("byte partial first unchanged",
-					    first->flags, HAL_MMU_MAP_WRITE);
+					    first->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("byte partial second unchanged",
-					    second->flags, HAL_MMU_MAP_WRITE);
+					    second->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_bool("byte protect exact rounded",
 				     test_kmem_protect_in_map(&test_map, addr, PAGE_SIZE + 1,
@@ -976,11 +993,11 @@ static int test_protect_bytes_rounds_to_exact_allocation(void)
 				     true);
 	if (first != NULL) {
 		failures += test_expect_u32("byte protect first readonly",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("byte protect second readonly",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -1007,11 +1024,11 @@ static int test_guard_protect_updates_only_user_pages(void)
 	failures += test_expect_not_null("guard protect second user", second);
 	if (first != NULL) {
 		failures += test_expect_u32("guard protect first readonly",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("guard protect second readonly",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_null("guard protect right unmapped",
 				     find_mapping(kmem_page_vaddr(3)));
@@ -1061,7 +1078,9 @@ static int test_protect_rejects_invalid_inputs(void)
 				     false);
 	if (mapping != NULL) {
 		failures += test_expect_u32("protect invalid unchanged",
-					    mapping->flags, HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	return failures;
 }
@@ -1214,8 +1233,9 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 	if (mapping != NULL) {
 		first_phys = mapping->phys_addr;
 		failures += test_expect_u32("lazy fault mapping writable",
-					    mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_ptr("lazy object page",
 				    plane_vm_object_lookup_page(&test_object,
@@ -1294,7 +1314,7 @@ static int test_lazy_readonly_fault_protection(void)
 	failures += test_expect_not_null("lazy readonly mapping", mapping);
 	if (mapping != NULL) {
 		failures += test_expect_u32("lazy readonly flags",
-					    mapping->flags, 0);
+					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("lazy readonly backing",
 				    allocated_page_count(), 1);
@@ -1385,7 +1405,7 @@ static int test_lazy_protect_before_and_after_fault(void)
 	failures += test_expect_not_null("lazy protected first mapping", first);
 	if (first != NULL) {
 		failures += test_expect_u32("lazy protected first ro",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_bool("lazy protected write fault",
 				     fault_test_map(kmem_page_vaddr(1),
@@ -1404,7 +1424,9 @@ static int test_lazy_protect_before_and_after_fault(void)
 				     true);
 	if (first != NULL) {
 		failures += test_expect_u32("lazy protect first writable",
-					    first->flags, HAL_MMU_MAP_WRITE);
+					    first->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_null("lazy protect second still absent",
 				     find_mapping(kmem_page_vaddr(1)));
@@ -1417,7 +1439,9 @@ static int test_lazy_protect_before_and_after_fault(void)
 	failures += test_expect_not_null("lazy second mapping", second);
 	if (second != NULL) {
 		failures += test_expect_u32("lazy second writable",
-					    second->flags, HAL_MMU_MAP_WRITE);
+					    second->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_bool("lazy protect free",
 				     test_kmem_free_pages_in_map(
@@ -1596,11 +1620,11 @@ static int test_lazy_readonly_range_fault_protection(void)
 	failures += test_expect_not_null("lazy ro second mapping", second);
 	if (first != NULL) {
 		failures += test_expect_u32("lazy ro first flags",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("lazy ro second flags",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_bool("lazy ro range free",
 				     test_kmem_free_pages_in_map(
@@ -1819,11 +1843,11 @@ static int test_readonly_zero_maps_without_write_and_zeros_pages(void)
 	failures += test_expect_not_null("readonly zero second mapping", second);
 	if (first != NULL) {
 		failures += test_expect_u32("readonly zero first flags",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("readonly zero second flags",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -1873,11 +1897,11 @@ static int test_readonly_guard_maps_only_user_pages(void)
 	failures += test_expect_not_null("readonly guard second user", second);
 	if (first != NULL) {
 		failures += test_expect_u32("readonly guard first flags",
-					    first->flags, 0);
+					    first->prot, PLANE_VM_PROT_READ);
 	}
 	if (second != NULL) {
 		failures += test_expect_u32("readonly guard second flags",
-					    second->flags, 0);
+					    second->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_null("readonly guard right unmapped",
 				     find_mapping(kmem_page_vaddr(3)));

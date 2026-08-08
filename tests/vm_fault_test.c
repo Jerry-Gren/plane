@@ -35,7 +35,7 @@ struct plane_page {
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
-	uint32_t flags;
+	uint32_t prot;
 	bool used;
 };
 
@@ -280,13 +280,14 @@ static int expect_page_wire_count(const char *name,
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     uint32_t flags)
+			     struct hal_mmu_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 
 	if (map_force_fail ||
-	    (flags & ~HAL_MMU_MAP_WRITE) != 0 ||
+	    !plane_vm_prot_valid(options.prot) ||
+	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
@@ -296,7 +297,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 			test_mappings[i] = (struct test_mapping){
 				.vaddr = raw_vaddr,
 				.phys_addr = raw_phys,
-				.flags = flags,
+				.prot = options.prot,
 				.used = true,
 			};
 			map_call_count++;
@@ -325,11 +326,11 @@ bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
-	if (protect_force_fail || (flags & ~HAL_MMU_MAP_WRITE) != 0) {
+	if (protect_force_fail || !plane_vm_prot_valid(prot)) {
 		return false;
 	}
 
@@ -338,7 +339,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 		return false;
 	}
 
-	mapping->flags = flags;
+	mapping->prot = prot;
 	protect_call_count++;
 	return true;
 }
@@ -669,8 +670,9 @@ static int test_fault_miss_allocates_zero_page_and_maps(void)
 					    test_paddr_raw(
 						    plane_vm_page_phys(page)));
 		failures += test_expect_u32("fault miss map flags",
-					    mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	return failures;
 }
@@ -739,7 +741,7 @@ static int test_fault_resident_hit_repairs_absent_pmap(void)
 	failures += test_expect_u64("fault hit map calls", map_call_count, 1);
 	if (mapping != NULL) {
 		failures += test_expect_u32("fault hit readonly flags",
-					    mapping->flags, 0);
+					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -768,7 +770,9 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 				     hal_mmu_map_kernel_page(
 					     test_vaddr(vaddr),
 					     plane_vm_page_phys(page),
-					     HAL_MMU_MAP_WRITE),
+					     hal_mmu_default_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_bool("fault protect page",
 				     test_fault_page(&test_map, vaddr,
@@ -781,7 +785,7 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 				    protect_call_count, 1);
 	if (mapping != NULL) {
 		failures += test_expect_u32("fault protect flags",
-					    mapping->flags, 0);
+					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -810,7 +814,9 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 				     hal_mmu_map_kernel_page(
 					     test_vaddr(vaddr),
 					     plane_vm_page_phys(page),
-					     HAL_MMU_MAP_WRITE),
+					     hal_mmu_default_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	protect_force_fail = true;
 	failures += test_expect_bool("fault protect fail page",
@@ -822,8 +828,9 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 					 mapping);
 	if (mapping != NULL) {
 		failures += test_expect_u32("fault protect fail flags",
-					    mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_u64("fault protect fail resident",
 				    plane_vm_object_resident_page_count(
@@ -928,7 +935,7 @@ static int test_fault_miss_rejects_stale_pmap_mapping(void)
 	test_mappings[0] = (struct test_mapping){
 		.vaddr = vaddr,
 		.phys_addr = test_page_phys(0),
-		.flags = HAL_MMU_MAP_WRITE,
+		.prot = PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
 		.used = true,
 	};
 	failures += test_expect_bool("fault stale page",
@@ -1382,7 +1389,9 @@ static int test_fault_pages_repairs_and_protects_resident_pages(void)
 				     hal_mmu_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     HAL_MMU_MAP_WRITE),
+					     hal_mmu_default_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_bool("range repair pages",
 				     test_fault_pages(&test_map, vaddr, 2,
@@ -1400,11 +1409,13 @@ static int test_fault_pages_repairs_and_protects_resident_pages(void)
 				    protect_call_count, 1);
 	if (first_mapping != NULL) {
 		failures += test_expect_u32("range repair first flags",
-					    first_mapping->flags, 0);
+					    first_mapping->prot,
+					    PLANE_VM_PROT_READ);
 	}
 	if (second_mapping != NULL) {
 		failures += test_expect_u32("range repair second flags",
-					    second_mapping->flags, 0);
+					    second_mapping->prot,
+					    PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -1530,7 +1541,9 @@ static int test_fault_wire_pages_wires_resident_hits_and_repairs_pmap(void)
 				     hal_mmu_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     HAL_MMU_MAP_WRITE),
+					     hal_mmu_default_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_bool("fault wire hit range",
 				     test_fault_wire_pages(&test_map, vaddr, 2,
@@ -1550,11 +1563,13 @@ static int test_fault_wire_pages_wires_resident_hits_and_repairs_pmap(void)
 				    protect_call_count, 1);
 	if (first_mapping != NULL) {
 		failures += test_expect_u32("fault wire hit first flags",
-					    first_mapping->flags, 0);
+					    first_mapping->prot,
+					    PLANE_VM_PROT_READ);
 	}
 	if (second_mapping != NULL) {
 		failures += test_expect_u32("fault wire hit second flags",
-					    second_mapping->flags, 0);
+					    second_mapping->prot,
+					    PLANE_VM_PROT_READ);
 	}
 	return failures;
 }
@@ -1591,7 +1606,9 @@ static int test_fault_wire_pages_rolls_back_wiring_on_failure(void)
 				     hal_mmu_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     HAL_MMU_MAP_WRITE),
+					     hal_mmu_default_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	protect_force_fail = true;
 	failures += test_expect_bool("fault wire fail range",
@@ -1614,8 +1631,9 @@ static int test_fault_wire_pages_rolls_back_wiring_on_failure(void)
 					 second_mapping);
 	if (second_mapping != NULL) {
 		failures += test_expect_u32("fault wire fail second flags",
-					    second_mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    second_mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_u64("fault wire fail resident kept",
 				    plane_vm_object_resident_page_count(

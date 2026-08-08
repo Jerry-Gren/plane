@@ -92,17 +92,6 @@ static bool reserve_kmem_vaddr(struct plane_vm_map *map,
 		base);
 }
 
-static uint32_t kmem_prot_to_map_flags(uint32_t prot)
-{
-	uint32_t map_flags = 0;
-
-	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
-		map_flags |= HAL_MMU_MAP_WRITE;
-	}
-
-	return map_flags;
-}
-
 bool plane_kmem_reserve_va_pages(uint64_t page_count,
 				 uint32_t prot,
 				 plane_vaddr_t *vaddr)
@@ -308,7 +297,7 @@ static bool map_allocated_pages(plane_vaddr_t vaddr,
 				uint32_t prot)
 {
 	uint32_t grab_flags = kmem_to_vm_page_grab_flags(flags);
-	uint32_t map_flags = kmem_prot_to_map_flags(prot);
+	struct hal_mmu_map_options options = hal_mmu_default_map_options(prot);
 	uint64_t mapped_pages = 0;
 
 	for (uint64_t i = 0; i < page_count; i++) {
@@ -369,7 +358,7 @@ static bool map_allocated_pages(plane_vaddr_t vaddr,
 			return false;
 		}
 
-		if (!hal_mmu_map_kernel_page(page_vaddr, phys_addr, map_flags)) {
+		if (!hal_mmu_map_kernel_page(page_vaddr, phys_addr, options)) {
 			bool page_ok = rollback_object_page(
 				object, page_object_offset, page);
 			bool mappings_ok = release_resident_pages(
@@ -392,8 +381,6 @@ static bool protect_mapped_pages(plane_vaddr_t vaddr,
 				 uint64_t page_count,
 				 uint32_t prot)
 {
-	uint32_t map_flags = kmem_prot_to_map_flags(prot);
-
 	for (uint64_t i = 0; i < page_count; i++) {
 		plane_vaddr_t page_vaddr;
 		uint64_t page_object_offset;
@@ -416,7 +403,7 @@ static bool protect_mapped_pages(plane_vaddr_t vaddr,
 		if (plane_vm_page_from_phys(phys_addr) != page) {
 			return false;
 		}
-		if (!hal_mmu_protect_kernel_page(page_vaddr, map_flags)) {
+		if (!hal_mmu_protect_kernel_page(page_vaddr, prot)) {
 			return false;
 		}
 	}

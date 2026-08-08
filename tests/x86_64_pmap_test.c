@@ -9,6 +9,7 @@
 #include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/vm_prot.h>
 
 #include "support/test.h"
 
@@ -220,14 +221,29 @@ static void *test_direct_phys_to_virt(uint64_t phys_addr)
 	return plane_vaddr_to_ptr(vaddr);
 }
 
+static struct hal_mmu_map_options test_map_options(
+	uint32_t prot,
+	enum hal_mmu_mapping_attr attr)
+{
+	return (struct hal_mmu_map_options){
+		.prot = prot,
+		.attr = attr,
+	};
+}
+
+static struct hal_mmu_map_options test_default_options(uint32_t prot)
+{
+	return hal_mmu_default_map_options(prot);
+}
+
 static bool test_pmap_map_in_root(uint64_t root,
 				  uint64_t vaddr,
 				  uint64_t phys_addr,
-				  uint32_t flags)
+				  struct hal_mmu_map_options options)
 {
 	return x86_64_pmap_map_page_in_owned_root(
 		test_paddr(root), test_vaddr(vaddr), test_paddr(phys_addr),
-		flags);
+		options);
 }
 
 static bool test_pmap_unmap_in_root(uint64_t root, uint64_t vaddr)
@@ -287,11 +303,11 @@ static bool test_pmap_clone_kernel_page_tables_skipping(
 
 static bool test_pmap_map_kernel_page(uint64_t vaddr,
 				      uint64_t phys_addr,
-				      uint32_t flags)
+				      struct hal_mmu_map_options options)
 {
 	return x86_64_pmap_map_kernel_page(test_vaddr(vaddr),
 					   test_paddr(phys_addr),
-					   flags);
+					   options);
 }
 
 static bool test_pmap_unmap_kernel_page(uint64_t vaddr)
@@ -299,17 +315,17 @@ static bool test_pmap_unmap_kernel_page(uint64_t vaddr)
 	return x86_64_pmap_unmap_kernel_page(test_vaddr(vaddr));
 }
 
-static bool test_pmap_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+static bool test_pmap_protect_kernel_page(uint64_t vaddr, uint32_t prot)
 {
-	return x86_64_pmap_protect_kernel_page(test_vaddr(vaddr), flags);
+	return x86_64_pmap_protect_kernel_page(test_vaddr(vaddr), prot);
 }
 
 static bool test_hal_map_kernel_page(uint64_t vaddr,
 				     uint64_t phys_addr,
-				     uint32_t flags)
+				     struct hal_mmu_map_options options)
 {
 	return hal_mmu_map_kernel_page(test_vaddr(vaddr), test_paddr(phys_addr),
-				       flags);
+				       options);
 }
 
 static bool test_hal_translate_kernel_page(uint64_t vaddr, uint64_t *phys_addr)
@@ -330,9 +346,9 @@ static bool test_hal_unmap_kernel_page(uint64_t vaddr)
 	return hal_mmu_unmap_kernel_page(test_vaddr(vaddr));
 }
 
-static bool test_hal_protect_kernel_page(uint64_t vaddr, uint32_t flags)
+static bool test_hal_protect_kernel_page(uint64_t vaddr, uint32_t prot)
 {
-	return hal_mmu_protect_kernel_page(test_vaddr(vaddr), flags);
+	return hal_mmu_protect_kernel_page(test_vaddr(vaddr), prot);
 }
 
 static uint64_t *test_kernel_pte(uint64_t vaddr)
@@ -353,28 +369,28 @@ static uint64_t *test_kernel_pte(uint64_t vaddr)
 
 #define hal_mmu_direct_phys_to_virt(phys_addr) \
 	test_direct_phys_to_virt((phys_addr))
-#define x86_64_pmap_map_page_in_owned_root(root, vaddr, phys_addr, flags) \
-	test_pmap_map_in_root((root), (vaddr), (phys_addr), (flags))
+#define x86_64_pmap_map_page_in_owned_root(root, vaddr, phys_addr, options) \
+	test_pmap_map_in_root((root), (vaddr), (phys_addr), (options))
 #define x86_64_pmap_unmap_page_in_owned_root(root, vaddr) \
 	test_pmap_unmap_in_root((root), (vaddr))
 #define x86_64_pmap_translate_in_root(root, vaddr, phys_addr) \
 	test_pmap_translate_in_root((root), (vaddr), (phys_addr))
 #define x86_64_pmap_clone_kernel_page_tables(source, out) \
 	test_pmap_clone_kernel_page_tables((source), (out))
-#define x86_64_pmap_map_kernel_page(vaddr, phys_addr, flags) \
-	test_pmap_map_kernel_page((vaddr), (phys_addr), (flags))
+#define x86_64_pmap_map_kernel_page(vaddr, phys_addr, options) \
+	test_pmap_map_kernel_page((vaddr), (phys_addr), (options))
 #define x86_64_pmap_unmap_kernel_page(vaddr) \
 	test_pmap_unmap_kernel_page((vaddr))
-#define x86_64_pmap_protect_kernel_page(vaddr, flags) \
-	test_pmap_protect_kernel_page((vaddr), (flags))
-#define hal_mmu_map_kernel_page(vaddr, phys_addr, flags) \
-	test_hal_map_kernel_page((vaddr), (phys_addr), (flags))
+#define x86_64_pmap_protect_kernel_page(vaddr, prot) \
+	test_pmap_protect_kernel_page((vaddr), (prot))
+#define hal_mmu_map_kernel_page(vaddr, phys_addr, options) \
+	test_hal_map_kernel_page((vaddr), (phys_addr), (options))
 #define hal_mmu_translate_kernel_page(vaddr, phys_addr) \
 	test_hal_translate_kernel_page((vaddr), (phys_addr))
 #define hal_mmu_unmap_kernel_page(vaddr) \
 	test_hal_unmap_kernel_page((vaddr))
-#define hal_mmu_protect_kernel_page(vaddr, flags) \
-	test_hal_protect_kernel_page((vaddr), (flags))
+#define hal_mmu_protect_kernel_page(vaddr, prot) \
+	test_hal_protect_kernel_page((vaddr), (prot))
 
 static int test_map_page_allocates_missing_path(void)
 {
@@ -390,7 +406,9 @@ static int test_map_page_allocates_missing_path(void)
 	failures += test_expect_bool("map missing path",
 				     x86_64_pmap_map_page_in_owned_root(
 					     test_page_phys(0), vaddr, phys,
-					     X86_64_PMAP_WRITE),
+					     test_default_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_u64("map allocated intermediate tables",
 				    allocated_page_count(), 3);
@@ -433,12 +451,16 @@ static int test_map_page_reuses_existing_tables(void)
 
 	failures += test_expect_bool("map first page",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
-							  vaddr, phys, 0),
+							  vaddr, phys,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_bool("map adjacent page",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  next_vaddr,
-							  next_phys, 0),
+							  next_phys,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_u64("map reuse allocation count",
 				    allocated_page_count(), 3);
@@ -456,7 +478,9 @@ static int test_active_kernel_map_invalidates(void)
 	failures += test_expect_bool("active map",
 				     x86_64_pmap_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     X86_64_PMAP_WRITE),
+					     test_default_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_u64("active map invalidates",
 				    invalidate_count, 1);
@@ -475,7 +499,9 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 	failures += test_expect_bool("protect setup map",
 				     x86_64_pmap_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     X86_64_PMAP_WRITE),
+					     test_default_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	pte = test_kernel_pte(vaddr);
 	failures += test_expect_u64("protect setup writable",
@@ -484,7 +510,8 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 	invalidate_count = 0;
 	invalidated_vaddr = UINTPTR_MAX;
 	failures += test_expect_bool("protect readonly",
-				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     x86_64_pmap_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("protect readonly clears write",
 				    *pte & X86_64_PAGING_ENTRY_WRITE, 0);
@@ -495,7 +522,9 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 
 	failures += test_expect_bool("protect writable",
 				     x86_64_pmap_protect_kernel_page(
-					     vaddr, X86_64_PMAP_WRITE),
+					     vaddr,
+					     PLANE_VM_PROT_READ |
+					     PLANE_VM_PROT_WRITE),
 				     true);
 	failures += test_expect_u64("protect writable sets write",
 				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
@@ -504,7 +533,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 	return failures;
 }
 
-static int test_cache_map_flags_encode_pte_cache_bits(void)
+static int test_cache_map_options_encode_pte_cache_bits(void)
 {
 	uint64_t device_vaddr = 0xffff800000402000ull;
 	uint64_t wc_vaddr = device_vaddr + PAGE_SIZE;
@@ -515,8 +544,10 @@ static int test_cache_map_flags_encode_pte_cache_bits(void)
 	failures += test_expect_bool("map device",
 				     x86_64_pmap_map_kernel_page(
 					     device_vaddr, 0x12345000ull,
-					     X86_64_PMAP_WRITE |
-						     X86_64_PMAP_DEVICE),
+					     test_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE,
+						     HAL_MMU_MAPPING_DEVICE)),
 				     true);
 	device_pte = test_kernel_pte(device_vaddr);
 	failures += test_expect_u64("device pcd",
@@ -532,7 +563,9 @@ static int test_cache_map_flags_encode_pte_cache_bits(void)
 	failures += test_expect_bool("map wc",
 				     hal_mmu_map_kernel_page(
 					     wc_vaddr, 0x12346000ull,
-					     HAL_MMU_MAP_WRITE_COMBINE),
+					     test_map_options(
+						     PLANE_VM_PROT_READ,
+						     HAL_MMU_MAPPING_WRITE_COMBINE)),
 				     true);
 	wc_pte = test_kernel_pte(wc_vaddr);
 	failures += test_expect_u64("wc pwt",
@@ -552,38 +585,41 @@ static int test_cache_flags_validate_and_protect_preserves_cache_bits(void)
 	uint64_t *pte;
 	int failures = 0;
 
-	failures += test_expect_bool("reject pmap cache conflict",
+	failures += test_expect_bool("reject pmap invalid attr",
 				     x86_64_pmap_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     X86_64_PMAP_DEVICE |
-						     X86_64_PMAP_WRITE_COMBINE),
+					     test_map_options(
+						     PLANE_VM_PROT_READ,
+						     (enum hal_mmu_mapping_attr)99)),
 				     false);
-	failures += test_expect_bool("reject hal cache conflict",
+	failures += test_expect_bool("reject hal invalid attr",
 				     hal_mmu_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     HAL_MMU_MAP_DEVICE |
-						     HAL_MMU_MAP_WRITE_COMBINE),
-				     false);
-	failures += test_expect_bool("reject hal unknown cache flag",
-				     hal_mmu_map_kernel_page(
-					     vaddr, 0x12345000ull, BIT(8)),
+					     test_map_options(
+						     PLANE_VM_PROT_READ,
+						     (enum hal_mmu_mapping_attr)99)),
 				     false);
 	test_pat_wc_ready = false;
 	failures += test_expect_bool("reject wc before pat init",
 				     hal_mmu_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     HAL_MMU_MAP_WRITE_COMBINE),
+					     test_map_options(
+						     PLANE_VM_PROT_READ,
+						     HAL_MMU_MAPPING_WRITE_COMBINE)),
 				     false);
 	test_pat_wc_ready = true;
 	failures += test_expect_bool("map device writable",
 				     hal_mmu_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     HAL_MMU_MAP_WRITE |
-						     HAL_MMU_MAP_DEVICE),
+					     test_map_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE,
+						     HAL_MMU_MAPPING_DEVICE)),
 				     true);
 	pte = test_kernel_pte(vaddr);
 	failures += test_expect_bool("protect readonly",
-				     hal_mmu_protect_kernel_page(vaddr, 0),
+				     hal_mmu_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("protect preserves pcd",
 				    *pte & X86_64_PAGING_ENTRY_PCD,
@@ -606,7 +642,9 @@ static int test_hal_kernel_page_wrappers(void)
 	failures += test_expect_bool("hal map",
 				     hal_mmu_map_kernel_page(
 					     vaddr, 0x12345000ull,
-					     HAL_MMU_MAP_WRITE),
+					     test_default_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_u64("hal map invalidates",
 				    invalidate_count, 1);
@@ -616,18 +654,21 @@ static int test_hal_kernel_page_wrappers(void)
 	failures += test_expect_u64("hal translate phys", phys,
 				    0x12345000ull);
 	failures += test_expect_bool("hal protect readonly",
-				     hal_mmu_protect_kernel_page(vaddr, 0),
+				     hal_mmu_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_bool("hal unmap",
 				     hal_mmu_unmap_kernel_page(vaddr), true);
 	failures += test_expect_u64("hal wrappers invalidate",
 				    invalidate_count, 3);
-	failures += test_expect_bool("hal reject flags",
+	failures += test_expect_bool("hal reject invalid attr",
 				     hal_mmu_map_kernel_page(vaddr,
 							     0x12345000ull,
-							     BIT(8)),
+							     test_map_options(
+								     PLANE_VM_PROT_READ,
+								     (enum hal_mmu_mapping_attr)99)),
 				     false);
-	failures += test_expect_bool("hal reject protect flags",
+	failures += test_expect_bool("hal reject invalid protect prot",
 				     hal_mmu_protect_kernel_page(vaddr,
 								 BIT(8)),
 				     false);
@@ -644,21 +685,23 @@ static int test_protect_page_rejects_invalid_paths(void)
 
 	failures += test_expect_bool("protect reject unaligned",
 				     x86_64_pmap_protect_kernel_page(vaddr + 1,
-								     0),
+								     PLANE_VM_PROT_READ),
 				     false);
-	failures += test_expect_bool("protect reject bad flags",
+	failures += test_expect_bool("protect reject bad prot",
 				     x86_64_pmap_protect_kernel_page(vaddr,
 								     BIT(31)),
 				     false);
 	failures += test_expect_bool("protect reject absent",
-				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     x86_64_pmap_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
 				     false);
 
 	pml4[X86_64_PAGING_PML4_INDEX(vaddr)] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
 	pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)] = 0x40000000ull | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE |
 				  X86_64_PAGING_ENTRY_PS;
 	failures += test_expect_bool("protect reject huge",
-				     x86_64_pmap_protect_kernel_page(vaddr, 0),
+				     x86_64_pmap_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("protect reject no invalidate",
 				    invalidate_count, 0);
@@ -673,23 +716,30 @@ static int test_map_page_rejects_invalid_inputs(void)
 	failures += test_expect_bool("map reject unaligned vaddr",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr + 1,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_bool("map reject unaligned phys",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12345001ull, 0),
+							  0x12345001ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
-	failures += test_expect_bool("map reject bad flags",
+	failures += test_expect_bool("map reject bad prot",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
 							  0x12345000ull,
-							  BIT(31)),
+							  test_default_options(
+								  BIT(31))),
 				     false);
 	failures += test_expect_bool("map reject unaligned root",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0) + 1,
 							  vaddr,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map invalid inputs allocate nothing",
 				    allocated_page_count(), 0);
@@ -705,12 +755,16 @@ static int test_map_page_rejects_existing_leaf(void)
 	failures += test_expect_bool("map original leaf",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_bool("map reject duplicate leaf",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12346000ull, 0),
+							  0x12346000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map duplicate does not allocate",
 				    allocated_page_count(), 3);
@@ -732,7 +786,9 @@ static int test_map_page_rejects_huge_intermediate(void)
 	failures += test_expect_bool("map reject huge intermediate",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map huge allocate nothing",
 				    allocated_page_count(), 0);
@@ -749,7 +805,9 @@ static int test_map_page_rolls_back_on_allocation_failure(void)
 	failures += test_expect_bool("map allocation failure",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map allocation rollback",
 				    allocated_page_count(), 0);
@@ -820,7 +878,9 @@ static int test_unmap_page_clears_leaf(void)
 	failures += test_expect_bool("unmap setup map",
 				     x86_64_pmap_map_page_in_owned_root(test_page_phys(0),
 							  vaddr,
-							  0x12345000ull, 0),
+							  0x12345000ull,
+							  test_default_options(
+								  PLANE_VM_PROT_READ)),
 				     true);
 	invalidate_count = 0;
 	invalidated_vaddr = UINTPTR_MAX;
@@ -855,7 +915,9 @@ static int test_active_kernel_unmap_invalidates(void)
 	failures += test_expect_bool("active unmap setup",
 				     x86_64_pmap_map_page_in_owned_root(
 					     test_page_phys(0), vaddr,
-					     0x12345000ull, 0),
+					     0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
 				     true);
 	invalidate_count = 0;
 	invalidated_vaddr = UINTPTR_MAX;
@@ -880,12 +942,16 @@ static int test_unmap_keeps_shared_tables_until_empty(void)
 	failures += test_expect_bool("shared setup first",
 				     x86_64_pmap_map_page_in_owned_root(
 					     test_page_phys(0), vaddr,
-					     0x12345000ull, 0),
+					     0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_bool("shared setup second",
 				     x86_64_pmap_map_page_in_owned_root(
 					     test_page_phys(0), next_vaddr,
-					     0x12346000ull, 0),
+					     0x12346000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_u64("shared setup tables",
 				    allocated_page_count(), 3);
@@ -1291,7 +1357,7 @@ int main(void)
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
 		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
-		TEST_CASE(test_cache_map_flags_encode_pte_cache_bits),
+		TEST_CASE(test_cache_map_options_encode_pte_cache_bits),
 		TEST_CASE(test_cache_flags_validate_and_protect_preserves_cache_bits),
 		TEST_CASE(test_hal_kernel_page_wrappers),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),

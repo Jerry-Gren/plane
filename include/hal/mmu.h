@@ -6,15 +6,28 @@
 #include <stdint.h>
 
 #include <plane/address.h>
-#include <plane/bits.h>
 
 struct plane_mem_info;
 
-enum hal_mmu_map_flags {
-	HAL_MMU_MAP_WRITE = BIT(0),
-	HAL_MMU_MAP_DEVICE = BIT(1),
-	HAL_MMU_MAP_WRITE_COMBINE = BIT(2),
+enum hal_mmu_mapping_attr {
+	HAL_MMU_MAPPING_DEFAULT,
+	HAL_MMU_MAPPING_DEVICE,
+	HAL_MMU_MAPPING_WRITE_COMBINE,
 };
+
+struct hal_mmu_map_options {
+	uint32_t prot;
+	enum hal_mmu_mapping_attr attr;
+};
+
+static inline struct hal_mmu_map_options hal_mmu_default_map_options(
+	uint32_t prot)
+{
+	return (struct hal_mmu_map_options){
+		.prot = prot,
+		.attr = HAL_MMU_MAPPING_DEFAULT,
+	};
+}
 
 #define HAL_MMU_INVALID_PHYS UINT64_MAX
 
@@ -52,11 +65,11 @@ plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr);
  */
 bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size);
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr, plane_paddr_t phys_addr,
-			     uint32_t flags);
+			     struct hal_mmu_map_options options);
 bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr);
 bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
 				   plane_paddr_t *phys_addr);
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags);
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot);
 
 void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr);
 void hal_mmu_flush_tlb_all(void);

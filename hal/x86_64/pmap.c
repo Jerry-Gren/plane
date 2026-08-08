@@ -10,6 +10,7 @@
 #include <plane/printk.h>
 #include <plane/pmm.h>
 #include <plane/util.h>
+#include <plane/vm_prot.h>
 
 static plane_paddr_t pmap_current_root_phys(void)
 {
@@ -269,6 +270,42 @@ static bool pmap_direct_map_pml4_range_available(uint64_t *root,
 	return true;
 }
 
+static bool pmap_mapping_attr_valid(enum hal_mmu_mapping_attr attr)
+{
+	return attr == HAL_MMU_MAPPING_DEFAULT ||
+	       attr == HAL_MMU_MAPPING_DEVICE ||
+	       attr == HAL_MMU_MAPPING_WRITE_COMBINE;
+}
+
+static bool pmap_map_options_valid(struct hal_mmu_map_options options)
+{
+	if (!plane_vm_prot_valid(options.prot) ||
+	    !pmap_mapping_attr_valid(options.attr)) {
+		return false;
+	}
+	return options.attr != HAL_MMU_MAPPING_WRITE_COMBINE ||
+	       x86_64_pat_write_combine_ready();
+}
+
+static uint64_t pmap_options_to_entry_flags(
+	struct hal_mmu_map_options options)
+{
+	uint64_t entry_flags = X86_64_PAGING_ENTRY_PRESENT;
+
+	if ((options.prot & PLANE_VM_PROT_WRITE) != 0) {
+		entry_flags |= X86_64_PAGING_ENTRY_WRITE;
+	}
+	if (options.attr == HAL_MMU_MAPPING_DEVICE) {
+		entry_flags |= X86_64_PAGING_ENTRY_PCD |
+			       X86_64_PAGING_ENTRY_PWT;
+	}
+	if (options.attr == HAL_MMU_MAPPING_WRITE_COMBINE) {
+		entry_flags |= X86_64_PAGING_ENTRY_PWT;
+	}
+
+	return entry_flags;
+}
+
 static void pmap_direct_map_rollback(uint64_t *root,
 				     plane_vaddr_t base,
 				     uint64_t size)
@@ -306,6 +343,8 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 	uint64_t *pdpt = NULL;
 	uint64_t current_pml4_index = UINT64_MAX;
 	uint64_t mapped = 0;
+	struct hal_mmu_map_options options = hal_mmu_default_map_options(
+		PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
 
 	if (!plane_paddr_is_page_aligned(root_pml4_phys) ||
 	    !plane_vaddr_is_page_aligned(base) ||
@@ -370,8 +409,7 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 		     pd_index++) {
 			pd[pd_index] = x86_64_paging_entry_make(
 				mapped,
-				X86_64_PAGING_ENTRY_PRESENT |
-				X86_64_PAGING_ENTRY_WRITE |
+				pmap_options_to_entry_flags(options) |
 				X86_64_PAGING_ENTRY_PS);
 			mapped += ARCH_LARGE_PAGE_SIZE;
 		}
@@ -409,48 +447,6 @@ static uint64_t pmap_leaf_phys(uint64_t entry, uint8_t level)
 	uint64_t leaf_size = pmap_leaf_size(level);
 
 	return x86_64_paging_entry_phys(entry) & ~(leaf_size - 1);
-}
-
-static uint64_t pmap_flags_to_entry_flags(uint32_t flags)
-{
-	uint64_t entry_flags = X86_64_PAGING_ENTRY_PRESENT;
-
-	if ((flags & X86_64_PMAP_WRITE) != 0) {
-		entry_flags |= X86_64_PAGING_ENTRY_WRITE;
-	}
-	if ((flags & X86_64_PMAP_DEVICE) != 0) {
-		entry_flags |= X86_64_PAGING_ENTRY_PCD |
-			       X86_64_PAGING_ENTRY_PWT;
-	}
-	if ((flags & X86_64_PMAP_WRITE_COMBINE) != 0) {
-		entry_flags |= X86_64_PAGING_ENTRY_PWT;
-	}
-
-	return entry_flags;
-}
-
-static bool pmap_map_flags_valid(uint32_t flags)
-{
-	const uint32_t known = X86_64_PMAP_WRITE |
-			       X86_64_PMAP_DEVICE |
-			       X86_64_PMAP_WRITE_COMBINE;
-
-	if ((flags & ~known) != 0) {
-		return false;
-	}
-	if ((flags & X86_64_PMAP_WRITE_COMBINE) != 0 &&
-	    !x86_64_pat_write_combine_ready()) {
-		return false;
-	}
-
-	return (flags & (X86_64_PMAP_DEVICE |
-			 X86_64_PMAP_WRITE_COMBINE)) !=
-	       (X86_64_PMAP_DEVICE | X86_64_PMAP_WRITE_COMBINE);
-}
-
-static bool pmap_protect_flags_valid(uint32_t flags)
-{
-	return (flags & ~X86_64_PMAP_WRITE) == 0;
 }
 
 static void pmap_free_allocated_tables(struct pmap_allocated_table *tables,
@@ -504,7 +500,7 @@ static bool pmap_alloc_child_table(uint64_t *parent,
 bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 					plane_vaddr_t vaddr,
 					plane_paddr_t phys_addr,
-					uint32_t flags)
+					struct hal_mmu_map_options options)
 {
 	struct pmap_allocated_table allocated[3];
 	uint64_t allocated_count = 0;
@@ -515,7 +511,7 @@ bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 
 	if (!plane_vaddr_is_page_aligned(vaddr) ||
 	    !plane_paddr_is_page_aligned(phys_addr) ||
-	    !pmap_map_flags_valid(flags) ||
+	    !pmap_map_options_valid(options) ||
 	    !plane_paddr_is_page_aligned(root_pml4_phys)) {
 		return false;
 	}
@@ -567,7 +563,7 @@ bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 
 	table[pt_index] =
 		x86_64_paging_entry_make(raw_phys,
-					 pmap_flags_to_entry_flags(flags));
+					 pmap_options_to_entry_flags(options));
 	return true;
 }
 
@@ -682,10 +678,10 @@ bool x86_64_pmap_translate_in_root(plane_paddr_t root_pml4_phys,
 
 bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
 				 plane_paddr_t phys_addr,
-				 uint32_t flags)
+				 struct hal_mmu_map_options options)
 {
 	if (!x86_64_pmap_map_page_in_owned_root(pmap_current_root_phys(),
-						vaddr, phys_addr, flags)) {
+						vaddr, phys_addr, options)) {
 		return false;
 	}
 
@@ -711,7 +707,7 @@ bool x86_64_pmap_translate_kernel_page(plane_vaddr_t vaddr,
 					     vaddr, phys_addr);
 }
 
-bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
+bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	plane_paddr_t current_phys = pmap_current_root_phys();
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
@@ -720,7 +716,7 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 	uint64_t index;
 
 	if (!plane_vaddr_is_page_aligned(vaddr) ||
-	    !pmap_protect_flags_valid(flags)) {
+	    !plane_vm_prot_valid(prot)) {
 		return false;
 	}
 
@@ -753,7 +749,7 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 	}
 
 	entry &= ~X86_64_PAGING_ENTRY_WRITE;
-	if ((flags & X86_64_PMAP_WRITE) != 0) {
+	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
 		entry |= X86_64_PAGING_ENTRY_WRITE;
 	}
 	table[index] = entry;
@@ -763,29 +759,9 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     uint32_t flags)
+			     struct hal_mmu_map_options options)
 {
-	uint32_t pmap_flags = 0;
-
-	if ((flags & ~(HAL_MMU_MAP_WRITE |
-		       HAL_MMU_MAP_DEVICE |
-		       HAL_MMU_MAP_WRITE_COMBINE)) != 0 ||
-	    (flags & (HAL_MMU_MAP_DEVICE |
-		      HAL_MMU_MAP_WRITE_COMBINE)) ==
-		    (HAL_MMU_MAP_DEVICE | HAL_MMU_MAP_WRITE_COMBINE)) {
-		return false;
-	}
-	if ((flags & HAL_MMU_MAP_WRITE) != 0) {
-		pmap_flags |= X86_64_PMAP_WRITE;
-	}
-	if ((flags & HAL_MMU_MAP_DEVICE) != 0) {
-		pmap_flags |= X86_64_PMAP_DEVICE;
-	}
-	if ((flags & HAL_MMU_MAP_WRITE_COMBINE) != 0) {
-		pmap_flags |= X86_64_PMAP_WRITE_COMBINE;
-	}
-
-	return x86_64_pmap_map_kernel_page(vaddr, phys_addr, pmap_flags);
+	return x86_64_pmap_map_kernel_page(vaddr, phys_addr, options);
 }
 
 bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
@@ -798,18 +774,9 @@ bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr, plane_paddr_t *phys_addr
 	return x86_64_pmap_translate_kernel_page(vaddr, phys_addr);
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
-	uint32_t pmap_flags = 0;
-
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0) {
-		return false;
-	}
-	if ((flags & HAL_MMU_MAP_WRITE) != 0) {
-		pmap_flags |= X86_64_PMAP_WRITE;
-	}
-
-	return x86_64_pmap_protect_kernel_page(vaddr, pmap_flags);
+	return x86_64_pmap_protect_kernel_page(vaddr, prot);
 }
 
 bool hal_mmu_take_kernel_page_table_ownership(void)

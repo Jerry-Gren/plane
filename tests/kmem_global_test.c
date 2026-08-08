@@ -36,7 +36,7 @@ struct plane_page {
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
-	uint32_t flags;
+	uint32_t prot;
 	bool used;
 };
 
@@ -192,11 +192,12 @@ bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     uint32_t flags)
+			     struct hal_mmu_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 ||
+	if (!plane_vm_prot_valid(options.prot) ||
+	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
@@ -205,7 +206,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 		if (!test_mappings[i].used) {
 			test_mappings[i].vaddr = raw_vaddr;
 			test_mappings[i].phys_addr = plane_paddr_raw(phys_addr);
-			test_mappings[i].flags = flags;
+			test_mappings[i].prot = options.prot;
 			test_mappings[i].used = true;
 			return true;
 		}
@@ -226,15 +227,15 @@ bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
+bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
-	if ((flags & ~HAL_MMU_MAP_WRITE) != 0 || mapping == NULL) {
+	if (!plane_vm_prot_valid(prot) || mapping == NULL) {
 		return false;
 	}
 
-	mapping->flags = flags;
+	mapping->prot = prot;
 	return true;
 }
 
@@ -675,8 +676,9 @@ static int test_global_kmem_init_is_one_shot(void)
 	if (mapping != NULL) {
 		mapped_phys = mapping->phys_addr;
 		failures += test_expect_u32("global fault starts writable",
-					    mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 		failures += test_expect_bool("global fault unmap",
 					     hal_mmu_unmap_kernel_page(
 						     plane_vaddr_make(
@@ -698,9 +700,10 @@ static int test_global_kmem_init_is_one_shot(void)
 			failures += test_expect_u64("global fault remap phys",
 						    mapping->phys_addr,
 						    mapped_phys);
-			failures += test_expect_u32("global fault remap flags",
-						    mapping->flags,
-						    HAL_MMU_MAP_WRITE);
+			failures += test_expect_u32("global fault remap prot",
+						    mapping->prot,
+						    PLANE_VM_PROT_READ |
+							    PLANE_VM_PROT_WRITE);
 		}
 	}
 	failures += test_expect_u64("global fault mapped count",
@@ -742,7 +745,8 @@ static int test_global_kmem_init_is_one_shot(void)
 	if (mapping != NULL) {
 		mapped_phys = mapping->phys_addr;
 		failures += test_expect_u32("global readonly starts ro",
-					    mapping->flags, 0);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ);
 		failures += test_expect_bool("global readonly write fault",
 					     plane_kmem_fault_page(
 						     plane_vaddr_make(
@@ -759,8 +763,8 @@ static int test_global_kmem_init_is_one_shot(void)
 				"global readonly phys unchanged",
 				mapping->phys_addr, mapped_phys);
 			failures += test_expect_u32(
-				"global readonly flags unchanged",
-				mapping->flags, 0);
+				"global readonly prot unchanged",
+				mapping->prot, PLANE_VM_PROT_READ);
 		}
 	}
 	failures += test_expect_bool("global readonly free",
@@ -793,8 +797,9 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_not_null("global lazy mapped", mapping);
 	if (mapping != NULL) {
 		failures += test_expect_u32("global lazy mapping writable",
-					    mapping->flags,
-					    HAL_MMU_MAP_WRITE);
+					    mapping->prot,
+					    PLANE_VM_PROT_READ |
+						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_u64("global lazy fault backing",
 				    allocated_page_count(), init_allocated + 1);

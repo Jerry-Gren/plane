@@ -16,17 +16,6 @@ struct plane_vm_fault_state {
 	bool wired_resident_hit;
 };
 
-static uint32_t prot_to_map_flags(uint32_t prot)
-{
-	uint32_t flags = 0;
-
-	if ((prot & PLANE_VM_PROT_WRITE) != 0) {
-		flags |= HAL_MMU_MAP_WRITE;
-	}
-
-	return flags;
-}
-
 static bool page_phys_valid(plane_paddr_t phys_addr)
 {
 	return !plane_paddr_equal(phys_addr, PLANE_VM_PAGE_NO_PHYS) &&
@@ -143,7 +132,8 @@ static bool fault_enter_pmap(const struct plane_vm_fault_state *state)
 {
 	plane_paddr_t page_phys = plane_vm_page_phys(state->page);
 	plane_paddr_t mapped_phys;
-	uint32_t map_flags = prot_to_map_flags(state->info.prot);
+	struct hal_mmu_map_options options =
+		hal_mmu_default_map_options(state->info.prot);
 
 	if (!page_phys_valid(page_phys)) {
 		return false;
@@ -153,11 +143,11 @@ static bool fault_enter_pmap(const struct plane_vm_fault_state *state)
 					  &mapped_phys)) {
 		return plane_paddr_equal(mapped_phys, page_phys) &&
 		       hal_mmu_protect_kernel_page(state->info.page_vaddr,
-						   map_flags);
+						   state->info.prot);
 	}
 
 	return hal_mmu_map_kernel_page(state->info.page_vaddr, page_phys,
-				       map_flags);
+				       options);
 }
 
 static void fault_cleanup_new_page(struct plane_vm_fault_state *state)
