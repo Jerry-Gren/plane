@@ -861,7 +861,7 @@ static int test_readonly_alloc_maps_without_write_flag(void)
 	mapping = find_mapping(TEST_KMEM_BASE);
 	failures += test_expect_not_null("readonly mapping", mapping);
 	if (mapping != NULL) {
-		failures += test_expect_u32("readonly mapping flags",
+		failures += test_expect_u32("readonly mapping prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("readonly backing pages",
@@ -951,7 +951,7 @@ static int test_readonly_allocation_can_be_promoted_to_writable(void)
 					     addr, 1, PLANE_VM_PROT_DEFAULT),
 				     true);
 	if (mapping != NULL) {
-		failures += test_expect_u32("readonly promote flags",
+		failures += test_expect_u32("readonly promote prot",
 					    mapping->prot,
 					    PLANE_VM_PROT_READ |
 						    PLANE_VM_PROT_WRITE);
@@ -1313,7 +1313,7 @@ static int test_lazy_readonly_fault_protection(void)
 	mapping = find_mapping(TEST_KMEM_BASE);
 	failures += test_expect_not_null("lazy readonly mapping", mapping);
 	if (mapping != NULL) {
-		failures += test_expect_u32("lazy readonly flags",
+		failures += test_expect_u32("lazy readonly prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("lazy readonly backing",

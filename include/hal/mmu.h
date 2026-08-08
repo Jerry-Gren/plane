@@ -32,32 +32,28 @@ static inline struct hal_mmu_map_options hal_mmu_default_map_options(
 #define HAL_MMU_INVALID_PHYS UINT64_MAX
 
 /*
- * Kernel direct map.
+ * Kernel physmap.
  *
  * This is the long-lived kernel phys-to-virt window, not a per-call mapper
  * and not a boot-protocol handoff window. The mapping must already exist
  * before this API is enabled.
  *
- * Installing a boot bridge disables the conversion helpers until the direct
- * map is enabled again. Enabling derives the runtime coverage required by the
- * memory map and validates it against both the boot bridge and the architecture
- * window. Boot-protocol direct maps remain temporary bridges until page-table
- * ownership rebuilds the Plane-owned direct-map subtree.
+ * Enabling derives the runtime RAM-like coverage required by the memory map.
+ * Architecture code owns bootstrap physmap setup and later rebuilds the
+ * Plane-owned physmap subtree during page-table ownership handoff.
  */
-uint64_t hal_mmu_direct_map_window_size(void);
-void hal_mmu_set_boot_direct_map(plane_vaddr_t base, uint64_t size);
-bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem);
+bool hal_mmu_enable_physmap(const struct plane_mem_info *mem);
 
 /*
- * Take ownership of the active kernel page-table tree after the direct map
+ * Take ownership of the active kernel page-table tree after the physmap
  * and PMM are available. This preserves ordinary kernel mappings, skips
- * boot-protocol direct-map bridges, and installs Plane's owned direct map.
+ * bootstrap physmap mappings, and installs Plane's owned physmap.
  */
 bool hal_mmu_take_kernel_page_table_ownership(void);
-plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr);
-plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t hal_mmu_physmap_phys_to_virt(plane_paddr_t phys_addr);
+plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						uint64_t size);
-plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr);
+plane_paddr_t hal_mmu_physmap_virt_to_phys(plane_vaddr_t vaddr);
 
 /*
  * Kernel dynamic mapping window. The HAL reports the architecture-owned

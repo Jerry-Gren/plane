@@ -1,4 +1,4 @@
-#include "msr_internal.h"
+#include <x86_64/msr_internal.h>
 
 uint64_t x86_64_msr_read(uint32_t msr)
 {

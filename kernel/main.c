@@ -25,8 +25,8 @@ void kmain(struct boot_info *info)
 
 	BUG_ON_MSG(!plane_sanitize_memory_map(&info->mem),
 		   "failed to sanitize boot memory map");
-	BUG_ON_MSG(!hal_mmu_enable_direct_map(&info->mem),
-		   "failed to enable kernel direct map");
+	BUG_ON_MSG(!hal_mmu_enable_physmap(&info->mem),
+		   "failed to enable kernel physmap");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
 	if (info->release_framebuffer_boot_mapping != NULL) {

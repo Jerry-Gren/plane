@@ -669,7 +669,7 @@ static int test_fault_miss_allocates_zero_page_and_maps(void)
 					    mapping->phys_addr,
 					    test_paddr_raw(
 						    plane_vm_page_phys(page)));
-		failures += test_expect_u32("fault miss map flags",
+		failures += test_expect_u32("fault miss map prot",
 					    mapping->prot,
 					    PLANE_VM_PROT_READ |
 						    PLANE_VM_PROT_WRITE);
@@ -740,7 +740,7 @@ static int test_fault_resident_hit_repairs_absent_pmap(void)
 				    last_grab_flags, 0);
 	failures += test_expect_u64("fault hit map calls", map_call_count, 1);
 	if (mapping != NULL) {
-		failures += test_expect_u32("fault hit readonly flags",
+		failures += test_expect_u32("fault hit readonly prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
@@ -784,7 +784,7 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 	failures += test_expect_u64("fault protect calls",
 				    protect_call_count, 1);
 	if (mapping != NULL) {
-		failures += test_expect_u32("fault protect flags",
+		failures += test_expect_u32("fault protect prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	return failures;
@@ -827,7 +827,7 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 	failures += test_expect_not_null("fault protect fail mapping",
 					 mapping);
 	if (mapping != NULL) {
-		failures += test_expect_u32("fault protect fail flags",
+		failures += test_expect_u32("fault protect fail prot",
 					    mapping->prot,
 					    PLANE_VM_PROT_READ |
 						    PLANE_VM_PROT_WRITE);
@@ -1408,12 +1408,12 @@ static int test_fault_pages_repairs_and_protects_resident_pages(void)
 	failures += test_expect_u64("range repair protect calls",
 				    protect_call_count, 1);
 	if (first_mapping != NULL) {
-		failures += test_expect_u32("range repair first flags",
+		failures += test_expect_u32("range repair first prot",
 					    first_mapping->prot,
 					    PLANE_VM_PROT_READ);
 	}
 	if (second_mapping != NULL) {
-		failures += test_expect_u32("range repair second flags",
+		failures += test_expect_u32("range repair second prot",
 					    second_mapping->prot,
 					    PLANE_VM_PROT_READ);
 	}
@@ -1562,12 +1562,12 @@ static int test_fault_wire_pages_wires_resident_hits_and_repairs_pmap(void)
 	failures += test_expect_u64("fault wire hit protect calls",
 				    protect_call_count, 1);
 	if (first_mapping != NULL) {
-		failures += test_expect_u32("fault wire hit first flags",
+		failures += test_expect_u32("fault wire hit first prot",
 					    first_mapping->prot,
 					    PLANE_VM_PROT_READ);
 	}
 	if (second_mapping != NULL) {
-		failures += test_expect_u32("fault wire hit second flags",
+		failures += test_expect_u32("fault wire hit second prot",
 					    second_mapping->prot,
 					    PLANE_VM_PROT_READ);
 	}
@@ -1630,7 +1630,7 @@ static int test_fault_wire_pages_rolls_back_wiring_on_failure(void)
 	failures += test_expect_not_null("fault wire fail second mapping",
 					 second_mapping);
 	if (second_mapping != NULL) {
-		failures += test_expect_u32("fault wire fail second flags",
+		failures += test_expect_u32("fault wire fail second prot",
 					    second_mapping->prot,
 					    PLANE_VM_PROT_READ |
 						    PLANE_VM_PROT_WRITE);

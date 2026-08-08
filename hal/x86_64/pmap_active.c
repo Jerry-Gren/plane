@@ -1,5 +1,6 @@
 #include <hal/x86_64/arch_mmu.h>
-#include <hal/x86_64/pmap.h>
+
+#include <x86_64/pmap_internal.h>
 
 plane_paddr_t x86_64_pmap_active_root_phys(void)
 {

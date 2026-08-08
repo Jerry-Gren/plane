@@ -4,7 +4,6 @@
 
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
-#include <hal/x86_64/mmu_internal.h>
 #include <hal/x86_64/pmap.h>
 #include <plane/compiler.h>
 #include <plane/mm.h>
@@ -12,6 +11,8 @@
 #include <plane/vm_prot.h>
 
 #include "support/test.h"
+#include <x86_64/physmap_internal.h>
+#include <x86_64/pmap_internal.h>
 
 #define TEST_PAGE_COUNT 720
 #define TEST_ALLOC_START_PAGE 16
@@ -21,14 +22,14 @@ static uint8_t phys_storage[TEST_PHYS_SIZE] __aligned(PAGE_SIZE);
 static bool page_allocated[TEST_PAGE_COUNT];
 static uint64_t alloc_attempts;
 static uint64_t alloc_fail_after;
-static uint64_t direct_map_blocked_phys;
+static uint64_t physmap_blocked_phys;
 static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
 static uint64_t flush_count;
 static bool test_pat_wc_ready;
-static plane_vaddr_t test_direct_map_base;
-static uint64_t test_direct_map_size;
-static bool test_direct_map_initialized;
+static plane_vaddr_t test_physmap_base;
+static uint64_t test_physmap_size;
+static bool test_physmap_initialized;
 
 static uint64_t test_page_phys(uint64_t page)
 {
@@ -89,17 +90,17 @@ static void reset_pmap_test(void)
 	memset(page_allocated, 0, sizeof(page_allocated));
 	alloc_attempts = 0;
 	alloc_fail_after = UINT64_MAX;
-	direct_map_blocked_phys = UINT64_MAX;
+	physmap_blocked_phys = UINT64_MAX;
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
 	flush_count = 0;
 	test_pat_wc_ready = true;
-	test_direct_map_base = test_vaddr(X86_64_DIRECT_MAP_BASE);
-	test_direct_map_size = ARCH_HUGE_PAGE_SIZE;
-	test_direct_map_initialized = true;
+	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
+	test_physmap_size = ARCH_HUGE_PAGE_SIZE;
+	test_physmap_initialized = true;
 }
 
-plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						uint64_t size)
 {
 	uint64_t raw = test_paddr_raw(phys_addr);
@@ -114,18 +115,18 @@ plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
 		return plane_vaddr_make(0);
 	}
 
-	if (direct_map_blocked_phys != UINT64_MAX &&
-	    raw < direct_map_blocked_phys + PAGE_SIZE &&
-	    end > direct_map_blocked_phys) {
+	if (physmap_blocked_phys != UINT64_MAX &&
+	    raw < physmap_blocked_phys + PAGE_SIZE &&
+	    end > physmap_blocked_phys) {
 		return plane_vaddr_make(0);
 	}
 
 	return plane_vaddr_from_ptr(&phys_storage[raw]);
 }
 
-plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t hal_mmu_physmap_phys_to_virt(plane_paddr_t phys_addr)
 {
-	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
+	return hal_mmu_physmap_phys_range_to_virt(phys_addr, 1);
 }
 
 void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
@@ -189,29 +190,28 @@ bool x86_64_pat_write_combine_ready(void)
 	return test_pat_wc_ready;
 }
 
-bool x86_64_mmu_direct_map_runtime(
-	struct x86_64_mmu_direct_map_runtime *runtime)
+bool x86_64_physmap_get_runtime(struct x86_64_physmap_runtime *runtime)
 {
-	if (runtime == NULL || !test_direct_map_initialized) {
+	if (runtime == NULL || !test_physmap_initialized) {
 		return false;
 	}
 
-	runtime->boot_base = test_direct_map_base;
-	runtime->boot_bridge_size = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
-	runtime->required_size = test_direct_map_size;
-	runtime->owned_window_size = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
+	runtime->bootstrap_base = test_physmap_base;
+	runtime->bootstrap_size = X86_64_PHYSMAP_BOOTSTRAP_SIZE;
+	runtime->required_size = test_physmap_size;
+	runtime->owned_window_size = X86_64_PHYSMAP_BOOTSTRAP_SIZE;
 	runtime->owned_pml4_count = 1;
 	return true;
 }
 
-void x86_64_mmu_commit_owned_direct_map(void)
+void x86_64_physmap_commit_owned(void)
 {
-	test_direct_map_base = test_vaddr(X86_64_DIRECT_MAP_BASE);
+	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
 }
 
-static void *test_direct_phys_to_virt(uint64_t phys_addr)
+static void *test_physmap_phys_to_virt(uint64_t phys_addr)
 {
-	plane_vaddr_t vaddr = hal_mmu_direct_phys_to_virt(
+	plane_vaddr_t vaddr = hal_mmu_physmap_phys_to_virt(
 		test_paddr(phys_addr));
 
 	if (plane_vaddr_is_null(vaddr)) {
@@ -358,17 +358,17 @@ static uint64_t *test_kernel_pte(uint64_t vaddr)
 	uint64_t *pd;
 	uint64_t *pt;
 
-	pdpt = test_direct_phys_to_virt(
+	pdpt = test_physmap_phys_to_virt(
 		pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
-	pd = test_direct_phys_to_virt(
+	pd = test_physmap_phys_to_virt(
 		pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
-	pt = test_direct_phys_to_virt(
+	pt = test_physmap_phys_to_virt(
 		pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
 	return &pt[X86_64_PAGING_PT_INDEX(vaddr)];
 }
 
-#define hal_mmu_direct_phys_to_virt(phys_addr) \
-	test_direct_phys_to_virt((phys_addr))
+#define hal_mmu_physmap_phys_to_virt(phys_addr) \
+	test_physmap_phys_to_virt((phys_addr))
 #define x86_64_pmap_map_page_in_owned_root(root, vaddr, phys_addr, options) \
 	test_pmap_map_in_root((root), (vaddr), (phys_addr), (options))
 #define x86_64_pmap_unmap_page_in_owned_root(root, vaddr) \
@@ -417,9 +417,9 @@ static int test_map_page_allocates_missing_path(void)
 	failures += test_expect_u64("root map leaves invalidated vaddr",
 				    invalidated_vaddr, UINTPTR_MAX);
 
-	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
-	pd = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
-	pt = hal_mmu_direct_phys_to_virt(pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
+	pdpt = hal_mmu_physmap_phys_to_virt(pte_phys(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]));
+	pd = hal_mmu_physmap_phys_to_virt(pte_phys(pdpt[X86_64_PAGING_PDPT_INDEX(vaddr)]));
+	pt = hal_mmu_physmap_phys_to_virt(pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
 	failures += test_expect_u64("map pml4 flags",
 				    pte_flags(pml4[X86_64_PAGING_PML4_INDEX(vaddr)]),
 				    X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE);
@@ -533,7 +533,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 	return failures;
 }
 
-static int test_cache_map_options_encode_pte_cache_bits(void)
+static int test_mapping_attrs_encode_pte_cache_bits(void)
 {
 	uint64_t device_vaddr = 0xffff800000402000ull;
 	uint64_t wc_vaddr = device_vaddr + PAGE_SIZE;
@@ -579,7 +579,7 @@ static int test_cache_map_options_encode_pte_cache_bits(void)
 	return failures;
 }
 
-static int test_cache_flags_validate_and_protect_preserves_cache_bits(void)
+static int test_mapping_attrs_validate_and_protect_preserves_cache_bits(void)
 {
 	uint64_t vaddr = 0xffff800000402000ull;
 	uint64_t *pte;
@@ -1028,13 +1028,13 @@ static int test_clone_copies_4k_leaf_path(void)
 	failures += test_expect_u64("clone 4k allocated tables",
 				    allocated_page_count(), 4);
 
-	new_pml4 = hal_mmu_direct_phys_to_virt(new_pml4_phys);
+	new_pml4 = hal_mmu_physmap_phys_to_virt(new_pml4_phys);
 	new_pdpt_phys = pte_phys(new_pml4[1]);
-	new_pdpt = hal_mmu_direct_phys_to_virt(new_pdpt_phys);
+	new_pdpt = hal_mmu_physmap_phys_to_virt(new_pdpt_phys);
 	new_pd_phys = pte_phys(new_pdpt[2]);
-	new_pd = hal_mmu_direct_phys_to_virt(new_pd_phys);
+	new_pd = hal_mmu_physmap_phys_to_virt(new_pd_phys);
 	new_pt_phys = pte_phys(new_pd[3]);
-	new_pt = hal_mmu_direct_phys_to_virt(new_pt_phys);
+	new_pt = hal_mmu_physmap_phys_to_virt(new_pt_phys);
 
 	failures += test_expect_bool("clone pml4 child replaced",
 				     new_pdpt_phys != test_page_phys(1), true);
@@ -1079,9 +1079,9 @@ static int test_clone_preserves_huge_leaf_entries(void)
 	failures += test_expect_u64("clone huge allocated tables",
 				    allocated_page_count(), 3);
 
-	new_pml4 = hal_mmu_direct_phys_to_virt(new_pml4_phys);
-	new_pdpt = hal_mmu_direct_phys_to_virt(pte_phys(new_pml4[0]));
-	new_pd = hal_mmu_direct_phys_to_virt(pte_phys(new_pdpt[2]));
+	new_pml4 = hal_mmu_physmap_phys_to_virt(new_pml4_phys);
+	new_pdpt = hal_mmu_physmap_phys_to_virt(pte_phys(new_pml4[0]));
+	new_pd = hal_mmu_physmap_phys_to_virt(pte_phys(new_pdpt[2]));
 
 	failures += test_expect_u64("clone 1g leaf", new_pdpt[1], pdpt[1]);
 	failures += test_expect_u64("clone 2m leaf", new_pd[7], pd[7]);
@@ -1089,7 +1089,7 @@ static int test_clone_preserves_huge_leaf_entries(void)
 	return failures;
 }
 
-static int test_clone_skips_direct_map_pml4_ranges(void)
+static int test_clone_skips_physmap_pml4_ranges(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t *ordinary_pdpt = test_table(3);
@@ -1097,19 +1097,19 @@ static int test_clone_skips_direct_map_pml4_ranges(void)
 	uint64_t *new_pml4;
 	struct x86_64_pmap_skip_range skip[2] = {
 		{
-			.base = test_vaddr(X86_64_DIRECT_MAP_BASE),
+			.base = test_vaddr(X86_64_PHYSMAP_BASE),
 			.size = ARCH_HUGE_PAGE_SIZE,
 		},
 		{
-			.base = test_vaddr(X86_64_DIRECT_MAP_BASE +
-					   X86_64_DIRECT_MAP_WINDOW_SIZE),
+			.base = test_vaddr(X86_64_PHYSMAP_BASE +
+					   X86_64_PHYSMAP_WINDOW_SIZE),
 			.size = ARCH_HUGE_PAGE_SIZE,
 		},
 	};
 	uint64_t final_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
 	uint64_t boot_index = X86_64_PAGING_PML4_INDEX(
-		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_WINDOW_SIZE);
+		X86_64_PHYSMAP_BASE + X86_64_PHYSMAP_WINDOW_SIZE);
 	int failures = 0;
 
 	pml4[final_index] = test_page_phys(1) |
@@ -1127,15 +1127,15 @@ static int test_clone_skips_direct_map_pml4_ranges(void)
 			   X86_64_PAGING_ENTRY_PS;
 
 	failures += test_expect_bool(
-		"clone skip direct ranges",
+		"clone skip physmap ranges",
 		test_pmap_clone_kernel_page_tables_skipping(
 			test_page_phys(0), skip, 2, &new_pml4_phys),
 		true);
-	new_pml4 = hal_mmu_direct_phys_to_virt(new_pml4_phys);
+	new_pml4 = hal_mmu_physmap_phys_to_virt(new_pml4_phys);
 
-	failures += test_expect_u64("clone skips final direct map",
+	failures += test_expect_u64("clone skips final physmap",
 				    new_pml4[final_index], 0);
-	failures += test_expect_u64("clone skips boot direct map",
+	failures += test_expect_u64("clone skips boot physmap",
 				    new_pml4[boot_index], 0);
 	failures += test_expect_bool("clone keeps ordinary pml4",
 				     x86_64_paging_entry_present(new_pml4[0]),
@@ -1144,7 +1144,7 @@ static int test_clone_skips_direct_map_pml4_ranges(void)
 	return failures;
 }
 
-static int test_direct_map_builder_uses_2m_leaves(void)
+static int test_physmap_builder_uses_2m_leaves(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t *pdpt;
@@ -1152,22 +1152,22 @@ static int test_direct_map_builder_uses_2m_leaves(void)
 	uint64_t *pd1;
 	uint64_t size = ARCH_HUGE_PAGE_SIZE + ARCH_LARGE_PAGE_SIZE;
 	uint64_t pml4_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
 	int failures = 0;
 
 	failures += test_expect_bool(
-		"build direct map",
-		x86_64_pmap_build_direct_map_in_owned_root(
+		"build physmap",
+		x86_64_pmap_build_physmap_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE), size,
-			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
+			test_vaddr(X86_64_PHYSMAP_BASE), size,
+			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		true);
-	failures += test_expect_u64("build direct map allocations",
+	failures += test_expect_u64("build physmap allocations",
 				    allocated_page_count(), 3);
 
-	pdpt = hal_mmu_direct_phys_to_virt(pte_phys(pml4[pml4_index]));
-	pd0 = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[0]));
-	pd1 = hal_mmu_direct_phys_to_virt(pte_phys(pdpt[1]));
+	pdpt = hal_mmu_physmap_phys_to_virt(pte_phys(pml4[pml4_index]));
+	pd0 = hal_mmu_physmap_phys_to_virt(pte_phys(pdpt[0]));
+	pd1 = hal_mmu_physmap_phys_to_virt(pte_phys(pdpt[1]));
 
 	failures += test_expect_u64(
 		"build first 2m leaf",
@@ -1188,24 +1188,24 @@ static int test_direct_map_builder_uses_2m_leaves(void)
 	return failures;
 }
 
-static int test_direct_map_builder_crosses_pml4_slots(void)
+static int test_physmap_builder_crosses_pml4_slots(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t size = X86_64_PAGING_PML4_SLOT_SIZE + ARCH_LARGE_PAGE_SIZE;
 	uint64_t first_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
 	uint64_t second_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE +
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE +
 					 X86_64_PAGING_PML4_SLOT_SIZE);
 	uint64_t *second_pdpt;
 	uint64_t *second_pd;
 	int failures = 0;
 
 	failures += test_expect_bool(
-		"build direct map crosses pml4",
-		x86_64_pmap_build_direct_map_in_owned_root(
+		"build physmap crosses pml4",
+		x86_64_pmap_build_physmap_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE), size,
+			test_vaddr(X86_64_PHYSMAP_BASE), size,
 			2 * X86_64_PAGING_PML4_SLOT_SIZE),
 		true);
 	failures += test_expect_bool("first pml4 present",
@@ -1217,9 +1217,9 @@ static int test_direct_map_builder_crosses_pml4_slots(void)
 					     pml4[second_index]),
 				     true);
 
-	second_pdpt = hal_mmu_direct_phys_to_virt(
+	second_pdpt = hal_mmu_physmap_phys_to_virt(
 		pte_phys(pml4[second_index]));
-	second_pd = hal_mmu_direct_phys_to_virt(pte_phys(second_pdpt[0]));
+	second_pd = hal_mmu_physmap_phys_to_virt(pte_phys(second_pdpt[0]));
 	failures += test_expect_u64(
 		"second pml4 first leaf",
 		second_pd[0],
@@ -1233,35 +1233,35 @@ static int test_direct_map_builder_crosses_pml4_slots(void)
 	return failures;
 }
 
-static int test_direct_map_builder_failure_rolls_back(void)
+static int test_physmap_builder_failure_rolls_back(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t pml4_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
 	int failures = 0;
 
 	alloc_fail_after = 1;
 	failures += test_expect_bool(
-		"build direct map allocation failure",
-		x86_64_pmap_build_direct_map_in_owned_root(
+		"build physmap allocation failure",
+		x86_64_pmap_build_physmap_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE),
+			test_vaddr(X86_64_PHYSMAP_BASE),
 			ARCH_HUGE_PAGE_SIZE,
-			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
+			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		false);
-	failures += test_expect_u64("build direct map rollback entry",
+	failures += test_expect_u64("build physmap rollback entry",
 				    pml4[pml4_index], 0);
-	failures += test_expect_u64("build direct map rollback allocations",
+	failures += test_expect_u64("build physmap rollback allocations",
 				    allocated_page_count(), 0);
 
 	return failures;
 }
 
-static int test_direct_map_builder_rejects_existing_range(void)
+static int test_physmap_builder_rejects_existing_range(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t pml4_index =
-		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
 	int failures = 0;
 
 	pml4[pml4_index] = test_page_phys(1) |
@@ -1269,36 +1269,36 @@ static int test_direct_map_builder_rejects_existing_range(void)
 			   X86_64_PAGING_ENTRY_WRITE;
 
 	failures += test_expect_bool(
-		"build direct map existing range",
-		x86_64_pmap_build_direct_map_in_owned_root(
+		"build physmap existing range",
+		x86_64_pmap_build_physmap_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE),
+			test_vaddr(X86_64_PHYSMAP_BASE),
 			ARCH_HUGE_PAGE_SIZE,
-			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
+			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		false);
-	failures += test_expect_u64("build direct map preserves existing",
+	failures += test_expect_u64("build physmap preserves existing",
 				    pml4[pml4_index],
 				    test_page_phys(1) |
 				    X86_64_PAGING_ENTRY_PRESENT |
 				    X86_64_PAGING_ENTRY_WRITE);
-	failures += test_expect_u64("build direct map existing no alloc",
+	failures += test_expect_u64("build physmap existing no alloc",
 				    allocated_page_count(), 0);
 
 	return failures;
 }
 
-static int test_direct_map_builder_rejects_non_final_base(void)
+static int test_physmap_builder_rejects_non_final_base(void)
 {
 	int failures = 0;
 
 	failures += test_expect_bool(
-		"build direct map rejects non-final base",
-		x86_64_pmap_build_direct_map_in_owned_root(
+		"build physmap rejects non-final base",
+		x86_64_pmap_build_physmap_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE +
-				   X86_64_DIRECT_MAP_WINDOW_SIZE),
+			test_vaddr(X86_64_PHYSMAP_BASE +
+				   X86_64_PHYSMAP_WINDOW_SIZE),
 			ARCH_HUGE_PAGE_SIZE,
-			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
+			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		false);
 	failures += test_expect_u64("build non-final base no alloc",
 				    allocated_page_count(), 0);
@@ -1331,20 +1331,20 @@ static int test_clone_failure_releases_allocated_tables(void)
 	return failures;
 }
 
-static int test_clone_direct_map_failure_releases_allocated_tables(void)
+static int test_clone_physmap_failure_releases_allocated_tables(void)
 {
 	uint64_t *pml4 = test_table(0);
 	uint64_t new_pml4_phys = UINT64_MAX;
 	int failures = 0;
 
 	pml4[0] = test_page_phys(1) | X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE;
-	direct_map_blocked_phys = test_page_phys(1);
+	physmap_blocked_phys = test_page_phys(1);
 
-	failures += test_expect_bool("clone direct-map failure",
+	failures += test_expect_bool("clone physmap failure",
 				     x86_64_pmap_clone_kernel_page_tables(
 					     test_page_phys(0), &new_pml4_phys),
 				     false);
-	failures += test_expect_u64("clone direct-map rollback",
+	failures += test_expect_u64("clone physmap rollback",
 				    allocated_page_count(), 0);
 
 	return failures;
@@ -1357,8 +1357,8 @@ int main(void)
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
 		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
-		TEST_CASE(test_cache_map_options_encode_pte_cache_bits),
-		TEST_CASE(test_cache_flags_validate_and_protect_preserves_cache_bits),
+		TEST_CASE(test_mapping_attrs_encode_pte_cache_bits),
+		TEST_CASE(test_mapping_attrs_validate_and_protect_preserves_cache_bits),
 		TEST_CASE(test_hal_kernel_page_wrappers),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),
@@ -1372,14 +1372,14 @@ int main(void)
 		TEST_CASE(test_unmap_page_rejects_invalid_paths),
 		TEST_CASE(test_clone_copies_4k_leaf_path),
 		TEST_CASE(test_clone_preserves_huge_leaf_entries),
-		TEST_CASE(test_clone_skips_direct_map_pml4_ranges),
-		TEST_CASE(test_direct_map_builder_uses_2m_leaves),
-		TEST_CASE(test_direct_map_builder_crosses_pml4_slots),
-		TEST_CASE(test_direct_map_builder_failure_rolls_back),
-		TEST_CASE(test_direct_map_builder_rejects_existing_range),
-		TEST_CASE(test_direct_map_builder_rejects_non_final_base),
+		TEST_CASE(test_clone_skips_physmap_pml4_ranges),
+		TEST_CASE(test_physmap_builder_uses_2m_leaves),
+		TEST_CASE(test_physmap_builder_crosses_pml4_slots),
+		TEST_CASE(test_physmap_builder_failure_rolls_back),
+		TEST_CASE(test_physmap_builder_rejects_existing_range),
+		TEST_CASE(test_physmap_builder_rejects_non_final_base),
 		TEST_CASE(test_clone_failure_releases_allocated_tables),
-		TEST_CASE(test_clone_direct_map_failure_releases_allocated_tables),
+		TEST_CASE(test_clone_physmap_failure_releases_allocated_tables),
 	};
 
 	return test_run_cases_with_fixture("x86_64_pmap_test", cases,

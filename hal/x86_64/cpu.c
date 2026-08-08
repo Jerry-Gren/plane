@@ -2,7 +2,7 @@
 #include <hal/x86_64/cpu_features.h>
 #include <hal/x86_64/msr_defs.h>
 
-#include "msr_internal.h"
+#include <x86_64/msr_internal.h>
 
 #include <stddef.h>
 #include <stdint.h>

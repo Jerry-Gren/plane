@@ -15,12 +15,12 @@ uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGING_TABLE_ENTRIES];
 static uintptr_t invalidated_vaddrs[X86_64_PAGING_TABLE_ENTRIES];
 static uint64_t invalidate_count;
 static uint64_t flush_count;
-static bool direct_map_available;
+static bool physmap_available;
 
-plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						uint64_t size)
 {
-	if (!direct_map_available || size != ARCH_PAGE_SIZE) {
+	if (!physmap_available || size != ARCH_PAGE_SIZE) {
 		return plane_vaddr_make(0);
 	}
 
@@ -49,7 +49,7 @@ static void reset_state(void)
 	memset(invalidated_vaddrs, 0, sizeof(invalidated_vaddrs));
 	invalidate_count = 0;
 	flush_count = 0;
-	direct_map_available = true;
+	physmap_available = true;
 }
 
 static void reset_invalidation_state(void)
@@ -77,7 +77,7 @@ static uint64_t framebuffer_page_flags(void)
 	       X86_64_PAGING_ENTRY_PS;
 }
 
-static int page_directory_untouched(void)
+static int page_physmapory_untouched(void)
 {
 	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
 		if (x86_64_mb2_early_pd_fb[i] != 0 ||
@@ -143,7 +143,7 @@ static int check_map_failure(const char *name, uint64_t phys_addr,
 	failures += test_expect_u64("failure leaves out address unchanged",
 				    plane_vaddr_raw(vaddr), 0xfeedface);
 	failures += test_expect_bool("failure leaves page directories untouched",
-				     page_directory_untouched(), true);
+				     page_physmapory_untouched(), true);
 	failures += test_expect_u64("failure does not invalidate tlb",
 				    invalidate_count, 0);
 
@@ -285,7 +285,7 @@ static int test_rejects_invalid_unmappings(void)
 	return failures;
 }
 
-static int test_unmap_rejects_missing_direct_map(void)
+static int test_unmap_rejects_missing_physmap(void)
 {
 	uint64_t start_idx =
 		X86_64_PAGING_PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
@@ -295,18 +295,18 @@ static int test_unmap_rejects_missing_direct_map(void)
 	reset_state();
 	target_pd = framebuffer_target_pd();
 	target_pd[start_idx] = 0x123000 | framebuffer_page_flags();
-	direct_map_available = false;
+	physmap_available = false;
 
-	failures += test_expect_bool("reject missing direct map",
+	failures += test_expect_bool("reject missing physmap",
 				     x86_64_mb2_early_unmap_framebuffer(
 					     plane_vaddr_make(
 						     X86_64_MB2_FRAMEBUFFER_VMA_BASE),
 					     ARCH_LARGE_PAGE_SIZE),
 				     false);
-	failures += test_expect_u64("missing direct map keeps pde",
+	failures += test_expect_u64("missing physmap keeps pde",
 				    target_pd[start_idx],
 				    0x123000 | framebuffer_page_flags());
-	failures += test_expect_u64("missing direct map no invalidate",
+	failures += test_expect_u64("missing physmap no invalidate",
 				    invalidate_count, 0);
 
 	return failures;
@@ -399,7 +399,7 @@ int main(void)
 		TEST_CASE(test_rejects_invalid_mappings),
 		TEST_CASE(test_unmaps_unaligned_framebuffer),
 		TEST_CASE(test_rejects_invalid_unmappings),
-		TEST_CASE(test_unmap_rejects_missing_direct_map),
+		TEST_CASE(test_unmap_rejects_missing_physmap),
 		TEST_CASE(test_unmap_preflight_rejects_absent_or_non_large_pde),
 		TEST_CASE(test_remove_identity_mapping_flushes_all),
 	};

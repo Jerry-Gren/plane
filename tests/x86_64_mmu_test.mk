@@ -1,1 +1,1 @@
-x86_64_mmu_test_DEPS := hal/x86_64/mmu.c
+x86_64_mmu_test_DEPS := hal/x86_64/mmu.c hal/x86_64/physmap_internal.h

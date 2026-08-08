@@ -11,6 +11,7 @@ BUILD_MODE_FILE := build/.build_mode
 
 override CFLAGS += \
 	-I$(ROOT_DIR)/include \
+	-I$(ROOT_DIR)/hal \
 	-std=gnu11 \
 	-Wall -Wextra -Werror \
 	-ffreestanding \
@@ -30,6 +31,7 @@ override CFLAGS += \
 
 override HOSTCFLAGS += \
 	-I$(ROOT_DIR)/include \
+	-I$(ROOT_DIR)/hal \
 	-std=gnu11 \
 	-Wall -Wextra -Werror
 
@@ -50,6 +52,9 @@ endif
 
 ifeq ($(CONFIG_BOOT_LIMINE),y)
     SRC_DIRS += boot/limine
+	ifeq ($(CONFIG_X86_64),y)
+        SRC_DIRS += hal/x86_64/boot/limine
+    endif
     LINKER_SCRIPT := hal/x86_64/linker_limine.lds
 endif
 

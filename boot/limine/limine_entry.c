@@ -3,8 +3,9 @@
 #include <stdbool.h>
 #include <limine.h>
 
+#include <boot/limine/limine_arch.h>
+
 #include <hal/cpu.h>
-#include <hal/mmu.h>
 #include <hal/serial.h>
 
 #include <plane/boot_info.h>
@@ -61,27 +62,37 @@ static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_
 __used __section(".limine_requests_end")
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
 
-static plane_paddr_t boot_limine_framebuffer_phys_addr(plane_vaddr_t vaddr)
+static plane_paddr_t boot_limine_framebuffer_phys_addr(
+	const struct boot_limine_arch_handoff *handoff,
+	plane_vaddr_t vaddr)
 {
-	uint64_t hhdm_offset = hhdm_request.response->offset;
-	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
+	plane_paddr_t phys_addr;
+	uint64_t hhdm_base = 0;
+
+	if (handoff != NULL) {
+		hhdm_base = plane_vaddr_raw(handoff->hhdm_base);
+	}
 
 	/*
 	 * Runtime framebuffer access is handed off to plane_io_map(), but
 	 * Limine only gives Plane a framebuffer VA. The current handoff assumes
-	 * that VA lives in the HHDM/direct-map window, making phys = va - HHDM.
+	 * that VA lives in Limine's HHDM bootstrap mapping, making phys =
+	 * va - HHDM.
 	 * If a future boot environment violates that, use the memmap framebuffer
 	 * entry to resolve the physical address instead of silently guessing.
 	 */
-	BUG_ON_MSG(raw_vaddr < hhdm_offset,
+	BUG_ON_MSG(!boot_limine_arch_hhdm_virt_to_phys(handoff, vaddr,
+						       &phys_addr),
 		   "limine framebuffer VA is not in HHDM: vaddr=0x%016llx hhdm=0x%016llx",
-		   (unsigned long long)raw_vaddr,
-		   (unsigned long long)hhdm_offset);
+		   (unsigned long long)plane_vaddr_raw(vaddr),
+		   (unsigned long long)hhdm_base);
 
-	return plane_paddr_make(raw_vaddr - hhdm_offset);
+	return phys_addr;
 }
 
-static void boot_limine_collect_framebuffer(struct plane_video_info *video)
+static void boot_limine_collect_framebuffer(
+	struct plane_video_info *video,
+	const struct boot_limine_arch_handoff *handoff)
 {
 	BUG_ON_MSG(framebuffer_request.response == NULL,
 		   "limine framebuffer response missing");
@@ -130,7 +141,8 @@ static void boot_limine_collect_framebuffer(struct plane_video_info *video)
 
 	video->framebuffer_addr = plane_vaddr_make((uint64_t)fb->address);
 	video->framebuffer_phys_addr =
-		boot_limine_framebuffer_phys_addr(video->framebuffer_addr);
+		boot_limine_framebuffer_phys_addr(handoff,
+						  video->framebuffer_addr);
 	video->framebuffer_size = fb_size;
 	video->width            = fb->width;
 	video->height           = fb->height;
@@ -198,13 +210,12 @@ static void boot_limine_collect_memmap(struct plane_mem_info *mem)
 	}
 }
 
-static void boot_limine_collect_hhdm(void)
+static void boot_limine_collect_hhdm(
+	struct boot_limine_arch_handoff *handoff)
 {
 	BUG_ON_MSG(hhdm_request.response == NULL,
 		   "limine HHDM response missing");
-	hal_mmu_set_boot_direct_map(
-		plane_vaddr_make(hhdm_request.response->offset),
-		hal_mmu_direct_map_window_size());
+	handoff->hhdm_base = plane_vaddr_make(hhdm_request.response->offset);
 }
 
 static void boot_limine_collect_smp(struct plane_smp_info *smp)
@@ -273,9 +284,12 @@ void _start(void)
 		   "limine base revision is not supported");
 
 	struct boot_info b_info = {0};
+	struct boot_limine_arch_handoff arch_handoff = {0};
 
-	boot_limine_collect_hhdm();
-	boot_limine_collect_framebuffer(&b_info.video);
+	boot_limine_collect_hhdm(&arch_handoff);
+	BUG_ON_MSG(!boot_limine_arch_init_handoff(&arch_handoff),
+		   "failed to initialize limine arch handoff");
+	boot_limine_collect_framebuffer(&b_info.video, &arch_handoff);
 	boot_limine_collect_memmap(&b_info.mem);
 	boot_limine_collect_smp(&b_info.smp);
 	b_info.start_aps = boot_limine_smp_start_aps;

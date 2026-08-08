@@ -13,12 +13,12 @@
 #include "../kernel/mm/vm_page_internal.h"
 #include "../kernel/mm/vm_zone_internal.h"
 
-static bool direct_map_available = true;
-#define DIRECT_MAP_STORAGE_SIZE (1024 * 1024)
+static bool physmap_available = true;
+#define PHYSMAP_STORAGE_SIZE (1024 * 1024)
 #define TEST_GUARD_BOOTSTRAP_COUNT 64
 #define TEST_GUARD_EXTRA_COUNT 4
-static uint64_t direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
-static uint8_t direct_map_storage[DIRECT_MAP_STORAGE_SIZE]
+static uint64_t physmap_limit = PHYSMAP_STORAGE_SIZE;
+static uint8_t physmap_storage[PHYSMAP_STORAGE_SIZE]
 	__aligned(PAGE_SIZE);
 static uint8_t extra_guard_storage[PAGE_SIZE] __aligned(PAGE_SIZE);
 static struct plane_vm_zone_segment extra_guard_segment;
@@ -38,32 +38,32 @@ static uint64_t test_page_phys_raw(const struct plane_page *page)
 	return plane_paddr_raw(plane_vm_page_phys(page));
 }
 
-plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						uint64_t size)
 {
 	uint64_t raw = plane_paddr_raw(phys_addr);
 
-	if (!direct_map_available || size == 0 ||
-	    raw > direct_map_limit ||
-	    size > direct_map_limit - raw ||
-	    raw > DIRECT_MAP_STORAGE_SIZE ||
-	    size > DIRECT_MAP_STORAGE_SIZE - raw) {
+	if (!physmap_available || size == 0 ||
+	    raw > physmap_limit ||
+	    size > physmap_limit - raw ||
+	    raw > PHYSMAP_STORAGE_SIZE ||
+	    size > PHYSMAP_STORAGE_SIZE - raw) {
 		return plane_vaddr_make(0);
 	}
 
-	return plane_vaddr_from_ptr(&direct_map_storage[raw]);
+	return plane_vaddr_from_ptr(&physmap_storage[raw]);
 }
 
-plane_vaddr_t hal_mmu_direct_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t hal_mmu_physmap_phys_to_virt(plane_paddr_t phys_addr)
 {
-	return hal_mmu_direct_phys_range_to_virt(phys_addr, 1);
+	return hal_mmu_physmap_phys_range_to_virt(phys_addr, 1);
 }
 
-static void reset_direct_map_stub(void)
+static void reset_physmap_stub(void)
 {
-	direct_map_available = true;
-	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
-	memset(direct_map_storage, 0, sizeof(direct_map_storage));
+	physmap_available = true;
+	physmap_limit = PHYSMAP_STORAGE_SIZE;
+	memset(physmap_storage, 0, sizeof(physmap_storage));
 	memset(extra_guard_storage, 0, sizeof(extra_guard_storage));
 	extra_guard_segment = (struct plane_vm_zone_segment){0};
 }
@@ -85,19 +85,19 @@ static int check_phys_bytes(const char *name,
 			    uint8_t expected,
 			    uint64_t length)
 {
-	if (phys_addr > DIRECT_MAP_STORAGE_SIZE ||
-	    length > DIRECT_MAP_STORAGE_SIZE - phys_addr) {
-		test_fail("%s out of direct-map test storage", name);
+	if (phys_addr > PHYSMAP_STORAGE_SIZE ||
+	    length > PHYSMAP_STORAGE_SIZE - phys_addr) {
+		test_fail("%s out of physmap test storage", name);
 		return 1;
 	}
 
 	for (uint64_t i = 0; i < length; i++) {
-		if (direct_map_storage[phys_addr + i] != expected) {
+		if (physmap_storage[phys_addr + i] != expected) {
 			test_fail("%s offset=%llu expected=%u actual=%u",
 				  name,
 				  (unsigned long long)i,
 				  expected,
-				  direct_map_storage[phys_addr + i]);
+				  physmap_storage[phys_addr + i]);
 			return 1;
 		}
 	}
@@ -879,7 +879,7 @@ static int test_plain_allocation_does_not_zero_page(void)
 	failures += test_expect_bool("plain zero init", plane_pmm_init(&mem),
 				     true);
 
-	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
+	memset(&physmap_storage[0x2000], 0xa5, PAGE_SIZE);
 	failures += test_expect_bool("plain alloc",
 				plane_pmm_alloc_page_phys(&phys), true);
 	failures += test_expect_u64("plain alloc phys", test_paddr_raw(phys),
@@ -900,7 +900,7 @@ static int test_zeroed_single_page_allocation(void)
 	failures += test_expect_bool("zero page init", plane_pmm_init(&mem),
 				     true);
 
-	memset(&direct_map_storage[0x2000], 0xa5, PAGE_SIZE);
+	memset(&physmap_storage[0x2000], 0xa5, PAGE_SIZE);
 	failures += test_expect_bool("zero page alloc",
 				plane_vm_page_grab(PLANE_VM_PAGE_GRAB_ZERO,
 						   &page),
@@ -924,8 +924,8 @@ static int test_zeroed_multi_page_allocation(void)
 	failures += test_expect_bool("zero multi init", plane_pmm_init(&mem),
 				     true);
 
-	memset(&direct_map_storage[0x2000], 0xa5, 3 * PAGE_SIZE);
-	memset(&direct_map_storage[0x5000], 0x5a, PAGE_SIZE);
+	memset(&physmap_storage[0x2000], 0xa5, 3 * PAGE_SIZE);
+	memset(&physmap_storage[0x5000], 0x5a, PAGE_SIZE);
 	failures += test_expect_bool("zero multi alloc",
 				plane_pmm_alloc_pages_phys_flags(
 					3, 1, PLANE_PMM_ALLOC_ZERO, &phys),
@@ -940,7 +940,7 @@ static int test_zeroed_multi_page_allocation(void)
 	return failures;
 }
 
-static int test_zeroed_allocation_rolls_back_without_direct_map(void)
+static int test_zeroed_allocation_rolls_back_without_physmap(void)
 {
 	struct plane_mem_info mem = {0};
 	struct plane_pmm_stats stats;
@@ -951,12 +951,12 @@ static int test_zeroed_allocation_rolls_back_without_direct_map(void)
 	failures += test_expect_bool("zero rollback init", plane_pmm_init(&mem),
 				     true);
 
-	direct_map_available = false;
+	physmap_available = false;
 	failures += test_expect_bool("zero rollback alloc",
 				plane_pmm_alloc_pages_phys_flags(
 					1, 1, PLANE_PMM_ALLOC_ZERO, &phys),
 				false);
-	direct_map_available = true;
+	physmap_available = true;
 
 	stats = plane_pmm_get_stats();
 	failures += check_stats("zero rollback stats", &stats,
@@ -985,12 +985,12 @@ static int test_zeroed_allocation_rolls_back_without_range_coverage(void)
 	failures += test_expect_bool("zero range rollback init",
 				     plane_pmm_init(&mem), true);
 
-	direct_map_limit = 0x2800;
+	physmap_limit = 0x2800;
 	failures += test_expect_bool("zero range rollback alloc",
 				plane_pmm_alloc_pages_phys_flags(
 					1, 1, PLANE_PMM_ALLOC_ZERO, &phys),
 				false);
-	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
+	physmap_limit = PHYSMAP_STORAGE_SIZE;
 
 	stats = plane_pmm_get_stats();
 	failures += check_stats("zero range rollback stats", &stats,
@@ -1240,16 +1240,16 @@ static int test_free_rejects_invalid_ranges(void)
 	return failures;
 }
 
-static int test_init_fails_without_direct_map(void)
+static int test_init_fails_without_physmap(void)
 {
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
-	direct_map_available = false;
-	failures += test_expect_bool("direct map missing init",
+	physmap_available = false;
+	failures += test_expect_bool("physmap missing init",
 				plane_pmm_init(&mem), false);
-	direct_map_available = true;
+	physmap_available = true;
 
 	return failures;
 }
@@ -1260,10 +1260,10 @@ static int test_init_fails_without_metadata_range_coverage(void)
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
-	direct_map_limit = 0x1001;
+	physmap_limit = 0x1001;
 	failures += test_expect_bool("metadata range missing init",
 				plane_pmm_init(&mem), false);
-	direct_map_limit = DIRECT_MAP_STORAGE_SIZE;
+	physmap_limit = PHYSMAP_STORAGE_SIZE;
 
 	return failures;
 }
@@ -1288,7 +1288,7 @@ int main(void)
 		TEST_CASE(test_plain_allocation_does_not_zero_page),
 		TEST_CASE(test_zeroed_single_page_allocation),
 		TEST_CASE(test_zeroed_multi_page_allocation),
-		TEST_CASE(test_zeroed_allocation_rolls_back_without_direct_map),
+		TEST_CASE(test_zeroed_allocation_rolls_back_without_physmap),
 		TEST_CASE(test_zeroed_allocation_rolls_back_without_range_coverage),
 		TEST_CASE(test_allocation_flags_reject_unknown_bits),
 		TEST_CASE(test_single_page_free_reuses_lowest_address),
@@ -1298,11 +1298,11 @@ int main(void)
 		TEST_CASE(test_multi_page_phys_api_updates_metadata),
 		TEST_CASE(test_free_merges_ranges),
 		TEST_CASE(test_free_rejects_invalid_ranges),
-		TEST_CASE(test_init_fails_without_direct_map),
+		TEST_CASE(test_init_fails_without_physmap),
 		TEST_CASE(test_init_fails_without_metadata_range_coverage),
 	};
 
 	return test_run_cases_with_fixture("pmm_test", cases,
 					   TEST_ARRAY_SIZE(cases),
-					   reset_direct_map_stub, NULL);
+					   reset_physmap_stub, NULL);
 }

@@ -8,8 +8,8 @@
 /*
  * Boot-only framebuffer mapping.
  *
- * This is a pre-kmain Multiboot2 handoff bridge with a dedicated framebuffer
- * VMA, not a general MMIO mapper. kmain releases this bridge before cloning
+ * This is a pre-kmain Multiboot2 bootstrap mapping with a dedicated framebuffer
+ * VMA, not a general MMIO mapper. kmain releases this mapping before cloning
  * PMM-owned kernel page tables; runtime framebuffer use is then remapped
  * through plane_io_map after kmem/io-map init.
  */
@@ -32,9 +32,9 @@ static uint64_t *mb2_framebuffer_pd(void)
 	return target_pd;
 }
 
-static uint64_t *mb2_framebuffer_pd_direct_map(void)
+static uint64_t *mb2_framebuffer_pd_physmap(void)
 {
-	plane_vaddr_t vaddr = hal_mmu_direct_phys_range_to_virt(
+	plane_vaddr_t vaddr = hal_mmu_physmap_phys_range_to_virt(
 		plane_paddr_make((uint64_t)mb2_framebuffer_pd()),
 		ARCH_PAGE_SIZE);
 
@@ -144,7 +144,7 @@ bool x86_64_mb2_early_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 {
 	uint64_t start_idx;
 	uint64_t page_count;
-	uint64_t *target_pd = mb2_framebuffer_pd_direct_map();
+	uint64_t *target_pd = mb2_framebuffer_pd_physmap();
 	uint64_t start_base_idx =
 		X86_64_PAGING_PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
 

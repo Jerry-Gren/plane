@@ -59,11 +59,11 @@ mb2_info:  .long 0
 x86_64_mb2_early_pml4:      .skip ARCH_PAGE_SIZE
 early_pdpt_ident:           .skip ARCH_PAGE_SIZE
 early_pdpt_high:            .skip ARCH_PAGE_SIZE
-early_pdpt_direct:          .skip ARCH_PAGE_SIZE
+early_pdpt_physmap:          .skip ARCH_PAGE_SIZE
 early_pd_ident:             .skip ARCH_PAGE_SIZE
 x86_64_mb2_early_pd_kernel: .skip ARCH_PAGE_SIZE
 x86_64_mb2_early_pd_fb:     .skip ARCH_PAGE_SIZE
-early_pd_direct:            .skip (X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
+early_pd_physmap:            .skip (X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
 
 .align 16
 stack_bottom:
@@ -144,9 +144,9 @@ _start:
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, (X86_64_PAGING_PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
 
-    mov $early_pdpt_direct, %eax
+    mov $early_pdpt_physmap, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
-    mov %eax, (X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE) * 8)(%edi)
+    mov %eax, (X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE) * 8)(%edi)
 
     /* PDPT */
     mov $early_pdpt_ident, %edi
@@ -165,16 +165,16 @@ _start:
     mov %eax, (X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
 
-    mov $early_pdpt_direct, %edi
-    mov $early_pd_direct, %eax
+    mov $early_pdpt_physmap, %edi
+    mov $early_pd_physmap, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
-    mov $(X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
-.Lfill_direct_pdpt:
+    mov $(X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
+.Lfill_physmap_pdpt:
     mov %eax, (%edi)
     movl $0, 4(%edi)
     add $ARCH_PAGE_SIZE, %eax
     add $8, %edi
-    loop .Lfill_direct_pdpt
+    loop .Lfill_physmap_pdpt
 
     /* PDT */
     mov mb2_info, %ebx /* cpuinfo will overwrite ebx, load manually */
@@ -213,15 +213,15 @@ _start:
     add $8, %edi
     loop .Lfill_kernel_pd
 
-    mov $early_pd_direct, %edi
+    mov $early_pd_physmap, %edi
     mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
-    mov $(X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
-.Lfill_direct_pd:
+    mov $(X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
+.Lfill_physmap_pd:
     mov %eax, (%edi)
     movl $0, 4(%edi)
     add $ARCH_LARGE_PAGE_SIZE, %eax
     add $8, %edi
-    loop .Lfill_direct_pd
+    loop .Lfill_physmap_pd
 
     /* CR3 = PML4 */
     mov $x86_64_mb2_early_pml4, %eax

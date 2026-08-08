@@ -47,7 +47,7 @@ bool plane_sanitize_memory_map(struct plane_mem_info *mem)
 	return mem != NULL;
 }
 
-bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
+bool hal_mmu_enable_physmap(const struct plane_mem_info *mem)
 {
 	return mem != NULL;
 }
