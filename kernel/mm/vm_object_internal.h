@@ -13,6 +13,10 @@ struct plane_vm_zone_segment;
  *
  * VM page wire/unwire uses these to keep resident object accounting in sync,
  * mirroring XNU's object-side wired page accounting boundary.
+ * VM object owns its refcount, resident list, resident counts, hint, zone
+ * allocation, and resident hash locking. The lock order inside this owner is
+ * object lock before resident hash lock; resident hash rehome remains a
+ * startup-only operation and is not a concurrent resize path.
  */
 bool plane_vm_object_page_became_wired(struct plane_vm_object *object);
 bool plane_vm_object_page_became_unwired(struct plane_vm_object *object);

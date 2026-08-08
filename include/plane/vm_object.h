@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <plane/spinlock.h>
+
 /*
  * Resident VM object metadata.
  *
@@ -20,11 +22,14 @@
  * boundary in Plane's reduced metadata allocator.
  *
  * A plane_vm_object must be zero-initialized before its first init call.
+ * VM object locking is internal to the VM object owner. Callers must not take
+ * or inspect the embedded lock directly.
  */
 
 struct plane_page;
 
 struct plane_vm_object {
+	struct plane_spinlock lock;
 	uint64_t offset_limit;
 	uint64_t ref_count;
 	uint64_t resident_page_count;

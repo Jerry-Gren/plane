@@ -208,10 +208,15 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 	return true;
 }
 
+static struct plane_page *resident_head(const struct plane_vm_object *object)
+{
+	return object->resident_head;
+}
+
 static void cleanup_vm_object(struct plane_vm_object *object)
 {
-	while (object->initialized && object->resident_head != NULL) {
-		struct plane_page *page = object->resident_head;
+	while (object->initialized && resident_head(object) != NULL) {
+		struct plane_page *page = resident_head(object);
 		struct plane_page *removed;
 
 		removed = plane_vm_object_remove_page(object,
@@ -220,6 +225,16 @@ static void cleanup_vm_object(struct plane_vm_object *object)
 			break;
 		}
 	}
+}
+
+static void clear_resident_hint(struct plane_vm_object *object)
+{
+	object->resident_hint = NULL;
+}
+
+static struct plane_page *resident_hint(const struct plane_vm_object *object)
+{
+	return object->resident_hint;
 }
 
 static void reset_vm_object_test(void)
@@ -792,13 +807,13 @@ static int test_lookup_small_object_scans_resident_list(void)
 					     &test_object, 2 * PAGE_SIZE,
 					     &third_allocated_page),
 				     true);
-	test_object.resident_hint = NULL;
+	clear_resident_hint(&test_object);
 	failures += test_expect_ptr("small object list lookup",
 				    plane_vm_object_lookup_page(&test_object,
 								2 * PAGE_SIZE),
 				    &third_allocated_page);
 	failures += test_expect_ptr("small object updates hint",
-				    test_object.resident_hint,
+				    resident_hint(&test_object),
 				    &third_allocated_page);
 	return failures;
 }
@@ -819,7 +834,7 @@ static int test_lookup_large_object_uses_hash(void)
 						     &hash_pages[i]),
 					     true);
 	}
-	test_object.resident_hint = NULL;
+	clear_resident_hint(&test_object);
 	failures += test_expect_ptr("large object hash lookup",
 				    plane_vm_object_lookup_page(
 					    &test_object,
@@ -827,7 +842,7 @@ static int test_lookup_large_object_uses_hash(void)
 					    PAGE_SIZE),
 				    &hash_pages[TEST_HASH_PAGE_COUNT - 1]);
 	failures += test_expect_ptr("large object updates hint",
-				    test_object.resident_hint,
+				    resident_hint(&test_object),
 				    &hash_pages[TEST_HASH_PAGE_COUNT - 1]);
 	return failures;
 }

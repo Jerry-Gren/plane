@@ -47,10 +47,15 @@ static uint64_t map_attempts;
 static uint64_t map_fail_after;
 static uint32_t last_grab_flags;
 
+static struct plane_page *test_object_resident_head(void)
+{
+	return test_object.resident_head;
+}
+
 static void cleanup_test_object(void)
 {
-	while (test_object.initialized && test_object.resident_head != NULL) {
-		struct plane_page *page = test_object.resident_head;
+	while (test_object.initialized && test_object_resident_head() != NULL) {
+		struct plane_page *page = test_object_resident_head();
 		struct plane_page *removed;
 
 		removed = plane_vm_object_remove_page(&test_object,

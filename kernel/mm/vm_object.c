@@ -1,6 +1,7 @@
 #include <plane/mm.h>
 #include <plane/printk.h>
 #include <plane/compiler.h>
+#include <plane/spinlock.h>
 #include <plane/vm_page.h>
 #include <plane/vm_object.h>
 
@@ -26,11 +27,13 @@
 static struct plane_page *bootstrap_resident_hash_buckets[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
 static struct plane_page **resident_hash = bootstrap_resident_hash_buckets;
 static uint64_t resident_hash_bucket_count = PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS;
+static struct plane_spinlock resident_hash_lock = PLANE_SPINLOCK_INIT;
 static struct plane_vm_object bootstrap_object_pool[PLANE_VM_OBJECT_POOL_SIZE];
 static struct plane_vm_zone_segment bootstrap_object_segment;
 static struct plane_vm_zone object_zone;
+static struct plane_spinlock object_zone_lock = PLANE_SPINLOCK_INIT;
 
-static bool ensure_object_zone(void)
+static bool ensure_object_zone_locked(void)
 {
 	if (object_zone.initialized) {
 		return true;
@@ -40,6 +43,42 @@ static bool ensure_object_zone(void)
 				  bootstrap_object_pool,
 				  PLANE_VM_OBJECT_POOL_SIZE,
 				  &bootstrap_object_segment);
+}
+
+static struct plane_spinlock *object_lock(const struct plane_vm_object *object)
+{
+	return (struct plane_spinlock *)&object->lock;
+}
+
+static plane_irq_state_t lock_object(const struct plane_vm_object *object)
+{
+	return plane_spin_lock_irqsave(object_lock(object));
+}
+
+static void unlock_object(const struct plane_vm_object *object,
+			  plane_irq_state_t state)
+{
+	plane_spin_unlock_irqrestore(object_lock(object), state);
+}
+
+static plane_irq_state_t lock_resident_hash(void)
+{
+	return plane_spin_lock_irqsave(&resident_hash_lock);
+}
+
+static void unlock_resident_hash(plane_irq_state_t state)
+{
+	plane_spin_unlock_irqrestore(&resident_hash_lock, state);
+}
+
+static plane_irq_state_t lock_object_zone(void)
+{
+	return plane_spin_lock_irqsave(&object_zone_lock);
+}
+
+static void unlock_object_zone(plane_irq_state_t state)
+{
+	plane_spin_unlock_irqrestore(&object_zone_lock, state);
 }
 
 static bool pointer_array_range(struct plane_page **buckets,
@@ -346,52 +385,106 @@ static bool object_count_valid(const struct plane_vm_object *object)
 	return object != NULL && object->initialized && object->alive;
 }
 
-bool plane_vm_object_page_became_wired(struct plane_vm_object *object)
+static bool can_deallocate_locked(const struct plane_vm_object *object)
 {
 	if (!object_count_valid(object) ||
-	    object->wired_page_count == UINT64_MAX) {
+	    object->ref_count == 0) {
 		return false;
 	}
 
+	if (object->ref_count > 1) {
+		return true;
+	}
+
+	return object->resident_page_count == 0 &&
+	       object->wired_page_count == 0 &&
+	       object->resident_head == NULL &&
+	       object->resident_tail == NULL &&
+	       object->resident_hint == NULL;
+}
+
+bool plane_vm_object_page_became_wired(struct plane_vm_object *object)
+{
+	plane_irq_state_t state;
+	bool wired = false;
+
+	if (object == NULL) {
+		return false;
+	}
+
+	state = lock_object(object);
+	if (!object_count_valid(object) ||
+	    object->wired_page_count == UINT64_MAX) {
+		goto out;
+	}
+
 	object->wired_page_count++;
-	return true;
+	wired = true;
+
+out:
+	unlock_object(object, state);
+	return wired;
 }
 
 bool plane_vm_object_page_became_unwired(struct plane_vm_object *object)
 {
-	if (!object_count_valid(object) ||
-	    object->wired_page_count == 0) {
+	plane_irq_state_t state;
+	bool unwired = false;
+
+	if (object == NULL) {
 		return false;
 	}
 
+	state = lock_object(object);
+	if (!object_count_valid(object) ||
+	    object->wired_page_count == 0) {
+		goto out;
+	}
+
 	object->wired_page_count--;
-	return true;
+	unwired = true;
+
+out:
+	unlock_object(object, state);
+	return unwired;
 }
 
 bool plane_vm_object_add_zone_storage(struct plane_vm_object *storage,
 				      uint64_t count,
 				      struct plane_vm_zone_segment *segment)
 {
-	return ensure_object_zone() &&
-	       plane_vm_zone_add_storage(&object_zone, storage, count, segment);
+	plane_irq_state_t state = lock_object_zone();
+	bool added;
+
+	added = ensure_object_zone_locked() &&
+		plane_vm_zone_add_storage(&object_zone, storage, count, segment);
+	unlock_object_zone(state);
+	return added;
 }
 
 bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
 					  uint64_t bucket_count)
 {
-	struct plane_page **old_hash = resident_hash;
-	uint64_t old_bucket_count = resident_hash_bucket_count;
+	struct plane_page **old_hash;
+	uint64_t old_bucket_count;
+	plane_irq_state_t state;
+	bool rehomed = false;
 
 	if (buckets == NULL || !plane_is_power_of_two_u64(bucket_count)) {
 		return false;
 	}
+
+	state = lock_resident_hash();
+	old_hash = resident_hash;
+	old_bucket_count = resident_hash_bucket_count;
 	if (buckets == resident_hash) {
-		return bucket_count == resident_hash_bucket_count;
+		rehomed = bucket_count == resident_hash_bucket_count;
+		goto out;
 	}
 	if (pointer_array_ranges_overlap(resident_hash,
 					 resident_hash_bucket_count,
 					 buckets, bucket_count)) {
-		return false;
+		goto out;
 	}
 
 	for (uint64_t i = 0; i < bucket_count; i++) {
@@ -424,11 +517,17 @@ bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
 		old_hash[i] = NULL;
 	}
 
-	return true;
+	rehomed = true;
+
+out:
+	unlock_resident_hash(state);
+	return rehomed;
 }
 
 void plane_vm_object_reset_bootstrap_for_tests(void)
 {
+	plane_spin_init(&resident_hash_lock);
+	plane_spin_init(&object_zone_lock);
 	object_zone = (struct plane_vm_zone){0};
 	bootstrap_object_segment = (struct plane_vm_zone_segment){0};
 	for (uint64_t i = 0; i < PLANE_VM_OBJECT_POOL_SIZE; i++) {
@@ -468,6 +567,7 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 		.allocated = false,
 		.initialized = true,
 	};
+	plane_spin_init(&object->lock);
 	return true;
 }
 
@@ -475,16 +575,23 @@ bool plane_vm_object_allocate(uint64_t offset_limit,
 			      struct plane_vm_object **object)
 {
 	struct plane_vm_object *candidate;
+	plane_irq_state_t state;
 
 	if (object == NULL ||
 	    offset_limit == 0 ||
-	    !plane_is_page_aligned(offset_limit) ||
-	    !ensure_object_zone()) {
+	    !plane_is_page_aligned(offset_limit)) {
+		return false;
+	}
+
+	state = lock_object_zone();
+	if (!ensure_object_zone_locked()) {
+		unlock_object_zone(state);
 		return false;
 	}
 
 	candidate = plane_vm_zone_alloc(&object_zone);
 	if (candidate == NULL) {
+		unlock_object_zone(state);
 		return false;
 	}
 
@@ -501,30 +608,54 @@ bool plane_vm_object_allocate(uint64_t offset_limit,
 		.allocated = true,
 		.initialized = true,
 	};
+	plane_spin_init(&candidate->lock);
+	unlock_object_zone(state);
 	*object = candidate;
 	return true;
 }
 
 bool plane_vm_object_reference(struct plane_vm_object *object)
 {
-	if (!object_count_valid(object) ||
-	    object->ref_count == UINT64_MAX) {
+	plane_irq_state_t state;
+	bool referenced = false;
+
+	if (object == NULL) {
 		return false;
 	}
 
+	state = lock_object(object);
+	if (!object_count_valid(object) ||
+	    object->ref_count == UINT64_MAX) {
+		goto out;
+	}
+
 	object->ref_count++;
-	return true;
+	referenced = true;
+
+out:
+	unlock_object(object, state);
+	return referenced;
 }
 
 bool plane_vm_object_deallocate(struct plane_vm_object *object)
 {
-	if (!plane_vm_object_can_deallocate(object)) {
+	plane_irq_state_t state;
+	bool allocated;
+	bool deallocated = false;
+
+	if (object == NULL) {
 		return false;
+	}
+
+	state = lock_object(object);
+	if (!can_deallocate_locked(object)) {
+		goto out;
 	}
 
 	if (object->ref_count > 1) {
 		object->ref_count--;
-		return true;
+		deallocated = true;
+		goto out;
 	}
 
 	if (object->resident_page_count != 0 ||
@@ -532,34 +663,45 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	    object->resident_head != NULL ||
 	    object->resident_tail != NULL ||
 	    object->resident_hint != NULL) {
-		return false;
+		goto out;
 	}
 
-	if (object->allocated) {
-		return plane_vm_zone_free(&object_zone, object);
+	allocated = object->allocated;
+	if (!allocated) {
+		object->ref_count = 0;
+		object->alive = false;
+		deallocated = true;
+		goto out;
 	}
 
 	object->ref_count = 0;
 	object->alive = false;
+	object->initialized = false;
+	unlock_object(object, state);
+	state = lock_object_zone();
+	deallocated = plane_vm_zone_free(&object_zone, object);
+	unlock_object_zone(state);
+	BUG_ON_MSG(!deallocated, "failed to free zone-backed VM object");
 	return true;
+
+out:
+	unlock_object(object, state);
+	return deallocated;
 }
 
 bool plane_vm_object_can_deallocate(const struct plane_vm_object *object)
 {
-	if (!object_count_valid(object) ||
-	    object->ref_count == 0) {
+	plane_irq_state_t state;
+	bool can_deallocate;
+
+	if (object == NULL) {
 		return false;
 	}
 
-	if (object->ref_count > 1) {
-		return true;
-	}
-
-	return object->resident_page_count == 0 &&
-	       object->wired_page_count == 0 &&
-	       object->resident_head == NULL &&
-	       object->resident_tail == NULL &&
-	       object->resident_hint == NULL;
+	state = lock_object(object);
+	can_deallocate = can_deallocate_locked(object);
+	unlock_object(object, state);
+	return can_deallocate;
 }
 
 bool plane_vm_object_insert_page(struct plane_vm_object *object,
@@ -568,22 +710,31 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 {
 	enum plane_vm_page_state page_state;
 	uint64_t wire_count;
+	plane_irq_state_t object_state;
+	plane_irq_state_t hash_state;
+	bool inserted = false;
 
 	page_state = plane_vm_page_state(page);
-	if (!offset_valid(object, offset) ||
-	    page == NULL ||
+	if (page == NULL ||
 	    (page_state != PLANE_VM_PAGE_ALLOCATED &&
 	     page_state != PLANE_VM_PAGE_GUARD) ||
 	    plane_vm_page_object(page) != NULL ||
 	    !plane_vm_page_wire_count(page, &wire_count) ||
 	    (page_state == PLANE_VM_PAGE_GUARD && wire_count != 0) ||
+	    object == NULL) {
+		return false;
+	}
+
+	object_state = lock_object(object);
+	hash_state = lock_resident_hash();
+	if (!offset_valid(object, offset) ||
 	    object->resident_page_count == UINT64_MAX ||
 	    (wire_count != 0 && object->wired_page_count == UINT64_MAX) ||
 	    find_page(object, offset) != NULL) {
-		return false;
+		goto out;
 	}
 	if (!plane_vm_page_attach_object(page, object, offset)) {
-		return false;
+		goto out;
 	}
 	append_resident_page(object, page);
 	insert_page_into_hash(object, page, offset);
@@ -591,17 +742,37 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	if (wire_count != 0) {
 		object->wired_page_count++;
 	}
-	return true;
+	inserted = true;
+
+out:
+	unlock_resident_hash(hash_state);
+	unlock_object(object, object_state);
+	return inserted;
 }
 
 struct plane_page *plane_vm_object_lookup_page(struct plane_vm_object *object,
 					       uint64_t offset)
 {
-	if (!offset_valid(object, offset)) {
+	plane_irq_state_t object_state;
+	plane_irq_state_t hash_state;
+	struct plane_page *page = NULL;
+
+	if (object == NULL) {
 		return NULL;
 	}
 
-	return find_page(object, offset);
+	object_state = lock_object(object);
+	hash_state = lock_resident_hash();
+	if (!offset_valid(object, offset)) {
+		goto out;
+	}
+
+	page = find_page(object, offset);
+
+out:
+	unlock_resident_hash(hash_state);
+	unlock_object(object, object_state);
+	return page;
 }
 
 struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
@@ -609,9 +780,18 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 {
 	struct plane_page *page;
 	uint64_t wire_count;
+	plane_irq_state_t object_state;
+	plane_irq_state_t hash_state;
 
-	if (!offset_valid(object, offset)) {
+	if (object == NULL) {
 		return NULL;
+	}
+
+	object_state = lock_object(object);
+	hash_state = lock_resident_hash();
+	if (!offset_valid(object, offset)) {
+		page = NULL;
+		goto out;
 	}
 
 	page = find_page(object, offset);
@@ -619,7 +799,8 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	    page == NULL ||
 	    !plane_vm_page_wire_count(page, &wire_count) ||
 	    (wire_count != 0 && object->wired_page_count == 0)) {
-		return NULL;
+		page = NULL;
+		goto out;
 	}
 	remove_resident_page(object, page, offset);
 	BUG_ON_MSG(!plane_vm_page_detach_object(page, object, offset),
@@ -628,48 +809,101 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 	if (wire_count != 0) {
 		object->wired_page_count--;
 	}
+
+out:
+	unlock_resident_hash(hash_state);
+	unlock_object(object, object_state);
 	return page;
 }
 
 uint64_t plane_vm_object_resident_page_count(
 	const struct plane_vm_object *object)
 {
-	if (!object_count_valid(object)) {
+	plane_irq_state_t state;
+	uint64_t count;
+
+	if (object == NULL) {
 		return 0;
 	}
 
-	return object->resident_page_count;
+	state = lock_object(object);
+	if (!object_count_valid(object)) {
+		unlock_object(object, state);
+		return 0;
+	}
+
+	count = object->resident_page_count;
+	unlock_object(object, state);
+	return count;
 }
 
 uint64_t plane_vm_object_wired_page_count(
 	const struct plane_vm_object *object)
 {
-	if (!object_count_valid(object)) {
+	plane_irq_state_t state;
+	uint64_t count;
+
+	if (object == NULL) {
 		return 0;
 	}
 
-	return object->wired_page_count;
+	state = lock_object(object);
+	if (!object_count_valid(object)) {
+		unlock_object(object, state);
+		return 0;
+	}
+
+	count = object->wired_page_count;
+	unlock_object(object, state);
+	return count;
 }
 
 uint64_t plane_vm_object_ref_count(const struct plane_vm_object *object)
 {
-	if (object == NULL || !object->initialized) {
+	plane_irq_state_t state;
+	uint64_t ref_count;
+
+	if (object == NULL) {
 		return 0;
 	}
 
-	return object->ref_count;
+	state = lock_object(object);
+	ref_count = object->ref_count;
+	unlock_object(object, state);
+	return ref_count;
 }
 
 uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object)
 {
-	if (!object_count_valid(object)) {
+	plane_irq_state_t state;
+	uint64_t offset_limit;
+
+	if (object == NULL) {
 		return 0;
 	}
 
-	return object->offset_limit;
+	state = lock_object(object);
+	if (!object_count_valid(object)) {
+		unlock_object(object, state);
+		return 0;
+	}
+
+	offset_limit = object->offset_limit;
+	unlock_object(object, state);
+	return offset_limit;
 }
 
 bool plane_vm_object_is_alive(const struct plane_vm_object *object)
 {
-	return object_count_valid(object);
+	plane_irq_state_t state;
+	bool alive;
+
+	if (object == NULL) {
+		return false;
+	}
+
+	state = lock_object(object);
+	alive = object_count_valid(object);
+	unlock_object(object, state);
+	return alive;
 }

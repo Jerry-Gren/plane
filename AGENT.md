@@ -250,6 +250,12 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 
 - PMM is currently an early, single-core allocator. Do not assume SMP safety,
   locking, or atomic semantics until those are added explicitly.
+- Use existing `plane_spinlock` plus irqsave for early MM metadata locks.
+  Do not introduce sleep locks or wait-based synchronization before scheduler
+  and wait queues exist.
+- Add locks at owner-cluster boundaries and document what each lock protects.
+  Prefer a small explicit lock order over broad lock nesting. Current VM object
+  internal order is object lock before resident hash lock.
 - Physical page 0 is reserved as a null physical guard. PMM must never allocate
   or manage it.
 - `struct plane_page` is the XNU-like page metadata foundation. Do not expand
