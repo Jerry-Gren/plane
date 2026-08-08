@@ -155,6 +155,218 @@ static int test_vm_page_from_phys_metadata(void)
 	return failures;
 }
 
+static int test_vm_page_queue_insert_orders_by_phys(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_vm_page_queue queue;
+	struct plane_page foreign = {0};
+	struct plane_page *pages[3];
+	plane_paddr_t phys[3];
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x6000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("queue order pmm init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("queue reject null init",
+				     plane_vm_page_queue_init(
+					     NULL, PLANE_VM_PAGE_QUEUE_FREE),
+				     false);
+	failures += test_expect_bool("queue reject none state",
+				     plane_vm_page_queue_init(
+					     &queue, PLANE_VM_PAGE_QUEUE_NONE),
+				     false);
+	failures += test_expect_bool("queue init",
+				     plane_vm_page_queue_init(
+					     &queue, PLANE_VM_PAGE_QUEUE_FREE),
+				     true);
+	failures += test_expect_u64("queue initial count",
+				    plane_vm_page_queue_count(&queue), 0);
+	failures += test_expect_ptr("queue initial head", queue.head, NULL);
+	failures += test_expect_ptr("queue initial tail", queue.tail, NULL);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(pages); i++) {
+		failures += test_expect_bool("queue alloc page",
+					     plane_pmm_alloc_page_phys(&phys[i]),
+					     true);
+		pages[i] = plane_vm_page_from_phys(phys[i]);
+		failures += test_expect_not_null("queue page metadata",
+						 pages[i]);
+	}
+
+	failures += test_expect_bool("queue insert high",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, pages[2]),
+				     true);
+	failures += test_expect_bool("queue insert low",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, pages[0]),
+				     true);
+	failures += test_expect_bool("queue insert middle",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, pages[1]),
+				     true);
+	failures += test_expect_u64("queue ordered count",
+				    plane_vm_page_queue_count(&queue), 3);
+	failures += test_expect_ptr("queue ordered head", queue.head,
+				    pages[0]);
+	failures += test_expect_ptr("queue ordered tail", queue.tail,
+				    pages[2]);
+	failures += test_expect_ptr("queue low next", pages[0]->queue_next,
+				    pages[1]);
+	failures += test_expect_ptr("queue middle prev",
+				    pages[1]->queue_prev, pages[0]);
+	failures += test_expect_ptr("queue middle next",
+				    pages[1]->queue_next, pages[2]);
+	failures += test_expect_ptr("queue high prev", pages[2]->queue_prev,
+				    pages[1]);
+	failures += test_expect_int("queue low state",
+				    plane_vm_page_queue_state(pages[0]),
+				    PLANE_VM_PAGE_QUEUE_FREE);
+	failures += test_expect_int("queue middle state",
+				    plane_vm_page_queue_state(pages[1]),
+				    PLANE_VM_PAGE_QUEUE_FREE);
+	failures += test_expect_bool("queue reject duplicate",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, pages[1]),
+				     false);
+	failures += test_expect_bool("queue reject null page",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, NULL),
+				     false);
+	failures += test_expect_bool("queue reject foreign page",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, &foreign),
+				     false);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(pages); i++) {
+		failures += test_expect_bool("queue cleanup remove",
+					     plane_vm_page_queue_remove(
+						     &queue, pages[i]),
+					     true);
+		failures += test_expect_bool("queue cleanup free",
+					     plane_pmm_free_page_phys(phys[i]),
+					     true);
+	}
+
+	return failures;
+}
+
+static int test_vm_page_queue_remove_and_pop_clear_membership(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_vm_page_queue queue;
+	struct plane_vm_page_queue wrong_queue;
+	struct plane_page *pages[4];
+	plane_paddr_t phys[4];
+	struct plane_page *popped;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x8000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("queue remove pmm init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("queue remove init",
+				     plane_vm_page_queue_init(
+					     &queue, PLANE_VM_PAGE_QUEUE_FREE),
+				     true);
+	failures += test_expect_bool("queue wrong init",
+				     plane_vm_page_queue_init(
+					     &wrong_queue,
+					     PLANE_VM_PAGE_QUEUE_FREE),
+				     true);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(pages); i++) {
+		failures += test_expect_bool("queue remove alloc",
+					     plane_pmm_alloc_page_phys(&phys[i]),
+					     true);
+		pages[i] = plane_vm_page_from_phys(phys[i]);
+		failures += test_expect_bool("queue remove insert",
+					     plane_vm_page_queue_insert_ordered(
+						     &queue, pages[i]),
+					     true);
+	}
+
+	failures += test_expect_bool("queue remove middle",
+				     plane_vm_page_queue_remove(&queue,
+								pages[1]),
+				     true);
+	failures += test_expect_u64("queue remove middle count",
+				    plane_vm_page_queue_count(&queue), 3);
+	failures += test_expect_ptr("queue middle prev clear",
+				    pages[1]->queue_prev, NULL);
+	failures += test_expect_ptr("queue middle next clear",
+				    pages[1]->queue_next, NULL);
+	failures += test_expect_int("queue middle state clear",
+				    plane_vm_page_queue_state(pages[1]),
+				    PLANE_VM_PAGE_QUEUE_NONE);
+	failures += test_expect_ptr("queue low skips removed",
+				    pages[0]->queue_next, pages[2]);
+	failures += test_expect_ptr("queue high links back",
+				    pages[2]->queue_prev, pages[0]);
+
+	failures += test_expect_bool("queue remove head",
+				     plane_vm_page_queue_remove(&queue,
+								pages[0]),
+				     true);
+	failures += test_expect_ptr("queue head advanced", queue.head,
+				    pages[2]);
+	failures += test_expect_ptr("queue head prev clear",
+				    pages[2]->queue_prev, NULL);
+
+	failures += test_expect_bool("queue remove tail",
+				     plane_vm_page_queue_remove(&queue,
+								pages[3]),
+				     true);
+	failures += test_expect_ptr("queue tail moved", queue.tail,
+				    pages[2]);
+	failures += test_expect_ptr("queue tail next clear",
+				    pages[2]->queue_next, NULL);
+
+	popped = plane_vm_page_queue_pop_head(&queue);
+	failures += test_expect_ptr("queue pop remaining", popped, pages[2]);
+	failures += test_expect_u64("queue pop empty count",
+				    plane_vm_page_queue_count(&queue), 0);
+	failures += test_expect_ptr("queue pop empty head", queue.head, NULL);
+	failures += test_expect_ptr("queue pop empty tail", queue.tail, NULL);
+	failures += test_expect_int("queue popped state clear",
+				    plane_vm_page_queue_state(pages[2]),
+				    PLANE_VM_PAGE_QUEUE_NONE);
+	failures += test_expect_null("queue pop empty",
+				     plane_vm_page_queue_pop_head(&queue));
+	failures += test_expect_bool("queue reject unqueued remove",
+				     plane_vm_page_queue_remove(&queue,
+								pages[1]),
+				     false);
+
+	failures += test_expect_bool("queue insert wrong target",
+				     plane_vm_page_queue_insert_ordered(
+					     &queue, pages[1]),
+				     true);
+	failures += test_expect_bool("queue insert other queue",
+				     plane_vm_page_queue_insert_ordered(
+					     &wrong_queue, pages[0]),
+				     true);
+	failures += test_expect_bool("queue reject wrong queue remove",
+				     plane_vm_page_queue_remove(&wrong_queue,
+								pages[1]),
+				     false);
+	failures += test_expect_bool("queue remove right queue",
+				     plane_vm_page_queue_remove(&queue,
+								pages[1]),
+				     true);
+	failures += test_expect_bool("queue remove other queue",
+				     plane_vm_page_queue_remove(&wrong_queue,
+								pages[0]),
+				     true);
+
+	for (uint64_t i = 0; i < TEST_ARRAY_SIZE(pages); i++) {
+		failures += test_expect_bool("queue remove cleanup free",
+					     plane_pmm_free_page_phys(phys[i]),
+					     true);
+	}
+
+	return failures;
+}
+
 static int test_vm_page_grab_allocates_and_releases_metadata(void)
 {
 	struct plane_mem_info mem = {0};
@@ -615,6 +827,8 @@ int main(void)
 {
 	static const struct test_case cases[] = {
 		TEST_CASE(test_vm_page_from_phys_metadata),
+		TEST_CASE(test_vm_page_queue_insert_orders_by_phys),
+		TEST_CASE(test_vm_page_queue_remove_and_pop_clear_membership),
 		TEST_CASE(test_vm_page_grab_allocates_and_releases_metadata),
 		TEST_CASE(test_vm_page_zero_grab_clears_page),
 		TEST_CASE(test_vm_page_wire_count_tracks_allocated_pages),

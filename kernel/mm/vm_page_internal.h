@@ -15,6 +15,13 @@ enum plane_vm_page_queue_state {
 	PLANE_VM_PAGE_QUEUE_FREE,
 };
 
+struct plane_vm_page_queue {
+	struct plane_page *head;
+	struct plane_page *tail;
+	uint64_t count;
+	enum plane_vm_page_queue_state state;
+};
+
 struct plane_page {
 	uint64_t phys_addr;
 	uint64_t wire_count;
@@ -41,6 +48,8 @@ struct plane_vm_page_managed_range {
  * VM page resident metadata mutation helpers.
  * Public callers should use vm_object insert/remove instead.
  * Tabled/hashed state is VM-resident membership state, not public page API.
+ * Queue links are owned by plane_vm_page_queue_* helpers; PMM owns the free
+ * allocator policy, but not the queue linkage mechanics.
  */
 void plane_vm_page_reset_runtime(void);
 bool plane_vm_page_install_pool(
@@ -55,6 +64,17 @@ void plane_vm_page_reset_resident_links(struct plane_page *page);
 bool plane_vm_page_set_state(struct plane_page *page,
 			     enum plane_vm_page_state state);
 bool plane_vm_page_allocated_unwired_no_object(const struct plane_page *page);
+bool plane_vm_page_queue_init(struct plane_vm_page_queue *queue,
+			      enum plane_vm_page_queue_state state);
+bool plane_vm_page_queue_insert_ordered(struct plane_vm_page_queue *queue,
+					struct plane_page *page);
+bool plane_vm_page_queue_remove(struct plane_vm_page_queue *queue,
+				struct plane_page *page);
+struct plane_page *plane_vm_page_queue_pop_head(
+	struct plane_vm_page_queue *queue);
+uint64_t plane_vm_page_queue_count(const struct plane_vm_page_queue *queue);
+enum plane_vm_page_queue_state plane_vm_page_queue_state(
+	const struct plane_page *page);
 struct plane_page *plane_vm_page_create_guard(void);
 bool plane_vm_page_release_guard(struct plane_page *page);
 bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size);
