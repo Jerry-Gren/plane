@@ -141,11 +141,11 @@ static int test_limine_start_preflights_and_sets_ap_entries(void)
 	failures += test_expect_u64("ap1 extra points at cpu data",
 				    ap1.extra_argument,
 				    (uint64_t)(uintptr_t)
-					    plane_cpu_data_get(1));
+					    plane_cpu_get_data(1));
 	failures += test_expect_u64("ap2 extra points at cpu data",
 				    ap2.extra_argument,
 				    (uint64_t)(uintptr_t)
-					    plane_cpu_data_get(2));
+					    plane_cpu_get_data(2));
 	failures += test_expect_not_null("ap1 goto set", ap1.goto_address);
 	failures += test_expect_ptr("ap2 uses same ap entry",
 				    ap2.goto_address, ap1.goto_address);

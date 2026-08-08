@@ -15,7 +15,7 @@ static bool cpu_data_is_startable_ap(const struct plane_cpu_data *cpu)
 bool plane_smp_startup_prepare_ap_stacks(void)
 {
 	for (uint32_t i = 0; i < plane_cpu_count(); i++) {
-		const struct plane_cpu_data *cpu = plane_cpu_data_get(i);
+		const struct plane_cpu_data *cpu = plane_cpu_get_data(i);
 		plane_vaddr_t stack;
 
 		if (cpu == NULL || cpu->is_bsp) {
@@ -39,7 +39,7 @@ bool plane_smp_startup_prepare_ap_stacks(void)
 
 bool plane_smp_startup_ap_is_launchable(uint32_t logical_id)
 {
-	const struct plane_cpu_data *cpu = plane_cpu_data_get(logical_id);
+	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
 
 	return cpu_data_is_startable_ap(cpu) &&
 	       plane_cpu_startup_state(logical_id) == PLANE_CPU_STARTUP_PREPARED;
@@ -54,7 +54,7 @@ bool plane_smp_startup_prepare_ap_launch(uint32_t logical_id,
 		return false;
 	}
 
-	cpu = plane_cpu_startup_data_get(logical_id);
+	cpu = plane_cpu_get_startup_data(logical_id);
 	if (cpu == NULL || !plane_smp_mark_ap_starting(logical_id)) {
 		return false;
 	}

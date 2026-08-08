@@ -176,7 +176,7 @@ static int test_runtime_rejects_invalid_before_init(void)
 	failures += test_expect_ptr("uninitialized current cpu data",
 				    plane_cpu_current_data(), NULL);
 	failures += test_expect_ptr("uninitialized cpu data get",
-				    plane_cpu_data_get(0), NULL);
+				    plane_cpu_get_data(0), NULL);
 	failures += test_expect_bool("uninitialized prepare rejected",
 				     plane_smp_prepare_ap_stack(
 					     1, plane_vaddr_make(0x1000), 1),
@@ -218,8 +218,8 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 				     plane_cpu_is_bsp(), true);
 
 	const struct plane_cpu_data *current = plane_cpu_current_data();
-	const struct plane_cpu_data *bsp = plane_cpu_data_get(0);
-	const struct plane_cpu_data *ap = plane_cpu_data_get(1);
+	const struct plane_cpu_data *bsp = plane_cpu_get_data(0);
+	const struct plane_cpu_data *ap = plane_cpu_get_data(1);
 
 	failures += test_expect_ptr("current is bsp data", current, bsp);
 	failures += test_expect_ptr("hal saw current data",
@@ -243,15 +243,15 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 		failures += test_expect_bool("ap offline", ap->online, false);
 	}
 	failures += test_expect_ptr("out of range cpu data get",
-				    plane_cpu_data_get(5), NULL);
+				    plane_cpu_get_data(5), NULL);
 	return failures;
 }
 
 static int test_ap_stack_prepare_and_state_transitions(void)
 {
 	int failures = 0;
-	struct plane_cpu_data *ap1 = plane_cpu_startup_data_get(1);
-	struct plane_cpu_data *ap2 = plane_cpu_startup_data_get(2);
+	struct plane_cpu_data *ap1 = plane_cpu_get_startup_data(1);
+	struct plane_cpu_data *ap2 = plane_cpu_get_startup_data(2);
 
 	failures += test_expect_bool("prepare rejects bsp",
 				     plane_smp_prepare_ap_stack(
@@ -345,7 +345,7 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_u32("parked count unchanged",
 				    plane_cpu_parked_count(), 1);
 
-	struct plane_cpu_data *ap3 = plane_cpu_startup_data_get(3);
+	struct plane_cpu_data *ap3 = plane_cpu_get_startup_data(3);
 
 	failures += test_expect_bool("prepare ap3",
 				     plane_smp_prepare_ap_stack(
@@ -371,7 +371,7 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 static int test_ap_stack_prepare_rejects_after_context_failure_path(void)
 {
 	int failures = 0;
-	struct plane_cpu_data *ap4 = plane_cpu_startup_data_get(4);
+	struct plane_cpu_data *ap4 = plane_cpu_get_startup_data(4);
 
 	hal_prepare_context_should_fail = true;
 	failures += test_expect_bool("prepare ap4 context failure rejected",
@@ -409,7 +409,7 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 	failures += test_expect_u32("old cpu count kept",
 				    plane_cpu_count(), 5);
 
-	const struct plane_cpu_data *bsp = plane_cpu_data_get(0);
+	const struct plane_cpu_data *bsp = plane_cpu_get_data(0);
 
 	failures += test_expect_not_null("old bsp still present", bsp);
 	if (bsp != NULL) {

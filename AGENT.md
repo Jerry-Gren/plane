@@ -54,8 +54,12 @@ Prefer small, manual patches that preserve surrounding style.
   `__noreturn`, `__packed`, `__used`, `__weak`, `__aligned(x)`, and
   `__section(name)`, instead of spelling raw `__attribute__((...))` in project
   code.
-- Keep file-local helpers `static`. Cross-file symbols must belong to a clear
-  owner cluster and have that cluster's prefix.
+- Keep file-local helpers `static`. Static helpers usually should not carry the
+  full public owner prefix; the file already supplies that ownership context.
+  Use a short local name such as `reset_free_queue()` unless a longer prefix is
+  needed to distinguish multiple local subdomains.
+- Cross-file symbols must belong to a clear owner cluster and have that
+  cluster's prefix.
 
 ## Comments
 
@@ -94,18 +98,27 @@ Use these words consistently:
 - `local_interrupt`: generic HAL name for a local interrupt controller. Do not
   expose x86-specific LAPIC terms through generic HAL names.
 
-Preferred owner/object/verb order:
+Preferred owner/verb/object order:
 
-- Prefer `plane_<owner>_<object>_<verb>()` when naming new Plane APIs.
-- Getter-style public APIs should trend toward object-first forms such as
-  `plane_pmm_stats_get()` and `plane_vm_map_stats_get()` when renamed in a
-  dedicated cleanup.
+- For operation-style C symbols, prefer `plane_<owner>_<verb>_<object>()`.
+  Keep the verb immediately after the owner cluster so related actions line up,
+  such as `plane_vm_page_reset_runtime()` and
+  `plane_vm_page_reset_resident_links()`.
+- Apply the same rule to arch-private helpers:
+  `x86_64_physmap_set_bootstrap_window()`,
+  `x86_64_physmap_install_bootstrap_window()`, and
+  `x86_64_pmap_build_physmap_in_owned_root()`.
+- Query/property helpers may use noun-like names when they read naturally, such
+  as `plane_cpu_current_id()`, `plane_vm_page_wire_count()`, or
+  `x86_64_pmap_current_root_phys()`.
+- Getter-style APIs are tolerated when they already exist, but do not mix
+  `owner_object_get()` and `owner_get_object()` inside one owner cluster. Rename
+  them only in a dedicated cleanup.
 - Existing `plane_pmm_get_stats()` and `plane_vm_map_get_stats()` are older
   public API names. Do not churn them opportunistically in unrelated patches.
-- For x86_64 internal helpers, prefer precise object names:
-  `x86_64_physmap_set_bootstrap_window()`,
-  `x86_64_physmap_install_bootstrap_window()`,
-  `x86_64_pmap_current_root_phys()`.
+- Do not force static file-local helpers to carry public owner prefixes just to
+  match exported symbols. Prefer concise local names when the containing file
+  already makes the owner obvious.
 
 Avoid these stale names in new code:
 

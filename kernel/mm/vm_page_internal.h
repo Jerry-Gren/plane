@@ -4,15 +4,57 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-struct plane_page;
+#include <plane/address.h>
+#include <plane/vm_page.h>
+
 struct plane_vm_object;
 struct plane_vm_zone_segment;
+
+enum plane_vm_page_queue_state {
+	PLANE_VM_PAGE_QUEUE_NONE = 0,
+	PLANE_VM_PAGE_QUEUE_FREE,
+};
+
+struct plane_page {
+	uint64_t phys_addr;
+	uint64_t wire_count;
+	struct plane_vm_object *vm_object;
+	uint64_t vm_object_offset;
+	struct plane_page *object_prev;
+	struct plane_page *object_next;
+	struct plane_page *object_hash_next;
+	bool object_tabled;
+	bool object_hashed;
+	enum plane_vm_page_state state;
+	struct plane_page *queue_prev;
+	struct plane_page *queue_next;
+	enum plane_vm_page_queue_state queue_state;
+};
+
+struct plane_vm_page_managed_range {
+	uint64_t base;
+	uint64_t page_count;
+	uint64_t page_index;
+};
 
 /*
  * VM page resident metadata mutation helpers.
  * Public callers should use vm_object insert/remove instead.
  * Tabled/hashed state is VM-resident membership state, not public page API.
  */
+void plane_vm_page_reset_runtime(void);
+bool plane_vm_page_install_pool(
+	struct plane_page *pool,
+	uint64_t page_count,
+	const struct plane_vm_page_managed_range *ranges,
+	uint64_t range_count);
+void plane_vm_page_init(struct plane_page *page,
+			plane_paddr_t phys_addr,
+			enum plane_vm_page_state state);
+void plane_vm_page_reset_resident_links(struct plane_page *page);
+bool plane_vm_page_set_state(struct plane_page *page,
+			     enum plane_vm_page_state state);
+bool plane_vm_page_allocated_unwired_no_object(const struct plane_page *page);
 struct plane_page *plane_vm_page_create_guard(void);
 bool plane_vm_page_release_guard(struct plane_page *page);
 bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size);

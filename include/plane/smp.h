@@ -74,7 +74,7 @@ uint32_t plane_cpu_count(void);
 uint32_t plane_cpu_current_id(void);
 bool plane_cpu_is_bsp(void);
 const struct plane_cpu_data *plane_cpu_current_data(void);
-const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id);
+const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
 
 /*

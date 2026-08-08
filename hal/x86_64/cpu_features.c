@@ -597,7 +597,7 @@ bool x86_64_cpu_features_init(void)
 	return cpu_features_have_required();
 }
 
-const struct x86_64_cpu_features *x86_64_cpu_features_get(void)
+const struct x86_64_cpu_features *x86_64_cpu_get_features(void)
 {
 	return &bsp_cpu_features;
 }

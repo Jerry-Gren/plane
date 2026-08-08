@@ -19,19 +19,6 @@
 #define TEST_MAP_COUNT 192
 #define TEST_SMALL_ALLOC_COUNT 130
 
-struct plane_page {
-	uint64_t phys_addr;
-	uint64_t wire_count;
-	struct plane_vm_object *object;
-	uint64_t object_offset;
-	struct plane_page *object_prev;
-	struct plane_page *object_next;
-	struct plane_page *object_hash_next;
-	bool object_tabled;
-	bool object_hashed;
-	bool allocated;
-	bool guard;
-};
 
 struct test_mapping {
 	uint64_t vaddr;
@@ -70,7 +57,7 @@ static bool is_test_guard_page(const struct plane_page *page)
 
 static bool is_test_active_guard_page(const struct plane_page *page)
 {
-	return is_test_guard_page(page) && page->guard;
+	return is_test_guard_page(page) && page->state == PLANE_VM_PAGE_GUARD;
 }
 
 static bool is_test_vm_page(const struct plane_page *page)
@@ -83,7 +70,7 @@ static uint64_t allocated_page_count(void)
 	uint64_t count = 0;
 
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
-		if (test_pages[i].allocated) {
+		if (test_pages[i].state == PLANE_VM_PAGE_ALLOCATED) {
 			count++;
 		}
 	}
@@ -122,12 +109,12 @@ static uint64_t guard_page_count(void)
 	uint64_t count = 0;
 
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
-		if (test_guard_pages[i].guard) {
+		if (test_guard_pages[i].state == PLANE_VM_PAGE_GUARD) {
 			count++;
 		}
 	}
 	for (uint64_t i = 0; i < runtime_guard_page_count; i++) {
-		if (runtime_guard_pages[i].guard) {
+		if (runtime_guard_pages[i].state == PLANE_VM_PAGE_GUARD) {
 			count++;
 		}
 	}
@@ -264,9 +251,9 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 	}
 
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
-		if (!test_pages[i].allocated) {
+		if (test_pages[i].state != PLANE_VM_PAGE_ALLOCATED) {
 			test_pages[i].phys_addr = i * PAGE_SIZE;
-			test_pages[i].allocated = true;
+			test_pages[i].state = PLANE_VM_PAGE_ALLOCATED;
 			*page = &test_pages[i];
 			return true;
 		}
@@ -278,22 +265,22 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 bool plane_vm_page_release(struct plane_page *page)
 {
 	if (!is_test_page(page) ||
-	    !page->allocated ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
-	    page->object != NULL) {
+	    page->vm_object != NULL) {
 		return false;
 	}
 
-	page->allocated = false;
-	page->object = NULL;
-	page->object_offset = 0;
+	page->state = PLANE_VM_PAGE_FREE;
+	page->vm_object = NULL;
+	page->vm_object_offset = 0;
 	return true;
 }
 
 bool plane_vm_page_wire(struct plane_page *page)
 {
 	if (!is_test_page(page) ||
-	    !page->allocated ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == UINT64_MAX) {
 		return false;
 	}
@@ -305,7 +292,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 bool plane_vm_page_unwire(struct plane_page *page)
 {
 	if (!is_test_page(page) ||
-	    !page->allocated ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == 0) {
 		return false;
 	}
@@ -330,7 +317,7 @@ struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
 	if (is_test_guard_page(page)) {
-		return page->guard ? PLANE_VM_PAGE_GUARD_PHYS :
+		return page->state == PLANE_VM_PAGE_GUARD ? PLANE_VM_PAGE_GUARD_PHYS :
 				     PLANE_VM_PAGE_NO_PHYS;
 	}
 	if (!is_test_page(page)) {
@@ -343,13 +330,15 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
 	if (is_test_guard_page(page)) {
-		return page->guard ? PLANE_VM_PAGE_GUARD : PLANE_VM_PAGE_INVALID;
+		return page->state == PLANE_VM_PAGE_GUARD ?
+		       PLANE_VM_PAGE_GUARD : PLANE_VM_PAGE_INVALID;
 	}
 	if (!is_test_page(page)) {
 		return PLANE_VM_PAGE_INVALID;
 	}
 
-	return page->allocated ? PLANE_VM_PAGE_ALLOCATED : PLANE_VM_PAGE_FREE;
+	return page->state == PLANE_VM_PAGE_ALLOCATED ?
+	       PLANE_VM_PAGE_ALLOCATED : PLANE_VM_PAGE_FREE;
 }
 
 bool plane_vm_page_is_guard(const struct plane_page *page)
@@ -363,7 +352,7 @@ struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 		return NULL;
 	}
 
-	return page->object;
+	return page->vm_object;
 }
 
 bool plane_vm_page_object_offset(const struct plane_page *page,
@@ -371,11 +360,11 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 {
 	if (offset == NULL ||
 	    !is_test_vm_page(page) ||
-	    page->object == NULL) {
+	    page->vm_object == NULL) {
 		return false;
 	}
 
-	*offset = page->object_offset;
+	*offset = page->vm_object_offset;
 	return true;
 }
 
@@ -385,13 +374,14 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 {
 	if (!is_test_vm_page(page) ||
 	    object == NULL ||
-	    (!page->allocated && !page->guard) ||
-	    page->object != NULL) {
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->vm_object != NULL) {
 		return false;
 	}
 
-	page->object = object;
-	page->object_offset = offset;
+	page->vm_object = object;
+	page->vm_object_offset = offset;
 	return true;
 }
 
@@ -401,14 +391,15 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 {
 	if (!is_test_vm_page(page) ||
 	    object == NULL ||
-	    (!page->allocated && !page->guard) ||
-	    page->object != object ||
-	    page->object_offset != offset) {
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->vm_object != object ||
+	    page->vm_object_offset != offset) {
 		return false;
 	}
 
-	page->object = NULL;
-	page->object_offset = 0;
+	page->vm_object = NULL;
+	page->vm_object_offset = 0;
 	return true;
 }
 
@@ -559,20 +550,20 @@ bool plane_vm_page_add_guard_storage(void *storage,
 struct plane_page *plane_vm_page_create_guard(void)
 {
 	for (uint64_t i = 0; i < TEST_GUARD_PAGE_COUNT; i++) {
-		if (!test_guard_pages[i].guard) {
+		if (test_guard_pages[i].state != PLANE_VM_PAGE_GUARD) {
 			test_guard_pages[i] = (struct plane_page){0};
 			test_guard_pages[i].phys_addr =
 				PLANE_VM_PAGE_GUARD_PHYS_RAW;
-			test_guard_pages[i].guard = true;
+			test_guard_pages[i].state = PLANE_VM_PAGE_GUARD;
 			return &test_guard_pages[i];
 		}
 	}
 	for (uint64_t i = 0; i < runtime_guard_page_count; i++) {
-		if (!runtime_guard_pages[i].guard) {
+		if (runtime_guard_pages[i].state != PLANE_VM_PAGE_GUARD) {
 			runtime_guard_pages[i] = (struct plane_page){0};
 			runtime_guard_pages[i].phys_addr =
 				PLANE_VM_PAGE_GUARD_PHYS_RAW;
-			runtime_guard_pages[i].guard = true;
+			runtime_guard_pages[i].state = PLANE_VM_PAGE_GUARD;
 			return &runtime_guard_pages[i];
 		}
 	}
@@ -583,9 +574,9 @@ struct plane_page *plane_vm_page_create_guard(void)
 bool plane_vm_page_release_guard(struct plane_page *page)
 {
 	if (!is_test_guard_page(page) ||
-	    !page->guard ||
+	    page->state != PLANE_VM_PAGE_GUARD ||
 	    page->wire_count != 0 ||
-	    page->object != NULL ||
+	    page->vm_object != NULL ||
 	    page->object_prev != NULL ||
 	    page->object_next != NULL ||
 	    page->object_hash_next != NULL ||
@@ -594,7 +585,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 		return false;
 	}
 
-	page->guard = false;
+	page->state = PLANE_VM_PAGE_INVALID;
 	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
 	return true;
 }

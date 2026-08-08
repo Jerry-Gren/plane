@@ -154,7 +154,7 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 				plane_vaddr_t stack_base,
 				uint64_t stack_pages)
 {
-	struct plane_cpu_data *cpu = plane_cpu_startup_data_get(logical_id);
+	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
 	plane_vaddr_t stack_top;
 
 	if (!cpu_data_is_startable_ap(cpu) || stack_pages == 0 ||
@@ -185,7 +185,7 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 
 bool plane_smp_mark_ap_starting(uint32_t logical_id)
 {
-	struct plane_cpu_data *cpu = plane_cpu_startup_data_get(logical_id);
+	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
 	uint32_t expected = PLANE_CPU_STARTUP_PREPARED;
 
 	if (!cpu_data_is_startable_ap(cpu)) {
@@ -266,12 +266,12 @@ const struct plane_cpu_data *plane_cpu_current_data(void)
 	return current_cpu_data;
 }
 
-const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id)
+const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id)
 {
-	return plane_cpu_startup_data_get(logical_id);
+	return plane_cpu_get_startup_data(logical_id);
 }
 
-struct plane_cpu_data *plane_cpu_startup_data_get(uint32_t logical_id)
+struct plane_cpu_data *plane_cpu_get_startup_data(uint32_t logical_id)
 {
 	if (!smp_initialized || logical_id >= runtime_cpu_count) {
 		return NULL;
@@ -282,7 +282,7 @@ struct plane_cpu_data *plane_cpu_startup_data_get(uint32_t logical_id)
 
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 {
-	const struct plane_cpu_data *cpu = plane_cpu_data_get(logical_id);
+	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
 
 	if (cpu == NULL) {
 		return PLANE_CPU_STARTUP_FAILED;

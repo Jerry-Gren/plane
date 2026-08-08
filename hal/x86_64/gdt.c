@@ -52,7 +52,7 @@ static void set_flat_descriptor(struct x86_64_cpu_desc_context *ctx,
 		x86_64_desc_flags(true, default_big, long_mode, false));
 }
 
-static void x86_64_desc_context_build(struct x86_64_cpu_desc_context *ctx,
+static void build_desc_context(struct x86_64_cpu_desc_context *ctx,
 				      uintptr_t rsp0)
 {
 	memset(ctx, 0, sizeof(*ctx));
@@ -92,7 +92,7 @@ void x86_64_gdt_init(void)
 {
 	struct x86_64_cpu_desc_context *ctx = &cpu_desc_contexts[0];
 
-	x86_64_desc_context_build(ctx, 0);
+	build_desc_context(ctx, 0);
 	x86_64_gdt_flush((uint64_t)&ctx->gdtr);
 	x86_64_tss_flush();
 }
@@ -111,7 +111,7 @@ bool hal_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
 		return false;
 	}
 
-	x86_64_desc_context_build(ctx,
+	build_desc_context(ctx,
 				  (uintptr_t)plane_vaddr_raw(data->ap_stack_top));
 	return true;
 }

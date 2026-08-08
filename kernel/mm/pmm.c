@@ -9,39 +9,9 @@
 #include <plane/util.h>
 #include <plane/vm_page.h>
 
-#include "vm_object_internal.h"
 #include "vm_page_internal.h"
-#include "vm_zone_internal.h"
-
-struct pmm_managed_range {
-	uint64_t base;
-	uint64_t page_count;
-	uint64_t page_index;
-};
-
-enum pmm_page_queue_state {
-	PMM_PAGE_QUEUE_NONE = 0,
-	PMM_PAGE_QUEUE_FREE,
-};
 
 #define PLANE_PMM_NULL_PHYS_GUARD_SIZE PAGE_SIZE
-#define PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE 64
-
-struct plane_page {
-	uint64_t phys_addr;
-	uint64_t wire_count;
-	struct plane_vm_object *vm_object;
-	uint64_t vm_object_offset;
-	struct plane_page *object_prev;
-	struct plane_page *object_next;
-	struct plane_page *object_hash_next;
-	bool object_tabled;
-	bool object_hashed;
-	enum plane_vm_page_state state;
-	struct plane_page *queue_prev;
-	struct plane_page *queue_next;
-	enum pmm_page_queue_state queue_state;
-};
 
 struct pmm_page_queue {
 	struct plane_page *head;
@@ -49,7 +19,8 @@ struct pmm_page_queue {
 	uint64_t count;
 };
 
-static struct pmm_managed_range managed_ranges[PLANE_MAX_MEMMAP_ENTRIES];
+static struct plane_vm_page_managed_range
+	managed_ranges[PLANE_MAX_MEMMAP_ENTRIES];
 static uint64_t managed_range_count;
 static struct plane_page *page_pool;
 static uint64_t tracked_page_count;
@@ -57,9 +28,6 @@ static struct pmm_page_queue free_queue;
 static struct plane_pmm_stats pmm_stats;
 static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
-static struct plane_page bootstrap_guard_page_pool[PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE];
-static struct plane_vm_zone_segment bootstrap_guard_page_segment;
-static struct plane_vm_zone guard_page_zone;
 
 static uint64_t page_count_for_region(uint64_t start, uint64_t end)
 {
@@ -189,7 +157,7 @@ static bool managed_range_contains(uint64_t base, uint64_t page_count)
 	return false;
 }
 
-static void free_queue_reset(void)
+static void reset_free_queue(void)
 {
 	free_queue = (struct pmm_page_queue){0};
 }
@@ -199,7 +167,7 @@ static bool free_queue_insert_ordered(struct plane_page *page)
 	struct plane_page *next;
 
 	if (page == NULL || page->state != PLANE_VM_PAGE_FREE ||
-	    page->queue_state != PMM_PAGE_QUEUE_NONE) {
+	    page->queue_state != PLANE_VM_PAGE_QUEUE_NONE) {
 		return false;
 	}
 
@@ -213,7 +181,7 @@ static bool free_queue_insert_ordered(struct plane_page *page)
 			free_queue.head = page;
 		}
 		free_queue.tail = page;
-		page->queue_state = PMM_PAGE_QUEUE_FREE;
+		page->queue_state = PLANE_VM_PAGE_QUEUE_FREE;
 		free_queue.count++;
 		return true;
 	}
@@ -238,7 +206,7 @@ static bool free_queue_insert_ordered(struct plane_page *page)
 		free_queue.head = page;
 	}
 
-	page->queue_state = PMM_PAGE_QUEUE_FREE;
+	page->queue_state = PLANE_VM_PAGE_QUEUE_FREE;
 	free_queue.count++;
 	return true;
 }
@@ -246,7 +214,7 @@ static bool free_queue_insert_ordered(struct plane_page *page)
 static bool free_queue_remove(struct plane_page *page)
 {
 	if (page == NULL ||
-	    page->queue_state != PMM_PAGE_QUEUE_FREE ||
+	    page->queue_state != PLANE_VM_PAGE_QUEUE_FREE ||
 	    free_queue.count == 0) {
 		return false;
 	}
@@ -265,7 +233,7 @@ static bool free_queue_remove(struct plane_page *page)
 
 	page->queue_prev = NULL;
 	page->queue_next = NULL;
-	page->queue_state = PMM_PAGE_QUEUE_NONE;
+	page->queue_state = PLANE_VM_PAGE_QUEUE_NONE;
 	free_queue.count--;
 	return true;
 }
@@ -281,529 +249,17 @@ static struct plane_page *free_queue_pop_head(void)
 	return page;
 }
 
-static bool page_pointer_index(const struct plane_page *page, uint64_t *index)
-{
-	uintptr_t pool_base;
-	uintptr_t page_addr;
-	uintptr_t offset;
-
-	if (page == NULL || page_pool == NULL) {
-		return false;
-	}
-
-	pool_base = (uintptr_t)page_pool;
-	page_addr = (uintptr_t)page;
-	if (page_addr < pool_base) {
-		return false;
-	}
-
-	offset = page_addr - pool_base;
-	if ((offset % sizeof(page_pool[0])) != 0) {
-		return false;
-	}
-
-	offset /= sizeof(page_pool[0]);
-	if (offset >= tracked_page_count) {
-		return false;
-	}
-
-	if (index != NULL) {
-		*index = offset;
-	}
-	return true;
-}
-
-static bool ensure_guard_page_zone(void)
-{
-	if (guard_page_zone.initialized) {
-		return true;
-	}
-
-	return plane_vm_zone_init(&guard_page_zone,
-				  sizeof(bootstrap_guard_page_pool[0]),
-				  bootstrap_guard_page_pool,
-				  PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE,
-				  &bootstrap_guard_page_segment);
-}
-
-static bool guard_page_known(const struct plane_page *page)
-{
-	return plane_vm_zone_contains(&guard_page_zone, page);
-}
-
-static bool active_guard_page(const struct plane_page *page)
-{
-	return guard_page_known(page) &&
-	       page->state == PLANE_VM_PAGE_GUARD;
-}
-
-static bool vm_page_known(const struct plane_page *page)
-{
-	return page_pointer_index(page, NULL) ||
-	       active_guard_page(page);
-}
-
-static bool vm_page_resident_state_valid(enum plane_vm_page_state state)
-{
-	return state == PLANE_VM_PAGE_ALLOCATED ||
-	       state == PLANE_VM_PAGE_GUARD;
-}
-
-static void reset_resident_links(struct plane_page *page)
-{
-	page->vm_object = NULL;
-	page->vm_object_offset = 0;
-	page->object_prev = NULL;
-	page->object_next = NULL;
-	page->object_hash_next = NULL;
-	page->object_tabled = false;
-	page->object_hashed = false;
-}
-
-static void reset_guard_page_zone(void)
-{
-	guard_page_zone = (struct plane_vm_zone){0};
-	bootstrap_guard_page_segment = (struct plane_vm_zone_segment){0};
-	BUG_ON_MSG(!ensure_guard_page_zone(),
-		   "failed to reset guard page zone");
-}
-
-struct plane_page *plane_vm_page_create_guard(void)
-{
-	struct plane_page *page;
-
-	if (!ensure_guard_page_zone()) {
-		return NULL;
-	}
-
-	page = plane_vm_zone_alloc(&guard_page_zone);
-	if (page == NULL) {
-		return NULL;
-	}
-
-	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS_RAW;
-	page->wire_count = 0;
-	reset_resident_links(page);
-	page->state = PLANE_VM_PAGE_GUARD;
-	page->queue_prev = NULL;
-	page->queue_next = NULL;
-	page->queue_state = PMM_PAGE_QUEUE_NONE;
-	return page;
-}
-
-bool plane_vm_page_release_guard(struct plane_page *page)
-{
-	if (!active_guard_page(page) ||
-	    page->wire_count != 0 ||
-	    page->vm_object != NULL ||
-	    page->object_prev != NULL ||
-	    page->object_next != NULL ||
-	    page->object_hash_next != NULL ||
-	    page->object_tabled ||
-	    page->object_hashed) {
-		return false;
-	}
-
-	reset_resident_links(page);
-	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
-	page->queue_prev = NULL;
-	page->queue_next = NULL;
-	page->queue_state = PMM_PAGE_QUEUE_NONE;
-	page->state = PLANE_VM_PAGE_INVALID;
-	return plane_vm_zone_free(&guard_page_zone, page);
-}
-
-bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size)
-{
-	if (size == NULL || count == 0) {
-		return false;
-	}
-
-	return plane_checked_mul_u64(count, sizeof(struct plane_page), size);
-}
-
-bool plane_vm_page_add_guard_storage(void *storage,
-				     uint64_t count,
-				     struct plane_vm_zone_segment *segment)
-{
-	return ensure_guard_page_zone() &&
-	       plane_vm_zone_add_storage(&guard_page_zone, storage, count,
-					 segment);
-}
-
-struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
-{
-	uint64_t raw_phys = plane_paddr_raw(phys_addr);
-
-	if (page_pool == NULL || !plane_paddr_is_page_aligned(phys_addr)) {
-		return NULL;
-	}
-
-	for (uint64_t i = 0; i < managed_range_count; i++) {
-		uint64_t managed_end;
-
-		if (!plane_checked_page_range_end(managed_ranges[i].base,
-					    managed_ranges[i].page_count,
-					    &managed_end)) {
-			return NULL;
-		}
-
-		if (raw_phys >= managed_ranges[i].base &&
-		    raw_phys < managed_end) {
-			uint64_t page_offset =
-				(raw_phys - managed_ranges[i].base) / PAGE_SIZE;
-
-			return &page_pool[managed_ranges[i].page_index +
-					  page_offset];
-		}
-	}
-
-	return NULL;
-}
-
-plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return PLANE_VM_PAGE_GUARD_PHYS;
-	}
-	if (guard_page_known(page)) {
-		return PLANE_VM_PAGE_NO_PHYS;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return PLANE_VM_PAGE_NO_PHYS;
-	}
-
-	return plane_paddr_make(page_pool[index].phys_addr);
-}
-
-enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (guard_page_known(page)) {
-		return page->state;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return PLANE_VM_PAGE_INVALID;
-	}
-
-	return page_pool[index].state;
-}
-
-bool plane_vm_page_wire_count(const struct plane_page *page,
-			      uint64_t *wire_count)
-{
-	uint64_t index;
-
-	if (wire_count == NULL) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		*wire_count = page->wire_count;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	*wire_count = page_pool[index].wire_count;
-	return true;
-}
-
-bool plane_vm_page_is_guard(const struct plane_page *page)
-{
-	return plane_vm_page_state(page) == PLANE_VM_PAGE_GUARD;
-}
-
-struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->vm_object;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return NULL;
-	}
-
-	return page_pool[index].vm_object;
-}
-
-bool plane_vm_page_object_offset(const struct plane_page *page,
-				 uint64_t *offset)
-{
-	uint64_t index;
-
-	if (offset == NULL) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		if (page->vm_object == NULL) {
-			return false;
-		}
-		*offset = page->vm_object_offset;
-		return true;
-	}
-	if (!page_pointer_index(page, &index) ||
-	    page_pool[index].vm_object == NULL) {
-		return false;
-	}
-
-	*offset = page_pool[index].vm_object_offset;
-	return true;
-}
-
-bool plane_vm_page_attach_object(struct plane_page *page,
-				 struct plane_vm_object *object,
-				 uint64_t offset)
-{
-	uint64_t index;
-
-	if (object == NULL) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		if (page->vm_object != NULL) {
-			return false;
-		}
-
-		page->vm_object = object;
-		page->vm_object_offset = offset;
-		page->object_prev = NULL;
-		page->object_next = NULL;
-		page->object_hash_next = NULL;
-		page->object_tabled = false;
-		page->object_hashed = false;
-		return true;
-	}
-	if (!page_pointer_index(page, &index) ||
-	    !vm_page_resident_state_valid(page_pool[index].state) ||
-	    page_pool[index].vm_object != NULL) {
-		return false;
-	}
-
-	page_pool[index].vm_object = object;
-	page_pool[index].vm_object_offset = offset;
-	page_pool[index].object_prev = NULL;
-	page_pool[index].object_next = NULL;
-	page_pool[index].object_hash_next = NULL;
-	page_pool[index].object_tabled = false;
-	page_pool[index].object_hashed = false;
-	return true;
-}
-
-bool plane_vm_page_detach_object(struct plane_page *page,
-				 struct plane_vm_object *object,
-				 uint64_t offset)
-{
-	uint64_t index;
-
-	if (object == NULL) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		if (page->vm_object != object ||
-		    page->vm_object_offset != offset) {
-			return false;
-		}
-
-		reset_resident_links(page);
-		return true;
-	}
-	if (!page_pointer_index(page, &index) ||
-	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED ||
-	    page_pool[index].vm_object != object ||
-	    page_pool[index].vm_object_offset != offset) {
-		return false;
-	}
-
-	page_pool[index].vm_object = NULL;
-	page_pool[index].vm_object_offset = 0;
-	page_pool[index].object_prev = NULL;
-	page_pool[index].object_next = NULL;
-	page_pool[index].object_hash_next = NULL;
-	page_pool[index].object_tabled = false;
-	page_pool[index].object_hashed = false;
-	return true;
-}
-
-struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->object_prev;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return NULL;
-	}
-
-	return page_pool[index].object_prev;
-}
-
-struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->object_next;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return NULL;
-	}
-
-	return page_pool[index].object_next;
-}
-
-struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->object_hash_next;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return NULL;
-	}
-
-	return page_pool[index].object_hash_next;
-}
-
-bool plane_vm_page_object_tabled(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->object_tabled;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	return page_pool[index].object_tabled;
-}
-
-bool plane_vm_page_object_hashed(const struct plane_page *page)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		return page->object_hashed;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	return page_pool[index].object_hashed;
-}
-
-bool plane_vm_page_set_object_prev(struct plane_page *page,
-				   struct plane_page *prev)
-{
-	uint64_t index;
-
-	if (prev != NULL && !vm_page_known(prev)) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		page->object_prev = prev;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	page_pool[index].object_prev = prev;
-	return true;
-}
-
-bool plane_vm_page_set_object_next(struct plane_page *page,
-				   struct plane_page *next)
-{
-	uint64_t index;
-
-	if (next != NULL && !vm_page_known(next)) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		page->object_next = next;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	page_pool[index].object_next = next;
-	return true;
-}
-
-bool plane_vm_page_set_object_hash_next(struct plane_page *page,
-					struct plane_page *next)
-{
-	uint64_t index;
-
-	if (next != NULL && !vm_page_known(next)) {
-		return false;
-	}
-	if (active_guard_page(page)) {
-		page->object_hash_next = next;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	page_pool[index].object_hash_next = next;
-	return true;
-}
-
-bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		page->object_tabled = tabled;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	page_pool[index].object_tabled = tabled;
-	return true;
-}
-
-bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
-{
-	uint64_t index;
-
-	if (active_guard_page(page)) {
-		page->object_hashed = hashed;
-		return true;
-	}
-	if (!page_pointer_index(page, &index)) {
-		return false;
-	}
-
-	page_pool[index].object_hashed = hashed;
-	return true;
-}
-
 static bool page_is_free_queued(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page->state == PLANE_VM_PAGE_FREE &&
-	       page->queue_state == PMM_PAGE_QUEUE_FREE;
+	       page->queue_state == PLANE_VM_PAGE_QUEUE_FREE;
 }
 
 static bool page_is_allocated_unqueued(const struct plane_page *page)
 {
-	return page != NULL &&
-	       page->state == PLANE_VM_PAGE_ALLOCATED &&
-	       page->queue_state == PMM_PAGE_QUEUE_NONE &&
-	       page->vm_object == NULL;
+	return plane_vm_page_allocated_unwired_no_object(page) &&
+	       page->queue_state == PLANE_VM_PAGE_QUEUE_NONE;
 }
 
 static bool page_state_range_matches(plane_paddr_t phys_addr,
@@ -845,8 +301,9 @@ static bool set_page_state_range(plane_paddr_t phys_addr,
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-
-		page->state = next;
+		if (!plane_vm_page_set_state(page, next)) {
+			return false;
+		}
 	}
 
 	return true;
@@ -905,21 +362,15 @@ static bool init_page_metadata(void)
 				return false;
 			}
 
-			page_pool[page_index].phys_addr = phys;
-			page_pool[page_index].wire_count = 0;
-			page_pool[page_index].vm_object = NULL;
-			page_pool[page_index].vm_object_offset = 0;
-			page_pool[page_index].object_prev = NULL;
-			page_pool[page_index].object_next = NULL;
-			page_pool[page_index].object_hash_next = NULL;
-			page_pool[page_index].object_tabled = false;
-			page_pool[page_index].object_hashed = false;
-			page_pool[page_index].state = PLANE_VM_PAGE_FREE;
-			page_pool[page_index].queue_prev = NULL;
-			page_pool[page_index].queue_next = NULL;
-			page_pool[page_index].queue_state =
-				PMM_PAGE_QUEUE_NONE;
+			plane_vm_page_init(&page_pool[page_index],
+					   plane_paddr_make(phys),
+					   PLANE_VM_PAGE_FREE);
 		}
+	}
+
+	if (!plane_vm_page_install_pool(page_pool, tracked_page_count,
+					managed_ranges, managed_range_count)) {
+		return false;
 	}
 
 	if (!set_page_state_range(plane_paddr_make(metadata_phys_base),
@@ -943,8 +394,8 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 	managed_range_count = 0;
 	tracked_page_count = 0;
 	page_pool = NULL;
-	free_queue_reset();
-	reset_guard_page_zone();
+	reset_free_queue();
+	plane_vm_page_reset_runtime();
 	metadata_phys_base = 0;
 	metadata_page_count = 0;
 	pmm_stats = (struct plane_pmm_stats){0};
@@ -1043,22 +494,6 @@ static bool alloc_flags_valid(uint32_t flags)
 	return (flags & ~PLANE_PMM_ALLOC_ZERO) == 0;
 }
 
-static bool vm_page_grab_flags_valid(uint32_t flags)
-{
-	return (flags & ~PLANE_VM_PAGE_GRAB_ZERO) == 0;
-}
-
-static uint32_t vm_page_grab_to_pmm_flags(uint32_t flags)
-{
-	uint32_t pmm_flags = 0;
-
-	if ((flags & PLANE_VM_PAGE_GRAB_ZERO) != 0) {
-		pmm_flags |= PLANE_PMM_ALLOC_ZERO;
-	}
-
-	return pmm_flags;
-}
-
 static bool page_range_is_allocated_unwired(plane_paddr_t phys_addr,
 					    uint64_t page_count)
 {
@@ -1071,10 +506,7 @@ static bool page_range_is_allocated_unwired(plane_paddr_t phys_addr,
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-		if (page == NULL ||
-		    page->state != PLANE_VM_PAGE_ALLOCATED ||
-		    page->wire_count != 0 ||
-		    page->vm_object != NULL) {
+		if (!plane_vm_page_allocated_unwired_no_object(page)) {
 			return false;
 		}
 	}
@@ -1128,14 +560,10 @@ static bool rollback_allocated_page_run(plane_paddr_t phys_addr,
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-		page->state = PLANE_VM_PAGE_FREE;
-		page->vm_object = NULL;
-		page->vm_object_offset = 0;
-		page->object_prev = NULL;
-		page->object_next = NULL;
-		page->object_hash_next = NULL;
-		page->object_tabled = false;
-		page->object_hashed = false;
+		if (!plane_vm_page_set_state(page, PLANE_VM_PAGE_FREE)) {
+			return false;
+		}
+		plane_vm_page_reset_resident_links(page);
 		if (!free_queue_insert_ordered(page)) {
 			return false;
 		}
@@ -1206,14 +634,10 @@ static bool plane_pmm_alloc_page_phys_internal(plane_paddr_t *phys_addr)
 		return false;
 	}
 
-	page->state = PLANE_VM_PAGE_ALLOCATED;
-	page->vm_object = NULL;
-	page->vm_object_offset = 0;
-	page->object_prev = NULL;
-	page->object_next = NULL;
-	page->object_hash_next = NULL;
-	page->object_tabled = false;
-	page->object_hashed = false;
+	if (!plane_vm_page_set_state(page, PLANE_VM_PAGE_ALLOCATED)) {
+		return false;
+	}
+	plane_vm_page_reset_resident_links(page);
 	*phys_addr = plane_paddr_make(page->phys_addr);
 	return true;
 }
@@ -1249,14 +673,10 @@ static bool plane_pmm_alloc_pages_phys_internal(uint64_t page_count,
 		if (!free_queue_remove(page)) {
 			return false;
 		}
-		page->state = PLANE_VM_PAGE_ALLOCATED;
-		page->vm_object = NULL;
-		page->vm_object_offset = 0;
-		page->object_prev = NULL;
-		page->object_next = NULL;
-		page->object_hash_next = NULL;
-		page->object_tabled = false;
-		page->object_hashed = false;
+		if (!plane_vm_page_set_state(page, PLANE_VM_PAGE_ALLOCATED)) {
+			return false;
+		}
+		plane_vm_page_reset_resident_links(page);
 	}
 
 	*phys_addr = alloc_base;
@@ -1297,27 +717,6 @@ bool plane_pmm_alloc_pages_phys(uint64_t page_count,
 					       phys_addr);
 }
 
-bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
-{
-	plane_paddr_t phys_addr;
-	struct plane_page *grabbed_page;
-
-	if (page == NULL ||
-	    !vm_page_grab_flags_valid(flags) ||
-	    !plane_pmm_alloc_pages_phys_flags(
-			1, 1, vm_page_grab_to_pmm_flags(flags), &phys_addr)) {
-		return false;
-	}
-
-	grabbed_page = plane_vm_page_from_phys(phys_addr);
-	BUG_ON_MSG(grabbed_page == NULL,
-		   "PMM allocated page without VM metadata: phys=%llx",
-		   (unsigned long long)plane_paddr_raw(phys_addr));
-
-	*page = grabbed_page;
-	return true;
-}
-
 bool plane_pmm_alloc_page_phys(plane_paddr_t *phys_addr)
 {
 	return plane_pmm_alloc_pages_phys_flags(1, 1, 0, phys_addr);
@@ -1348,13 +747,7 @@ bool plane_pmm_free_pages_phys(plane_paddr_t phys_addr, uint64_t page_count)
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-		page->vm_object = NULL;
-		page->vm_object_offset = 0;
-		page->object_prev = NULL;
-		page->object_next = NULL;
-		page->object_hash_next = NULL;
-		page->object_tabled = false;
-		page->object_hashed = false;
+		plane_vm_page_reset_resident_links(page);
 		BUG_ON_MSG(!free_queue_insert_ordered(page),
 			   "failed to insert PMM free page");
 	}
@@ -1362,69 +755,9 @@ bool plane_pmm_free_pages_phys(plane_paddr_t phys_addr, uint64_t page_count)
 	return true;
 }
 
-bool plane_vm_page_release(struct plane_page *page)
-{
-	plane_paddr_t phys_addr;
-
-	if (!page_pointer_index(page, NULL) ||
-	    page->state != PLANE_VM_PAGE_ALLOCATED ||
-	    page->wire_count != 0 ||
-	    page->vm_object != NULL ||
-	    page->object_prev != NULL ||
-	    page->object_next != NULL ||
-	    page->object_hash_next != NULL ||
-	    page->object_tabled ||
-	    page->object_hashed ||
-	    page->queue_prev != NULL ||
-	    page->queue_next != NULL ||
-	    page->queue_state != PMM_PAGE_QUEUE_NONE) {
-		return false;
-	}
-
-	phys_addr = plane_paddr_make(page->phys_addr);
-	BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),
-		   "failed to release VM page: phys=%llx",
-		   (unsigned long long)plane_paddr_raw(phys_addr));
-	return true;
-}
-
 bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 {
 	return plane_pmm_free_pages_phys(phys_addr, 1);
-}
-
-bool plane_vm_page_wire(struct plane_page *page)
-{
-	if (!page_pointer_index(page, NULL) ||
-	    page->state != PLANE_VM_PAGE_ALLOCATED ||
-	    page->wire_count == UINT64_MAX) {
-		return false;
-	}
-
-	if (page->vm_object != NULL &&
-	    page->wire_count == 0 &&
-	    !plane_vm_object_page_became_wired(page->vm_object)) {
-		return false;
-	}
-	page->wire_count++;
-	return true;
-}
-
-bool plane_vm_page_unwire(struct plane_page *page)
-{
-	if (!page_pointer_index(page, NULL) ||
-	    page->state != PLANE_VM_PAGE_ALLOCATED ||
-	    page->wire_count == 0) {
-		return false;
-	}
-
-	if (page->vm_object != NULL &&
-	    page->wire_count == 1 &&
-	    !plane_vm_object_page_became_unwired(page->vm_object)) {
-		return false;
-	}
-	page->wire_count--;
-	return true;
 }
 
 struct plane_pmm_stats plane_pmm_get_stats(void)

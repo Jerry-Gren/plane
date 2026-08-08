@@ -7,7 +7,7 @@
 #include <plane/compiler.h>
 #include <plane/smp.h>
 
-struct plane_cpu_data *plane_cpu_startup_data_get(uint32_t logical_id);
+struct plane_cpu_data *plane_cpu_get_startup_data(uint32_t logical_id);
 bool plane_smp_startup_prepare_ap_stacks(void);
 bool plane_smp_mark_ap_starting(uint32_t logical_id);
 bool plane_smp_mark_ap_parked(struct plane_cpu_data *data);

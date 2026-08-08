@@ -17,18 +17,6 @@
 #define TEST_OBJECT_EXTRA_POOL_SIZE 4
 #define TEST_REHASH_BUCKETS 512
 
-struct plane_page {
-	struct plane_vm_object *object;
-	uint64_t object_offset;
-	uint64_t wire_count;
-	struct plane_page *object_prev;
-	struct plane_page *object_next;
-	struct plane_page *object_hash_next;
-	bool object_tabled;
-	bool object_hashed;
-	bool guard;
-	enum plane_vm_page_state state;
-};
 
 static struct plane_vm_object test_object;
 static struct plane_vm_object second_object;
@@ -62,18 +50,18 @@ struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 		return NULL;
 	}
 
-	return page->object;
+	return page->vm_object;
 }
 
 bool plane_vm_page_object_offset(const struct plane_page *page, uint64_t *offset)
 {
 	if (page == NULL ||
-	    page->object == NULL ||
+	    page->vm_object == NULL ||
 	    offset == NULL) {
 		return false;
 	}
 
-	*offset = page->object_offset;
+	*offset = page->vm_object_offset;
 	return true;
 }
 
@@ -93,14 +81,14 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 {
 	if (page == NULL ||
 	    object == NULL ||
-	    page->object != NULL ||
+	    page->vm_object != NULL ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD)) {
 		return false;
 	}
 
-	page->object = object;
-	page->object_offset = offset;
+	page->vm_object = object;
+	page->vm_object_offset = offset;
 	return true;
 }
 
@@ -110,15 +98,15 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 {
 	if (page == NULL ||
 	    object == NULL ||
-	    page->object != object ||
-	    page->object_offset != offset ||
+	    page->vm_object != object ||
+	    page->vm_object_offset != offset ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD)) {
 		return false;
 	}
 
-	page->object = NULL;
-	page->object_offset = 0;
+	page->vm_object = NULL;
+	page->vm_object_offset = 0;
 	return true;
 }
 
@@ -227,7 +215,7 @@ static void cleanup_vm_object(struct plane_vm_object *object)
 		struct plane_page *removed;
 
 		removed = plane_vm_object_remove_page(object,
-						      page->object_offset);
+						      page->vm_object_offset);
 		if (removed == NULL) {
 			break;
 		}
@@ -261,7 +249,6 @@ static void reset_vm_object_test(void)
 	second_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	third_allocated_page.state = PLANE_VM_PAGE_ALLOCATED;
 	guard_page.state = PLANE_VM_PAGE_GUARD;
-	guard_page.guard = true;
 	free_page.state = PLANE_VM_PAGE_FREE;
 }
 
