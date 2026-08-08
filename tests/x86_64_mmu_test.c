@@ -23,13 +23,30 @@ static uint64_t test_paddr_raw(plane_paddr_t addr)
 	return plane_paddr_raw(addr);
 }
 
+static void test_set_mb2_boot_direct_map(void)
+{
+	hal_mmu_set_boot_direct_map(test_vaddr(X86_64_DIRECT_MAP_BASE),
+				    X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE);
+}
+
+static uint64_t test_hhdm_base(void)
+{
+	return X86_64_KERNEL_MAP_BASE + X86_64_PAGING_PML4_SLOT_SIZE;
+}
+
+static void test_set_limine_boot_direct_map(uint64_t base)
+{
+	hal_mmu_set_boot_direct_map(test_vaddr(base),
+				    hal_mmu_direct_map_window_size());
+}
+
 static int test_direct_map_roundtrip(void)
 {
 	struct plane_mem_info mem = {0};
 	plane_vaddr_t vaddr;
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
 
 	mem.map[0].base = plane_paddr_make(0x1000);
 	mem.map[0].length = 0x3000;
@@ -74,7 +91,7 @@ static int test_direct_map_rejects_invalid_ranges(void)
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -111,7 +128,7 @@ static int test_bootloader_direct_map_base(void)
 {
 	struct plane_mem_info mem = {0};
 	uint64_t bootloader_base =
-		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_WINDOW_SIZE;
+		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
 	plane_vaddr_t vaddr;
 	int failures = 0;
 
@@ -120,7 +137,8 @@ static int test_bootloader_direct_map_base(void)
 	mem.map[0].type = PLANE_MEM_USABLE;
 	mem.entry_count = 1;
 
-	hal_mmu_set_direct_map_base(test_vaddr(bootloader_base));
+	hal_mmu_set_boot_direct_map(test_vaddr(bootloader_base),
+				    X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE);
 	failures += test_expect_bool("bootloader direct map enable",
 				     hal_mmu_enable_direct_map(&mem), true);
 	vaddr = hal_mmu_direct_phys_to_virt(test_paddr(0x1000));
@@ -131,6 +149,45 @@ static int test_bootloader_direct_map_base(void)
 				    test_paddr_raw(
 					    hal_mmu_direct_virt_to_phys(vaddr)),
 				    0x1000);
+
+	return failures;
+}
+
+static int test_direct_map_runtime_counts_owned_pml4_slots(void)
+{
+	struct plane_mem_info mem = {0};
+	struct x86_64_mmu_direct_map_runtime runtime = {0};
+	uint64_t hhdm_base = test_hhdm_base();
+	uint64_t high_phys = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE + 0x2000;
+	int failures = 0;
+
+	test_set_limine_boot_direct_map(hhdm_base);
+
+	mem.map[0].base = plane_paddr_make(0);
+	mem.map[0].length = 0x1000;
+	mem.map[0].type = PLANE_MEM_USABLE;
+	mem.map[1].base = plane_paddr_make(high_phys);
+	mem.map[1].length = 0x1000;
+	mem.map[1].type = PLANE_MEM_USABLE;
+	mem.entry_count = 2;
+
+	failures += test_expect_bool("direct multi-slot enable",
+				     hal_mmu_enable_direct_map(&mem), true);
+	failures += test_expect_bool(
+		"direct multi-slot runtime",
+		x86_64_mmu_direct_map_runtime(&runtime), true);
+	failures += test_expect_u64("direct multi-slot required",
+				    runtime.required_size,
+				    X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE +
+					    ARCH_LARGE_PAGE_SIZE);
+	failures += test_expect_u64("direct multi-slot owned pml4 count",
+				    runtime.owned_pml4_count, 2);
+	failures += test_expect_u64("direct multi-slot owned window",
+				    runtime.owned_window_size,
+				    2 * X86_64_PAGING_PML4_SLOT_SIZE);
+	failures += test_expect_u64("direct multi-slot boot bridge",
+				    runtime.boot_bridge_size,
+				    X86_64_DIRECT_MAP_WINDOW_SIZE);
 
 	return failures;
 }
@@ -176,7 +233,7 @@ static int test_direct_map_supports_runtime_coverage_above_64g(void)
 	plane_vaddr_t vaddr;
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x2000;
@@ -207,7 +264,7 @@ static int test_direct_map_reserved_high_memory_does_not_extend_coverage(void)
 	uint64_t high_phys = 0x100000000ull;
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -235,7 +292,7 @@ static int test_direct_map_covers_ram_like_boot_regions(void)
 	uint64_t high_kernel = 0x300000000ull;
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -268,10 +325,11 @@ static int test_direct_map_commit_converges_to_plane_base(void)
 {
 	struct plane_mem_info mem = {0};
 	uint64_t bootloader_base =
-		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_WINDOW_SIZE;
+		X86_64_DIRECT_MAP_BASE + X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(bootloader_base));
+	hal_mmu_set_boot_direct_map(test_vaddr(bootloader_base),
+				    X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE);
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x2000;
@@ -295,12 +353,57 @@ static int test_direct_map_commit_converges_to_plane_base(void)
 	return failures;
 }
 
-static int test_direct_map_rejects_ram_like_memory_above_window(void)
+static int test_direct_map_rejects_mb2_boot_bridge_shortfall(void)
 {
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
-	hal_mmu_set_direct_map_base(test_vaddr(X86_64_DIRECT_MAP_BASE));
+	test_set_mb2_boot_direct_map();
+
+	mem.map[0].base = plane_paddr_make(
+		X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE);
+	mem.map[0].length = 0x1000;
+	mem.map[0].type = PLANE_MEM_USABLE;
+	mem.entry_count = 1;
+
+	failures += test_expect_bool("direct boot bridge shortfall",
+				     hal_mmu_enable_direct_map(&mem), false);
+	failures += test_expect_bool("direct boot bridge shortfall disables",
+				     plane_vaddr_is_null(
+					     hal_mmu_direct_phys_to_virt(
+						     test_paddr(0))),
+				     true);
+
+	return failures;
+}
+
+static int test_direct_map_rejects_boot_bridge_kernel_map_overlap(void)
+{
+	struct plane_mem_info mem = {0};
+	int failures = 0;
+
+	hal_mmu_set_boot_direct_map(
+		test_vaddr(X86_64_KERNEL_MAP_BASE - ARCH_LARGE_PAGE_SIZE),
+		2 * ARCH_LARGE_PAGE_SIZE);
+
+	mem.map[0].base = plane_paddr_make(0);
+	mem.map[0].length = 0x1000;
+	mem.map[0].type = PLANE_MEM_USABLE;
+	mem.entry_count = 1;
+
+	failures += test_expect_bool("direct boot bridge kernel overlap",
+				     hal_mmu_enable_direct_map(&mem), false);
+
+	return failures;
+}
+
+static int test_direct_map_rejects_ram_like_memory_above_window(void)
+{
+	struct plane_mem_info mem = {0};
+	uint64_t hhdm_base = test_hhdm_base();
+	int failures = 0;
+
+	test_set_limine_boot_direct_map(hhdm_base);
 
 	mem.map[0].base = plane_paddr_make(X86_64_DIRECT_MAP_WINDOW_SIZE);
 	mem.map[0].length = 0x1000;
@@ -316,7 +419,7 @@ static int test_direct_map_rejects_ram_like_memory_above_window(void)
 				     true);
 	failures += test_expect_u64("direct window reject disables virt",
 				    test_paddr_raw(hal_mmu_direct_virt_to_phys(
-					    test_vaddr(X86_64_DIRECT_MAP_BASE))),
+					    test_vaddr(hhdm_base))),
 				    HAL_MMU_INVALID_PHYS);
 
 	return failures;
@@ -328,7 +431,10 @@ int main(void)
 		TEST_CASE(test_direct_map_supports_runtime_coverage_above_64g),
 		TEST_CASE(test_direct_map_reserved_high_memory_does_not_extend_coverage),
 		TEST_CASE(test_direct_map_covers_ram_like_boot_regions),
+		TEST_CASE(test_direct_map_runtime_counts_owned_pml4_slots),
 		TEST_CASE(test_direct_map_commit_converges_to_plane_base),
+		TEST_CASE(test_direct_map_rejects_mb2_boot_bridge_shortfall),
+		TEST_CASE(test_direct_map_rejects_boot_bridge_kernel_map_overlap),
 		TEST_CASE(test_direct_map_rejects_ram_like_memory_above_window),
 		TEST_CASE(test_direct_map_roundtrip),
 		TEST_CASE(test_direct_map_rejects_invalid_ranges),

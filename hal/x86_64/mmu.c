@@ -7,7 +7,9 @@
 #include <plane/overflow.h>
 
 static uint64_t direct_map_base = X86_64_DIRECT_MAP_BASE;
+static uint64_t direct_map_boot_bridge_size = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
 static uint64_t direct_map_size;
+static uint64_t direct_map_owned_window_size;
 static bool direct_map_initialized;
 
 static bool direct_map_covers_region_type(uint32_t type)
@@ -17,10 +19,23 @@ static bool direct_map_covers_region_type(uint32_t type)
 	       type == PLANE_MEM_EXECUTABLE_AND_MODULES;
 }
 
-void hal_mmu_set_direct_map_base(plane_vaddr_t base)
+static bool ranges_overlap(uint64_t base, uint64_t end,
+			   uint64_t other_base, uint64_t other_end)
+{
+	return base < other_end && other_base < end;
+}
+
+uint64_t hal_mmu_direct_map_window_size(void)
+{
+	return X86_64_DIRECT_MAP_WINDOW_SIZE;
+}
+
+void hal_mmu_set_boot_direct_map(plane_vaddr_t base, uint64_t size)
 {
 	direct_map_base = plane_vaddr_raw(base);
+	direct_map_boot_bridge_size = size;
 	direct_map_size = 0;
+	direct_map_owned_window_size = 0;
 	direct_map_initialized = false;
 }
 
@@ -28,19 +43,26 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 {
 	uint64_t direct_map_end;
 	uint64_t required_size = 0;
+	uint64_t owned_window_size = 0;
 
 	direct_map_initialized = false;
 	direct_map_size = 0;
+	direct_map_owned_window_size = 0;
 
-	if (mem == NULL || (direct_map_base & (ARCH_LARGE_PAGE_SIZE - 1)) != 0) {
+	if (mem == NULL || direct_map_boot_bridge_size == 0 ||
+	    (direct_map_base & (ARCH_LARGE_PAGE_SIZE - 1)) != 0 ||
+	    (direct_map_boot_bridge_size & (ARCH_LARGE_PAGE_SIZE - 1)) != 0 ||
+	    direct_map_boot_bridge_size > X86_64_DIRECT_MAP_WINDOW_SIZE) {
 		return false;
 	}
 
 	if (!plane_checked_add_u64(direct_map_base,
-				   X86_64_DIRECT_MAP_WINDOW_SIZE,
+				   direct_map_boot_bridge_size,
 				   &direct_map_end) ||
 	    (KERNEL_VMA_BASE >= direct_map_base &&
-	     KERNEL_VMA_BASE < direct_map_end)) {
+	     KERNEL_VMA_BASE < direct_map_end) ||
+	    ranges_overlap(direct_map_base, direct_map_end,
+			   X86_64_KERNEL_MAP_BASE, X86_64_KERNEL_MAP_END)) {
 		return false;
 	}
 
@@ -64,23 +86,33 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 
 	if (!plane_checked_align_up_u64(required_size, ARCH_LARGE_PAGE_SIZE,
 					&required_size) ||
+	    required_size > direct_map_boot_bridge_size ||
+	    !plane_checked_align_up_u64(required_size,
+					X86_64_PAGING_PML4_SLOT_SIZE,
+					&owned_window_size) ||
 	    required_size > X86_64_DIRECT_MAP_WINDOW_SIZE) {
 		return false;
 	}
 
 	direct_map_size = required_size;
+	direct_map_owned_window_size = owned_window_size;
 	direct_map_initialized = true;
 	return true;
 }
 
-bool x86_64_mmu_direct_map_runtime(plane_vaddr_t *base, uint64_t *size)
+bool x86_64_mmu_direct_map_runtime(
+	struct x86_64_mmu_direct_map_runtime *runtime)
 {
-	if (base == NULL || size == NULL || !direct_map_initialized) {
+	if (runtime == NULL || !direct_map_initialized) {
 		return false;
 	}
 
-	*base = plane_vaddr_make(direct_map_base);
-	*size = direct_map_size;
+	runtime->boot_base = plane_vaddr_make(direct_map_base);
+	runtime->boot_bridge_size = direct_map_boot_bridge_size;
+	runtime->required_size = direct_map_size;
+	runtime->owned_window_size = direct_map_owned_window_size;
+	runtime->owned_pml4_count =
+		direct_map_owned_window_size / X86_64_PAGING_PML4_SLOT_SIZE;
 	return true;
 }
 

@@ -11,7 +11,16 @@
  * the pmap ownership handoff. Boot-protocol direct maps are temporary bridges;
  * after ownership, pmap commits the Plane-owned physmap base here.
  */
-bool x86_64_mmu_direct_map_runtime(plane_vaddr_t *base, uint64_t *size);
+struct x86_64_mmu_direct_map_runtime {
+	plane_vaddr_t boot_base;
+	uint64_t boot_bridge_size;
+	uint64_t required_size;
+	uint64_t owned_window_size;
+	uint64_t owned_pml4_count;
+};
+
+bool x86_64_mmu_direct_map_runtime(
+	struct x86_64_mmu_direct_map_runtime *runtime);
 void x86_64_mmu_commit_owned_direct_map(void);
 
 #endif /* HAL_X86_64_MMU_INTERNAL_H */

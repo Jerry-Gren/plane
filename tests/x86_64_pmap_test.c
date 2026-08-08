@@ -4,6 +4,7 @@
 
 #include <hal/mmu.h>
 #include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/mmu_internal.h>
 #include <hal/x86_64/pmap.h>
 #include <plane/compiler.h>
 #include <plane/mm.h>
@@ -11,7 +12,7 @@
 
 #include "support/test.h"
 
-#define TEST_PAGE_COUNT 32
+#define TEST_PAGE_COUNT 720
 #define TEST_ALLOC_START_PAGE 16
 #define TEST_PHYS_SIZE (TEST_PAGE_COUNT * PAGE_SIZE)
 
@@ -187,14 +188,18 @@ bool x86_64_pat_write_combine_ready(void)
 	return test_pat_wc_ready;
 }
 
-bool x86_64_mmu_direct_map_runtime(plane_vaddr_t *base, uint64_t *size)
+bool x86_64_mmu_direct_map_runtime(
+	struct x86_64_mmu_direct_map_runtime *runtime)
 {
-	if (base == NULL || size == NULL || !test_direct_map_initialized) {
+	if (runtime == NULL || !test_direct_map_initialized) {
 		return false;
 	}
 
-	*base = test_direct_map_base;
-	*size = test_direct_map_size;
+	runtime->boot_base = test_direct_map_base;
+	runtime->boot_bridge_size = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
+	runtime->required_size = test_direct_map_size;
+	runtime->owned_window_size = X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE;
+	runtime->owned_pml4_count = 1;
 	return true;
 }
 
@@ -1088,7 +1093,8 @@ static int test_direct_map_builder_uses_2m_leaves(void)
 		"build direct map",
 		x86_64_pmap_build_direct_map_in_owned_root(
 			test_paddr(test_page_phys(0)),
-			test_vaddr(X86_64_DIRECT_MAP_BASE), size),
+			test_vaddr(X86_64_DIRECT_MAP_BASE), size,
+			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
 		true);
 	failures += test_expect_u64("build direct map allocations",
 				    allocated_page_count(), 3);
@@ -1116,6 +1122,51 @@ static int test_direct_map_builder_uses_2m_leaves(void)
 	return failures;
 }
 
+static int test_direct_map_builder_crosses_pml4_slots(void)
+{
+	uint64_t *pml4 = test_table(0);
+	uint64_t size = X86_64_PAGING_PML4_SLOT_SIZE + ARCH_LARGE_PAGE_SIZE;
+	uint64_t first_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE);
+	uint64_t second_index =
+		X86_64_PAGING_PML4_INDEX(X86_64_DIRECT_MAP_BASE +
+					 X86_64_PAGING_PML4_SLOT_SIZE);
+	uint64_t *second_pdpt;
+	uint64_t *second_pd;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"build direct map crosses pml4",
+		x86_64_pmap_build_direct_map_in_owned_root(
+			test_paddr(test_page_phys(0)),
+			test_vaddr(X86_64_DIRECT_MAP_BASE), size,
+			2 * X86_64_PAGING_PML4_SLOT_SIZE),
+		true);
+	failures += test_expect_bool("first pml4 present",
+				     x86_64_paging_entry_present(
+					     pml4[first_index]),
+				     true);
+	failures += test_expect_bool("second pml4 present",
+				     x86_64_paging_entry_present(
+					     pml4[second_index]),
+				     true);
+
+	second_pdpt = hal_mmu_direct_phys_to_virt(
+		pte_phys(pml4[second_index]));
+	second_pd = hal_mmu_direct_phys_to_virt(pte_phys(second_pdpt[0]));
+	failures += test_expect_u64(
+		"second pml4 first leaf",
+		second_pd[0],
+		X86_64_PAGING_PML4_SLOT_SIZE |
+		X86_64_PAGING_ENTRY_PRESENT |
+		X86_64_PAGING_ENTRY_WRITE |
+		X86_64_PAGING_ENTRY_PS);
+	failures += test_expect_u64("second pml4 stops after requested size",
+				    second_pd[1], 0);
+
+	return failures;
+}
+
 static int test_direct_map_builder_failure_rolls_back(void)
 {
 	uint64_t *pml4 = test_table(0);
@@ -1129,7 +1180,8 @@ static int test_direct_map_builder_failure_rolls_back(void)
 		x86_64_pmap_build_direct_map_in_owned_root(
 			test_paddr(test_page_phys(0)),
 			test_vaddr(X86_64_DIRECT_MAP_BASE),
-			ARCH_HUGE_PAGE_SIZE),
+			ARCH_HUGE_PAGE_SIZE,
+			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
 		false);
 	failures += test_expect_u64("build direct map rollback entry",
 				    pml4[pml4_index], 0);
@@ -1155,7 +1207,8 @@ static int test_direct_map_builder_rejects_existing_range(void)
 		x86_64_pmap_build_direct_map_in_owned_root(
 			test_paddr(test_page_phys(0)),
 			test_vaddr(X86_64_DIRECT_MAP_BASE),
-			ARCH_HUGE_PAGE_SIZE),
+			ARCH_HUGE_PAGE_SIZE,
+			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
 		false);
 	failures += test_expect_u64("build direct map preserves existing",
 				    pml4[pml4_index],
@@ -1178,7 +1231,8 @@ static int test_direct_map_builder_rejects_non_final_base(void)
 			test_paddr(test_page_phys(0)),
 			test_vaddr(X86_64_DIRECT_MAP_BASE +
 				   X86_64_DIRECT_MAP_WINDOW_SIZE),
-			ARCH_HUGE_PAGE_SIZE),
+			ARCH_HUGE_PAGE_SIZE,
+			X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE),
 		false);
 	failures += test_expect_u64("build non-final base no alloc",
 				    allocated_page_count(), 0);
@@ -1254,6 +1308,7 @@ int main(void)
 		TEST_CASE(test_clone_preserves_huge_leaf_entries),
 		TEST_CASE(test_clone_skips_direct_map_pml4_ranges),
 		TEST_CASE(test_direct_map_builder_uses_2m_leaves),
+		TEST_CASE(test_direct_map_builder_crosses_pml4_slots),
 		TEST_CASE(test_direct_map_builder_failure_rolls_back),
 		TEST_CASE(test_direct_map_builder_rejects_existing_range),
 		TEST_CASE(test_direct_map_builder_rejects_non_final_base),

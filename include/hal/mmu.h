@@ -25,13 +25,14 @@ enum hal_mmu_map_flags {
  * and not a boot-protocol handoff window. The mapping must already exist
  * before this API is enabled.
  *
- * Setting the base disables the conversion helpers until the direct map is
- * enabled again. Enabling derives the runtime coverage required by the memory
- * map and validates it against the architecture window. Boot-protocol direct
- * maps remain temporary bridges until page-table ownership rebuilds the
- * Plane-owned direct-map subtree.
+ * Installing a boot bridge disables the conversion helpers until the direct
+ * map is enabled again. Enabling derives the runtime coverage required by the
+ * memory map and validates it against both the boot bridge and the architecture
+ * window. Boot-protocol direct maps remain temporary bridges until page-table
+ * ownership rebuilds the Plane-owned direct-map subtree.
  */
-void hal_mmu_set_direct_map_base(plane_vaddr_t base);
+uint64_t hal_mmu_direct_map_window_size(void);
+void hal_mmu_set_boot_direct_map(plane_vaddr_t base, uint64_t size);
 bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem);
 
 /*

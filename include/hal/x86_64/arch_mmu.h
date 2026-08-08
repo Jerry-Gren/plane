@@ -8,13 +8,15 @@
 	#define X86_64_DIRECT_MAP_BASE 0xffff800000000000
 	#define X86_64_KERNEL_MAP_BASE 0xffff900000000000
 	/*
-	 * Plane-owned direct-map v2 capacity. One x86-64 PML4 slot covers
-	 * 512GiB; this is a physmap geometry boundary, not Plane's permanent
-	 * maximum memory design.
+	 * Plane-owned direct-map v3 capacity. One x86-64 PML4 slot covers
+	 * 512GiB; Plane computes the runtime slot count from sanitized memory.
+	 * MB2 still uses a one-slot pre-kmain bridge.
 	 */
-	#define X86_64_DIRECT_MAP_PML4_COUNT 1
+	#define X86_64_DIRECT_MAP_PML4_COUNT_MAX \
+		((X86_64_KERNEL_MAP_BASE - X86_64_DIRECT_MAP_BASE) / X86_64_PAGING_PML4_SLOT_SIZE)
 	#define X86_64_DIRECT_MAP_WINDOW_SIZE \
-		(X86_64_DIRECT_MAP_PML4_COUNT * X86_64_PAGING_PML4_SLOT_SIZE)
+		(X86_64_DIRECT_MAP_PML4_COUNT_MAX * X86_64_PAGING_PML4_SLOT_SIZE)
+	#define X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE X86_64_PAGING_PML4_SLOT_SIZE
 	/* v1 kernel dynamic mapping window. */
 	#define X86_64_KERNEL_MAP_SIZE 0x40000000
 #else
@@ -22,13 +24,15 @@
 	#define X86_64_DIRECT_MAP_BASE 0xffff800000000000ull
 	#define X86_64_KERNEL_MAP_BASE 0xffff900000000000ull
 	/*
-	 * Plane-owned direct-map v2 capacity. One x86-64 PML4 slot covers
-	 * 512GiB; this is a physmap geometry boundary, not Plane's permanent
-	 * maximum memory design.
+	 * Plane-owned direct-map v3 capacity. One x86-64 PML4 slot covers
+	 * 512GiB; Plane computes the runtime slot count from sanitized memory.
+	 * MB2 still uses a one-slot pre-kmain bridge.
 	 */
-	#define X86_64_DIRECT_MAP_PML4_COUNT 1ull
+	#define X86_64_DIRECT_MAP_PML4_COUNT_MAX \
+		((X86_64_KERNEL_MAP_BASE - X86_64_DIRECT_MAP_BASE) / X86_64_PAGING_PML4_SLOT_SIZE)
 	#define X86_64_DIRECT_MAP_WINDOW_SIZE \
-		(X86_64_DIRECT_MAP_PML4_COUNT * X86_64_PAGING_PML4_SLOT_SIZE)
+		(X86_64_DIRECT_MAP_PML4_COUNT_MAX * X86_64_PAGING_PML4_SLOT_SIZE)
+	#define X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE X86_64_PAGING_PML4_SLOT_SIZE
 	/* v1 kernel dynamic mapping window. */
 	#define X86_64_KERNEL_MAP_SIZE 0x40000000ull
 #endif
@@ -45,11 +49,11 @@
 	#error "X86_64_DIRECT_MAP_BASE must be 2MB aligned!"
 #endif
 
-#if X86_64_DIRECT_MAP_PML4_COUNT == 0
-	#error "X86_64_DIRECT_MAP_PML4_COUNT must be non-zero"
+#if X86_64_DIRECT_MAP_PML4_COUNT_MAX == 0
+	#error "X86_64_DIRECT_MAP_PML4_COUNT_MAX must be non-zero"
 #endif
 
-#if X86_64_DIRECT_MAP_PML4_COUNT > X86_64_PAGING_TABLE_ENTRIES
+#if X86_64_DIRECT_MAP_PML4_COUNT_MAX > X86_64_PAGING_TABLE_ENTRIES
 	#error "x86_64 direct map cannot consume more than the whole PML4"
 #endif
 
@@ -59,6 +63,14 @@
 
 #if (X86_64_DIRECT_MAP_WINDOW_SIZE & (ARCH_HUGE_PAGE_SIZE - 1)) != 0
 	#error "X86_64_DIRECT_MAP_WINDOW_SIZE must be 1GB aligned!"
+#endif
+
+#if (X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE & (ARCH_HUGE_PAGE_SIZE - 1)) != 0
+	#error "X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE must be 1GB aligned!"
+#endif
+
+#if X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE > X86_64_DIRECT_MAP_WINDOW_SIZE
+	#error "x86_64 direct-map boot bridge exceeds final direct-map window"
 #endif
 
 #if (X86_64_KERNEL_MAP_BASE & (ARCH_LARGE_PAGE_SIZE - 1)) != 0

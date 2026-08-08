@@ -9,6 +9,7 @@
 #include <plane/overflow.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
+#include <plane/util.h>
 
 static plane_paddr_t pmap_current_root_phys(void)
 {
@@ -298,7 +299,8 @@ static void pmap_direct_map_rollback(uint64_t *root,
 
 bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 						plane_vaddr_t base,
-						uint64_t size)
+						uint64_t required_size,
+						uint64_t window_size)
 {
 	uint64_t *root;
 	uint64_t *pdpt = NULL;
@@ -308,21 +310,23 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 	if (!plane_paddr_is_page_aligned(root_pml4_phys) ||
 	    !plane_vaddr_is_page_aligned(base) ||
 	    plane_vaddr_raw(base) != X86_64_DIRECT_MAP_BASE ||
-	    size > X86_64_DIRECT_MAP_WINDOW_SIZE ||
-	    (size & (ARCH_LARGE_PAGE_SIZE - 1)) != 0) {
+	    required_size > window_size ||
+	    window_size > X86_64_DIRECT_MAP_WINDOW_SIZE ||
+	    (required_size & (ARCH_LARGE_PAGE_SIZE - 1)) != 0 ||
+	    (window_size & (X86_64_PAGING_PML4_SLOT_SIZE - 1)) != 0) {
 		return false;
 	}
-	if (size == 0) {
+	if (required_size == 0) {
 		return true;
 	}
 
 	root = direct_map_page_table(root_pml4_phys);
 	if (root == NULL ||
-	    !pmap_direct_map_pml4_range_available(root, base, size)) {
+	    !pmap_direct_map_pml4_range_available(root, base, window_size)) {
 		return false;
 	}
 
-	while (mapped < size) {
+	while (mapped < required_size) {
 		uint64_t raw_vaddr;
 		uint64_t pml4_index;
 		uint64_t pdpt_index;
@@ -331,7 +335,7 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 
 		if (!plane_checked_add_u64(plane_vaddr_raw(base), mapped,
 					   &raw_vaddr)) {
-			pmap_direct_map_rollback(root, base, size);
+			pmap_direct_map_rollback(root, base, window_size);
 			return false;
 		}
 
@@ -340,7 +344,7 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 			plane_paddr_t pdpt_phys;
 
 			if (!pmap_alloc_zero_table(&pdpt_phys, &pdpt)) {
-				pmap_direct_map_rollback(root, base, size);
+				pmap_direct_map_rollback(root, base, window_size);
 				return false;
 			}
 			root[pml4_index] = x86_64_paging_entry_make(
@@ -352,7 +356,7 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 
 		pdpt_index = X86_64_PAGING_PDPT_INDEX(raw_vaddr);
 		if (!pmap_alloc_zero_table(&pd_phys, &pd)) {
-			pmap_direct_map_rollback(root, base, size);
+			pmap_direct_map_rollback(root, base, window_size);
 			return false;
 		}
 		pdpt[pdpt_index] = x86_64_paging_entry_make(
@@ -361,7 +365,8 @@ bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 			X86_64_PAGING_ENTRY_WRITE);
 
 		for (uint64_t pd_index = X86_64_PAGING_PD_INDEX(raw_vaddr);
-		     pd_index < X86_64_PAGING_TABLE_ENTRIES && mapped < size;
+		     pd_index < X86_64_PAGING_TABLE_ENTRIES &&
+		     mapped < required_size;
 		     pd_index++) {
 			pd[pd_index] = x86_64_paging_entry_make(
 				mapped,
@@ -810,30 +815,28 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t flags)
 bool hal_mmu_take_kernel_page_table_ownership(void)
 {
 	struct x86_64_pmap_skip_range skip[2];
-	plane_vaddr_t boot_direct_map_base;
-	uint64_t direct_map_size;
+	struct x86_64_mmu_direct_map_runtime direct_map;
 	plane_paddr_t new_pml4_phys;
 
-	if (!x86_64_mmu_direct_map_runtime(&boot_direct_map_base,
-					   &direct_map_size)) {
+	if (!x86_64_mmu_direct_map_runtime(&direct_map)) {
 		return false;
 	}
 
-	skip[0].base = boot_direct_map_base;
-	skip[0].size = direct_map_size;
+	skip[0].base = direct_map.boot_base;
+	skip[0].size = direct_map.boot_bridge_size;
 	skip[1].base = plane_vaddr_make(X86_64_DIRECT_MAP_BASE);
-	skip[1].size = direct_map_size;
+	skip[1].size = direct_map.owned_window_size;
 
 	if (!x86_64_pmap_clone_kernel_page_tables(pmap_current_root_phys(),
 						  skip,
-						  sizeof(skip) / sizeof(skip[0]),
+						  ARRAY_SIZE(skip),
 						  &new_pml4_phys)) {
 		return false;
 	}
 
 	if (!x86_64_pmap_build_direct_map_in_owned_root(
 		    new_pml4_phys, plane_vaddr_make(X86_64_DIRECT_MAP_BASE),
-		    direct_map_size)) {
+		    direct_map.required_size, direct_map.owned_window_size)) {
 		if (!free_cloned_page_table(new_pml4_phys, 4)) {
 			return false;
 		}

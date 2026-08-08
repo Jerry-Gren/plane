@@ -63,7 +63,7 @@ early_pdpt_direct:          .skip ARCH_PAGE_SIZE
 early_pd_ident:             .skip ARCH_PAGE_SIZE
 x86_64_mb2_early_pd_kernel: .skip ARCH_PAGE_SIZE
 x86_64_mb2_early_pd_fb:     .skip ARCH_PAGE_SIZE
-early_pd_direct:            .skip (X86_64_DIRECT_MAP_WINDOW_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
+early_pd_direct:            .skip (X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
 
 .align 16
 stack_bottom:
@@ -168,7 +168,7 @@ _start:
     mov $early_pdpt_direct, %edi
     mov $early_pd_direct, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
-    mov $(X86_64_DIRECT_MAP_WINDOW_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
+    mov $(X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
 .Lfill_direct_pdpt:
     mov %eax, (%edi)
     movl $0, 4(%edi)
@@ -215,7 +215,7 @@ _start:
 
     mov $early_pd_direct, %edi
     mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
-    mov $(X86_64_DIRECT_MAP_WINDOW_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
+    mov $(X86_64_DIRECT_MAP_BOOT_BRIDGE_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
 .Lfill_direct_pd:
     mov %eax, (%edi)
     movl $0, 4(%edi)

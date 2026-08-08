@@ -31,7 +31,8 @@ bool x86_64_pmap_clone_kernel_page_tables(plane_paddr_t source_pml4_phys,
 					  plane_paddr_t *new_pml4_phys);
 bool x86_64_pmap_build_direct_map_in_owned_root(plane_paddr_t root_pml4_phys,
 						plane_vaddr_t base,
-						uint64_t size);
+						uint64_t required_size,
+						uint64_t window_size);
 bool x86_64_pmap_map_page_in_owned_root(plane_paddr_t root_pml4_phys,
 					 plane_vaddr_t vaddr,
 					 plane_paddr_t phys_addr,
