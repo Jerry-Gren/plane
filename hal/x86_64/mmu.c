@@ -6,25 +6,29 @@
 #include <plane/overflow.h>
 
 static uint64_t direct_map_base = X86_64_DIRECT_MAP_BASE;
+static uint64_t direct_map_size;
 static bool direct_map_initialized;
 
 void hal_mmu_set_direct_map_base(plane_vaddr_t base)
 {
 	direct_map_base = plane_vaddr_raw(base);
+	direct_map_size = 0;
 	direct_map_initialized = false;
 }
 
 bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 {
 	uint64_t direct_map_end;
+	uint64_t required_size = 0;
 
 	direct_map_initialized = false;
+	direct_map_size = 0;
 
 	if (mem == NULL || (direct_map_base & (ARCH_LARGE_PAGE_SIZE - 1)) != 0) {
 		return false;
 	}
 
-	if (!plane_checked_add_u64(direct_map_base, X86_64_DIRECT_MAP_SIZE,
+	if (!plane_checked_add_u64(direct_map_base, X86_64_DIRECT_MAP_MAX_SIZE,
 				   &direct_map_end) ||
 	    (KERNEL_VMA_BASE >= direct_map_base &&
 	     KERNEL_VMA_BASE < direct_map_end)) {
@@ -40,12 +44,21 @@ bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem)
 			continue;
 		}
 
-		if (!plane_checked_add_u64(region_base, region->length, &end) ||
-		    end > X86_64_DIRECT_MAP_SIZE) {
+		if (!plane_checked_add_u64(region_base, region->length, &end)) {
 			return false;
+		}
+		if (end > required_size) {
+			required_size = end;
 		}
 	}
 
+	if (!plane_checked_align_up_u64(required_size, ARCH_LARGE_PAGE_SIZE,
+					&required_size) ||
+	    required_size > X86_64_DIRECT_MAP_MAX_SIZE) {
+		return false;
+	}
+
+	direct_map_size = required_size;
 	direct_map_initialized = true;
 	return true;
 }
@@ -64,7 +77,7 @@ plane_vaddr_t hal_mmu_direct_phys_range_to_virt(plane_paddr_t phys_addr,
 
 	if (!direct_map_initialized || size == 0 ||
 	    !plane_checked_add_u64(raw_phys, size, &end) ||
-	    end > X86_64_DIRECT_MAP_SIZE) {
+	    end > direct_map_size) {
 		return plane_vaddr_make(0);
 	}
 
@@ -85,7 +98,7 @@ plane_paddr_t hal_mmu_direct_virt_to_phys(plane_vaddr_t vaddr)
 	}
 
 	offset = addr - direct_map_base;
-	if (offset >= X86_64_DIRECT_MAP_SIZE) {
+	if (offset >= direct_map_size) {
 		return plane_paddr_make(HAL_MMU_INVALID_PHYS);
 	}
 

@@ -26,8 +26,9 @@ enum hal_mmu_map_flags {
  * before this API is enabled.
  *
  * Setting the base disables the conversion helpers until the direct map is
- * enabled again. Enabling validates the current direct-map coverage, but does
- * not create or modify page table mappings.
+ * enabled again. Enabling derives the runtime coverage required by the memory
+ * map and validates it against the architecture maximum, but does not create
+ * or modify page table mappings.
  */
 void hal_mmu_set_direct_map_base(plane_vaddr_t base);
 bool hal_mmu_enable_direct_map(const struct plane_mem_info *mem);
