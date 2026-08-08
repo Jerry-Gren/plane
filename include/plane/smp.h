@@ -10,19 +10,19 @@
 #define PLANE_MAX_CPUS 64
 
 /*
- * Early SMP foundation records topology and installs BSP CPU data into the
+ * Initial SMP foundation records topology and installs BSP CPU data into the
  * arch current-data slot. APs may be started only far enough to install
  * per-CPU architecture context, current data, and local interrupt state before
  * parking in a halt loop; PMM/VM/pmap/kmem remain BSP-only. Plane does not
  * expose a CPU-local fast accessor, IPI dispatch, TLB shootdown, or scheduling
  * yet.
  */
-enum plane_cpu_boot_state {
-	PLANE_CPU_BOOT_OFFLINE = 0,
-	PLANE_CPU_BOOT_PREPARED,
-	PLANE_CPU_BOOT_STARTING,
-	PLANE_CPU_BOOT_PARKED,
-	PLANE_CPU_BOOT_FAILED,
+enum plane_cpu_startup_state {
+	PLANE_CPU_STARTUP_OFFLINE = 0,
+	PLANE_CPU_STARTUP_PREPARED,
+	PLANE_CPU_STARTUP_STARTING,
+	PLANE_CPU_STARTUP_PARKED,
+	PLANE_CPU_STARTUP_FAILED,
 };
 
 struct plane_cpu_info {
@@ -51,7 +51,11 @@ struct plane_cpu_data {
 	plane_vaddr_t ap_stack_base;
 	plane_vaddr_t ap_stack_top;
 	uint64_t ap_stack_pages;
-	uint32_t boot_state;
+	uint32_t startup_state;
+};
+
+struct plane_smp_ap_launch {
+	struct plane_cpu_data *argument;
 };
 
 bool plane_smp_info_init(struct plane_smp_info *info);
@@ -71,6 +75,15 @@ uint32_t plane_cpu_current_id(void);
 bool plane_cpu_is_bsp(void);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id);
-enum plane_cpu_boot_state plane_cpu_boot_state(uint32_t logical_id);
+enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
+
+/*
+ * Bootloader-specific AP launch code uses these helpers to publish AP start
+ * requests without reaching into the kernel SMP state machine internals.
+ */
+bool plane_smp_startup_ap_is_launchable(uint32_t logical_id);
+bool plane_smp_startup_prepare_ap_launch(uint32_t logical_id,
+				      struct plane_smp_ap_launch *launch);
+void plane_smp_startup_enter_ap(struct plane_cpu_data *data) __noreturn;
 
 #endif /* PLANE_SMP_H */

@@ -47,7 +47,7 @@ static int run_sanitize_too_many_regions_failure_case(void)
 		actual.map[i + 1].type = PLANE_MEM_RESERVED;
 	}
 
-	int ret = plane_sanitize_memory_map(&actual);
+	int ret = plane_memmap_sanitize(&actual);
 	if (ret == 0) {
 		return 0;
 	}
@@ -66,7 +66,7 @@ static int run_sanitize_overflow_failure_case(void)
 	actual.map[0].length = 0x2000;
 	actual.map[0].type = PLANE_MEM_USABLE;
 
-	int ret = plane_sanitize_memory_map(&actual);
+	int ret = plane_memmap_sanitize(&actual);
 	if (ret == 0) {
 		return 0;
 	}
@@ -383,5 +383,5 @@ int main(void)
 		TEST_CASE(run_reserve_overflow_failure_case),
 	};
 
-	return test_run_cases("boot_mem_test", cases, TEST_ARRAY_SIZE(cases));
+	return test_run_cases("memmap_test", cases, TEST_ARRAY_SIZE(cases));
 }

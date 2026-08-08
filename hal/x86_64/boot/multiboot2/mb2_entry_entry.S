@@ -1,7 +1,7 @@
 #define ASM_FILE           1
 #include <multiboot2.h>
 
-#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 #include <hal/x86_64/cpuid_defs.h>
 #include <hal/x86_64/descriptor_defs.h>
 #include <hal/x86_64/msr_defs.h>
@@ -52,18 +52,18 @@ mb2_info:  .long 0
 
 /* Section bss */
 .section .boot.bss, "aw", @nobits
-.global x86_64_mb2_early_pml4
-.global x86_64_mb2_early_pd_kernel
-.global x86_64_mb2_early_pd_fb
+.global x86_64_mb2_bootstrap_pml4
+.global x86_64_mb2_bootstrap_pd_kernel
+.global x86_64_mb2_bootstrap_pd_fb
 .align ARCH_PAGE_SIZE
-x86_64_mb2_early_pml4:      .skip ARCH_PAGE_SIZE
-early_pdpt_ident:           .skip ARCH_PAGE_SIZE
-early_pdpt_high:            .skip ARCH_PAGE_SIZE
-early_pdpt_physmap:          .skip ARCH_PAGE_SIZE
-early_pd_ident:             .skip ARCH_PAGE_SIZE
-x86_64_mb2_early_pd_kernel: .skip ARCH_PAGE_SIZE
-x86_64_mb2_early_pd_fb:     .skip ARCH_PAGE_SIZE
-early_pd_physmap:            .skip (X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
+x86_64_mb2_bootstrap_pml4:      .skip ARCH_PAGE_SIZE
+bootstrap_pdpt_identity:           .skip ARCH_PAGE_SIZE
+bootstrap_pdpt_kernel:            .skip ARCH_PAGE_SIZE
+bootstrap_pdpt_physmap:          .skip ARCH_PAGE_SIZE
+bootstrap_pd_identity:             .skip ARCH_PAGE_SIZE
+x86_64_mb2_bootstrap_pd_kernel: .skip ARCH_PAGE_SIZE
+x86_64_mb2_bootstrap_pd_fb:     .skip ARCH_PAGE_SIZE
+bootstrap_pd_physmap:            .skip (X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_HUGE_PAGE_SIZE) * ARCH_PAGE_SIZE
 
 .align 16
 stack_bottom:
@@ -134,39 +134,39 @@ _start:
 
     /* setup page table */
     /* PML4 */
-    mov $x86_64_mb2_early_pml4, %edi
+    mov $x86_64_mb2_bootstrap_pml4, %edi
 
-    mov $early_pdpt_ident, %eax
+    mov $bootstrap_pdpt_identity, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
-    mov %eax, 0(%edi) /* PML4[0] -> early_pdpt_ident */
+    mov %eax, 0(%edi) /* PML4[0] -> bootstrap_pdpt_identity */
 
-    mov $early_pdpt_high, %eax
+    mov $bootstrap_pdpt_kernel, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, (X86_64_PAGING_PML4_INDEX(KERNEL_VMA_BASE) * 8)(%edi) /* dynamic PML4 index */
 
-    mov $early_pdpt_physmap, %eax
+    mov $bootstrap_pdpt_physmap, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, (X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE) * 8)(%edi)
 
     /* PDPT */
-    mov $early_pdpt_ident, %edi
-    mov $early_pd_ident, %eax
+    mov $bootstrap_pdpt_identity, %edi
+    mov $bootstrap_pd_identity, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
-    mov %eax, 0(%edi) /* early_pdpt_ident[0] -> early_pd_ident */
+    mov %eax, 0(%edi) /* bootstrap_pdpt_identity[0] -> bootstrap_pd_identity */
 
-    mov $early_pdpt_high, %edi
-    mov $x86_64_mb2_early_pd_kernel, %eax
+    mov $bootstrap_pdpt_kernel, %edi
+    mov $x86_64_mb2_bootstrap_pd_kernel, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, (X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) * 8)(%edi)
 
 #if X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) != X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
-    mov $x86_64_mb2_early_pd_fb, %eax
+    mov $x86_64_mb2_bootstrap_pd_fb, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov %eax, (X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE) * 8)(%edi)
 #endif
 
-    mov $early_pdpt_physmap, %edi
-    mov $early_pd_physmap, %eax
+    mov $bootstrap_pdpt_physmap, %edi
+    mov $bootstrap_pd_physmap, %eax
     or $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE), %eax
     mov $(X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_HUGE_PAGE_SIZE), %ecx
 .Lfill_physmap_pdpt:
@@ -195,7 +195,7 @@ _start:
 .Lpages_ok:
 
     push %ecx
-    mov $early_pd_ident, %edi
+    mov $bootstrap_pd_identity, %edi
     mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
 .Lfill_ident_pd:
     mov %eax, (%edi)
@@ -204,7 +204,7 @@ _start:
     loop .Lfill_ident_pd
     pop %ecx
 
-    mov $x86_64_mb2_early_pd_kernel, %edi
+    mov $x86_64_mb2_bootstrap_pd_kernel, %edi
     add $(X86_64_PAGING_PD_INDEX(KERNEL_VMA_BASE) * 8), %edi
     mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
 .Lfill_kernel_pd:
@@ -213,7 +213,7 @@ _start:
     add $8, %edi
     loop .Lfill_kernel_pd
 
-    mov $early_pd_physmap, %edi
+    mov $bootstrap_pd_physmap, %edi
     mov $(X86_64_PAGING_ENTRY_PRESENT | X86_64_PAGING_ENTRY_WRITE | X86_64_PAGING_ENTRY_PS), %eax
     mov $(X86_64_PHYSMAP_BOOTSTRAP_SIZE / ARCH_LARGE_PAGE_SIZE), %ecx
 .Lfill_physmap_pd:
@@ -224,7 +224,7 @@ _start:
     loop .Lfill_physmap_pd
 
     /* CR3 = PML4 */
-    mov $x86_64_mb2_early_pml4, %eax
+    mov $x86_64_mb2_bootstrap_pml4, %eax
     mov %eax, %cr3
     /* enable PAE */
     mov %cr4, %eax
@@ -236,10 +236,10 @@ _start:
     or $X86_64_MSR_IA32_EFER_LME, %eax
     wrmsr
     /*
-     * Early framebuffer write-combining setup.
+     * Bootstrap framebuffer write-combining setup.
      *
      * Plane currently gives framebuffer PDEs PWT=1, selecting PAT entry 1.
-     * Program that entry as WC here as a boot-time shortcut. This should move
+     * Program that entry as WC here as a bootstrap shortcut. This should move
      * behind a real cache-attribute / kernel IO-map policy when pmap grows
      * PAT-aware mappings.
      */

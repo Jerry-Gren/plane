@@ -10,7 +10,7 @@ static uint64_t last_gdtr;
 static uint32_t gdt_flush_count;
 static uint32_t tss_flush_count;
 static uint32_t idt_load_count;
-static enum plane_cpu_boot_state test_boot_states[PLANE_MAX_CPUS];
+static enum plane_cpu_startup_state test_startup_states[PLANE_MAX_CPUS];
 
 #include "../hal/x86_64/gdt.c"
 
@@ -30,19 +30,19 @@ void x86_64_idt_load_current(void)
 	idt_load_count++;
 }
 
-enum plane_cpu_boot_state plane_cpu_boot_state(uint32_t logical_id)
+enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 {
 	if (logical_id >= PLANE_MAX_CPUS) {
-		return PLANE_CPU_BOOT_FAILED;
+		return PLANE_CPU_STARTUP_FAILED;
 	}
 
-	return test_boot_states[logical_id];
+	return test_startup_states[logical_id];
 }
 
 static void reset_gdt_test(void)
 {
 	memset(cpu_desc_contexts, 0, sizeof(cpu_desc_contexts));
-	memset(test_boot_states, 0, sizeof(test_boot_states));
+	memset(test_startup_states, 0, sizeof(test_startup_states));
 	last_gdtr = 0;
 	gdt_flush_count = 0;
 	tss_flush_count = 0;
@@ -183,7 +183,7 @@ static int test_install_ap_context_validates_state_and_loads_context(void)
 	failures += test_expect_bool("install before starting rejected",
 				     hal_cpu_install_ap_startup_context(&data),
 				     false);
-	test_boot_states[2] = PLANE_CPU_BOOT_STARTING;
+	test_startup_states[2] = PLANE_CPU_STARTUP_STARTING;
 	failures += test_expect_bool("install starting ap",
 				     hal_cpu_install_ap_startup_context(&data),
 				     true);

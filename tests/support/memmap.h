@@ -114,7 +114,7 @@ static inline int test_run_memmap_sanitize_case(
 	memcpy(expected.map, tc->expected,
 	       tc->expected_count * sizeof(tc->expected[0]));
 
-	ret = plane_sanitize_memory_map(&actual);
+	ret = plane_memmap_sanitize(&actual);
 	if (ret == 1 && test_memmaps_equal(&actual, &expected)) {
 		return 0;
 	}

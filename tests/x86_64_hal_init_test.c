@@ -46,12 +46,12 @@ static void reset_hal_init_test(void)
 	idt_count = 0;
 }
 
-static int test_arch_early_init_succeeds_in_order(void)
+static int test_arch_startup_init_succeeds_in_order(void)
 {
 	int failures = 0;
 
-	failures += test_expect_bool("arch early init succeeds",
-				     hal_arch_early_init(), true);
+	failures += test_expect_bool("arch startup init succeeds",
+				     hal_arch_startup_init(), true);
 	failures += test_expect_u32("cpu features called",
 				    cpu_features_count, 1);
 	failures += test_expect_u32("pat called", pat_count, 1);
@@ -60,13 +60,13 @@ static int test_arch_early_init_succeeds_in_order(void)
 	return failures;
 }
 
-static int test_arch_early_init_rejects_cpu_feature_failure(void)
+static int test_arch_startup_init_rejects_cpu_feature_failure(void)
 {
 	int failures = 0;
 
 	cpu_features_ok = false;
 	failures += test_expect_bool("cpu feature failure rejected",
-				     hal_arch_early_init(), false);
+				     hal_arch_startup_init(), false);
 	failures += test_expect_u32("cpu features attempted",
 				    cpu_features_count, 1);
 	failures += test_expect_u32("pat skipped", pat_count, 0);
@@ -75,13 +75,13 @@ static int test_arch_early_init_rejects_cpu_feature_failure(void)
 	return failures;
 }
 
-static int test_arch_early_init_rejects_pat_failure(void)
+static int test_arch_startup_init_rejects_pat_failure(void)
 {
 	int failures = 0;
 
 	pat_ok = false;
 	failures += test_expect_bool("pat failure rejected",
-				     hal_arch_early_init(), false);
+				     hal_arch_startup_init(), false);
 	failures += test_expect_u32("cpu features called",
 				    cpu_features_count, 1);
 	failures += test_expect_u32("pat attempted", pat_count, 1);
@@ -93,9 +93,9 @@ static int test_arch_early_init_rejects_pat_failure(void)
 int main(void)
 {
 	static const struct test_case cases[] = {
-		TEST_CASE(test_arch_early_init_succeeds_in_order),
-		TEST_CASE(test_arch_early_init_rejects_cpu_feature_failure),
-		TEST_CASE(test_arch_early_init_rejects_pat_failure),
+		TEST_CASE(test_arch_startup_init_succeeds_in_order),
+		TEST_CASE(test_arch_startup_init_rejects_cpu_feature_failure),
+		TEST_CASE(test_arch_startup_init_rejects_pat_failure),
 	};
 
 	return test_run_cases_with_fixture("x86_64_hal_init_test", cases,

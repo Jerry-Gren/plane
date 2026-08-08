@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 #include <plane/memmap.h>
 
 #include "support/test.h"
@@ -23,9 +23,9 @@ static uint64_t test_paddr_raw(plane_paddr_t addr)
 	return plane_paddr_raw(addr);
 }
 
-static void test_set_mb2_bootstrap_physmap(void)
+static void test_set_mb2_bootstrap_physmap_window(void)
 {
-	x86_64_physmap_set_bootstrap(
+	x86_64_physmap_set_bootstrap_window(
 		test_vaddr(X86_64_PHYSMAP_BASE),
 		X86_64_PHYSMAP_BOOTSTRAP_SIZE);
 }
@@ -35,10 +35,10 @@ static uint64_t test_hhdm_base(void)
 	return X86_64_KERNEL_MAP_BASE + X86_64_PAGING_PML4_SLOT_SIZE;
 }
 
-static void test_set_limine_bootstrap_physmap(uint64_t base)
+static void test_set_limine_bootstrap_physmap_window(uint64_t base)
 {
-	x86_64_physmap_set_bootstrap(test_vaddr(base),
-				       x86_64_physmap_window_size());
+	x86_64_physmap_set_bootstrap_window(test_vaddr(base),
+					    x86_64_physmap_window_size());
 }
 
 static int test_physmap_roundtrip(void)
@@ -47,7 +47,7 @@ static int test_physmap_roundtrip(void)
 	plane_vaddr_t vaddr;
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(0x1000);
 	mem.map[0].length = 0x3000;
@@ -92,7 +92,7 @@ static int test_physmap_rejects_invalid_ranges(void)
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -125,7 +125,7 @@ static int test_physmap_rejects_invalid_ranges(void)
 	return failures;
 }
 
-static int test_bootstrap_physmap_base(void)
+static int test_bootstrap_physmap_window_base(void)
 {
 	struct plane_mem_info mem = {0};
 	uint64_t bootstrap_base =
@@ -138,16 +138,16 @@ static int test_bootstrap_physmap_base(void)
 	mem.map[0].type = PLANE_MEM_USABLE;
 	mem.entry_count = 1;
 
-	x86_64_physmap_set_bootstrap(
+	x86_64_physmap_set_bootstrap_window(
 		test_vaddr(bootstrap_base),
 		X86_64_PHYSMAP_BOOTSTRAP_SIZE);
-	failures += test_expect_bool("bootstrap physmap enable",
+	failures += test_expect_bool("bootstrap physmap window enable",
 				     hal_mmu_enable_physmap(&mem), true);
 	vaddr = hal_mmu_physmap_phys_to_virt(test_paddr(0x1000));
-	failures += test_expect_u64("bootstrap physmap phys to virt",
+	failures += test_expect_u64("bootstrap physmap window phys to virt",
 				    plane_vaddr_raw(vaddr),
 				    bootstrap_base + 0x1000);
-	failures += test_expect_u64("bootstrap physmap virt to phys",
+	failures += test_expect_u64("bootstrap physmap window virt to phys",
 				    test_paddr_raw(
 					    hal_mmu_physmap_virt_to_phys(vaddr)),
 				    0x1000);
@@ -163,7 +163,7 @@ static int test_physmap_runtime_counts_owned_pml4_slots(void)
 	uint64_t high_phys = X86_64_PHYSMAP_BOOTSTRAP_SIZE + 0x2000;
 	int failures = 0;
 
-	test_set_limine_bootstrap_physmap(hhdm_base);
+	test_set_limine_bootstrap_physmap_window(hhdm_base);
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -194,40 +194,6 @@ static int test_physmap_runtime_counts_owned_pml4_slots(void)
 	return failures;
 }
 
-static int test_kernel_vma_range(void)
-{
-	plane_vaddr_t base = {0};
-	uint64_t size = 0;
-	int failures = 0;
-
-	failures += test_expect_bool("kernel range",
-				     hal_mmu_kernel_vma_range(&base, &size),
-				     true);
-	failures += test_expect_u64("kernel range base",
-				    plane_vaddr_raw(base),
-				    X86_64_KERNEL_MAP_BASE);
-	failures += test_expect_u64("kernel range size",
-				    size, X86_64_KERNEL_MAP_SIZE);
-	failures += test_expect_bool("kernel range null base",
-				     hal_mmu_kernel_vma_range(NULL, &size),
-				     false);
-	failures += test_expect_bool("kernel range null size",
-				     hal_mmu_kernel_vma_range(&base, NULL),
-				     false);
-	failures += test_expect_bool(
-		"kernel range avoids physmap",
-		X86_64_KERNEL_MAP_BASE >= X86_64_PHYSMAP_WINDOW_END ||
-		X86_64_KERNEL_MAP_END <= X86_64_PHYSMAP_BASE,
-		true);
-	failures += test_expect_bool(
-		"kernel range avoids kernel image",
-		KERNEL_VMA_BASE < X86_64_KERNEL_MAP_BASE ||
-		KERNEL_VMA_BASE >= X86_64_KERNEL_MAP_END,
-		true);
-
-	return failures;
-}
-
 static int test_physmap_supports_runtime_coverage_above_64g(void)
 {
 	struct plane_mem_info mem = {0};
@@ -235,7 +201,7 @@ static int test_physmap_supports_runtime_coverage_above_64g(void)
 	plane_vaddr_t vaddr;
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x2000;
@@ -266,7 +232,7 @@ static int test_physmap_reserved_high_memory_does_not_extend_coverage(void)
 	uint64_t high_phys = 0x100000000ull;
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -294,7 +260,7 @@ static int test_physmap_covers_ram_like_boot_regions(void)
 	uint64_t high_kernel = 0x300000000ull;
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(0);
 	mem.map[0].length = 0x1000;
@@ -330,7 +296,7 @@ static int test_physmap_commit_converges_to_plane_base(void)
 		X86_64_PHYSMAP_BASE + X86_64_PHYSMAP_BOOTSTRAP_SIZE;
 	int failures = 0;
 
-	x86_64_physmap_set_bootstrap(
+	x86_64_physmap_set_bootstrap_window(
 		test_vaddr(bootstrap_base),
 		X86_64_PHYSMAP_BOOTSTRAP_SIZE);
 
@@ -361,7 +327,7 @@ static int test_physmap_rejects_mb2_bootstrap_shortfall(void)
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
-	test_set_mb2_bootstrap_physmap();
+	test_set_mb2_bootstrap_physmap_window();
 
 	mem.map[0].base = plane_paddr_make(
 		X86_64_PHYSMAP_BOOTSTRAP_SIZE);
@@ -385,7 +351,7 @@ static int test_physmap_rejects_bootstrap_kernel_map_overlap(void)
 	struct plane_mem_info mem = {0};
 	int failures = 0;
 
-	x86_64_physmap_set_bootstrap(
+	x86_64_physmap_set_bootstrap_window(
 		test_vaddr(X86_64_KERNEL_MAP_BASE - ARCH_LARGE_PAGE_SIZE),
 		2 * ARCH_LARGE_PAGE_SIZE);
 
@@ -406,7 +372,7 @@ static int test_physmap_rejects_ram_like_memory_above_window(void)
 	uint64_t hhdm_base = test_hhdm_base();
 	int failures = 0;
 
-	test_set_limine_bootstrap_physmap(hhdm_base);
+	test_set_limine_bootstrap_physmap_window(hhdm_base);
 
 	mem.map[0].base = plane_paddr_make(X86_64_PHYSMAP_WINDOW_SIZE);
 	mem.map[0].length = 0x1000;
@@ -441,10 +407,9 @@ int main(void)
 		TEST_CASE(test_physmap_rejects_ram_like_memory_above_window),
 		TEST_CASE(test_physmap_roundtrip),
 		TEST_CASE(test_physmap_rejects_invalid_ranges),
-		TEST_CASE(test_bootstrap_physmap_base),
-		TEST_CASE(test_kernel_vma_range),
+		TEST_CASE(test_bootstrap_physmap_window_base),
 	};
 
-	return test_run_cases("x86_64_mmu_test",
+	return test_run_cases("x86_64_physmap_test",
 			      cases, TEST_ARRAY_SIZE(cases));
 }

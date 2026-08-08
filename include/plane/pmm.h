@@ -9,7 +9,7 @@
 #include <plane/memmap.h>
 
 /*
- * Early physical page allocator.
+ * Physical page allocator.
  *
  * The returned addresses are physical addresses, not directly
  * dereferenceable virtual addresses. Pages are not zeroed unless

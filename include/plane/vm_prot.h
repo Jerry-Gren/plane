@@ -7,10 +7,10 @@
 #include <plane/bits.h>
 
 /*
- * XNU-like VM protection bitset foundation.
+ * XNU-like VM protection bitset.
  *
  * READ and WRITE are independent metadata bits. Plane currently has no
- * EXEC/NX and no no-access user mapping API. The early soft fault core and
+ * EXEC/NX and no no-access user mapping API. The minimal soft fault core and
  * hardware fault dispatch consume these bits.
  */
 enum plane_vm_prot {

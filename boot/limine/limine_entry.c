@@ -91,7 +91,7 @@ static plane_paddr_t boot_limine_framebuffer_phys_addr(
 }
 
 static void boot_limine_collect_framebuffer(
-	struct plane_video_info *video,
+	struct plane_framebuffer_info *framebuffer_info,
 	const struct boot_limine_arch_handoff *handoff)
 {
 	BUG_ON_MSG(framebuffer_request.response == NULL,
@@ -130,7 +130,7 @@ static void boot_limine_collect_framebuffer(
 
 	BUG_ON_MSG(fb->width > UINT32_MAX || fb->height > UINT32_MAX ||
 		   fb->pitch > UINT32_MAX || fb->bpp > UINT8_MAX,
-		   "limine framebuffer fields exceed plane_video_info limits");
+		   "limine framebuffer fields exceed plane_framebuffer_info limits");
 
 	uint64_t fb_size;
 	BUG_ON_MSG(!plane_checked_mul_u64(fb->pitch, fb->height, &fb_size),
@@ -139,21 +139,21 @@ static void boot_limine_collect_framebuffer(
 		   (unsigned long long)fb->height);
 	BUG_ON_MSG(fb_size == 0, "limine framebuffer size is zero");
 
-	video->framebuffer_addr = plane_vaddr_make((uint64_t)fb->address);
-	video->framebuffer_phys_addr =
+	framebuffer_info->framebuffer_addr = plane_vaddr_make((uint64_t)fb->address);
+	framebuffer_info->framebuffer_phys_addr =
 		boot_limine_framebuffer_phys_addr(handoff,
-						  video->framebuffer_addr);
-	video->framebuffer_size = fb_size;
-	video->width            = fb->width;
-	video->height           = fb->height;
-	video->pitch            = fb->pitch;
-	video->bpp              = fb->bpp;
-	video->red_mask_size    = fb->red_mask_size;
-	video->red_mask_shift   = fb->red_mask_shift;
-	video->green_mask_size  = fb->green_mask_size;
-	video->green_mask_shift = fb->green_mask_shift;
-	video->blue_mask_size   = fb->blue_mask_size;
-	video->blue_mask_shift  = fb->blue_mask_shift;
+						  framebuffer_info->framebuffer_addr);
+	framebuffer_info->framebuffer_size = fb_size;
+	framebuffer_info->width            = fb->width;
+	framebuffer_info->height           = fb->height;
+	framebuffer_info->pitch            = fb->pitch;
+	framebuffer_info->bpp              = fb->bpp;
+	framebuffer_info->red_mask_size    = fb->red_mask_size;
+	framebuffer_info->red_mask_shift   = fb->red_mask_shift;
+	framebuffer_info->green_mask_size  = fb->green_mask_size;
+	framebuffer_info->green_mask_shift = fb->green_mask_shift;
+	framebuffer_info->blue_mask_size   = fb->blue_mask_size;
+	framebuffer_info->blue_mask_shift  = fb->blue_mask_shift;
 }
 
 static void boot_limine_collect_memmap(struct plane_mem_info *mem)
@@ -283,13 +283,13 @@ void _start(void)
 	BUG_ON_MSG(LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false,
 		   "limine base revision is not supported");
 
-	struct boot_info b_info = {0};
+	struct plane_boot_info b_info = {0};
 	struct boot_limine_arch_handoff arch_handoff = {0};
 
 	boot_limine_collect_hhdm(&arch_handoff);
-	BUG_ON_MSG(!boot_limine_arch_init_handoff(&arch_handoff),
-		   "failed to initialize limine arch handoff");
-	boot_limine_collect_framebuffer(&b_info.video, &arch_handoff);
+	BUG_ON_MSG(!boot_limine_arch_install_hhdm_physmap(&arch_handoff),
+		   "failed to install limine HHDM physmap");
+	boot_limine_collect_framebuffer(&b_info.framebuffer, &arch_handoff);
 	boot_limine_collect_memmap(&b_info.mem);
 	boot_limine_collect_smp(&b_info.smp);
 	b_info.start_aps = boot_limine_smp_start_aps;

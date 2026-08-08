@@ -9,7 +9,7 @@ struct boot_limine_arch_handoff {
 	plane_vaddr_t hhdm_base;
 };
 
-bool boot_limine_arch_init_handoff(
+bool boot_limine_arch_install_hhdm_physmap(
 	const struct boot_limine_arch_handoff *handoff);
 bool boot_limine_arch_hhdm_virt_to_phys(
 	const struct boot_limine_arch_handoff *handoff,

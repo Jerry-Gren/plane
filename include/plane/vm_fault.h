@@ -10,7 +10,7 @@
 struct plane_vm_map;
 
 /*
- * Early XNU-like soft fault core.
+ * Minimal XNU-like soft fault.
  *
  * This handles a single kernel-map user page: map lookup, current protection
  * check, resident page lookup or zero-fill allocation, object insertion, and

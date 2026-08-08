@@ -1,7 +1,7 @@
 #include <stddef.h>
 
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 #include <plane/memmap.h>
 #include <plane/overflow.h>
 
@@ -31,13 +31,23 @@ uint64_t x86_64_physmap_window_size(void)
 	return X86_64_PHYSMAP_WINDOW_SIZE;
 }
 
-void x86_64_physmap_set_bootstrap(plane_vaddr_t base, uint64_t size)
+void x86_64_physmap_set_bootstrap_window(plane_vaddr_t base, uint64_t size)
 {
 	physmap_base = plane_vaddr_raw(base);
 	physmap_bootstrap_size = size;
 	physmap_required_size = 0;
 	physmap_owned_window_size = 0;
 	physmap_initialized = false;
+}
+
+bool x86_64_physmap_install_bootstrap_window(plane_vaddr_t base)
+{
+	if (plane_vaddr_is_null(base)) {
+		return false;
+	}
+
+	x86_64_physmap_set_bootstrap_window(base, x86_64_physmap_window_size());
+	return true;
 }
 
 bool hal_mmu_enable_physmap(const struct plane_mem_info *mem)
@@ -161,35 +171,4 @@ plane_paddr_t hal_mmu_physmap_virt_to_phys(plane_vaddr_t vaddr)
 	}
 
 	return plane_paddr_make(offset);
-}
-
-bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
-{
-	if (base == NULL || size == NULL) {
-		return false;
-	}
-
-	*base = plane_vaddr_make(X86_64_KERNEL_MAP_BASE);
-	*size = X86_64_KERNEL_MAP_SIZE;
-	return true;
-}
-
-void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
-{
-	/*
-	 * INVLPG invalidates cached translations for one linear address on the
-	 * current CPU. Cross-CPU shootdown comes with the later SMP pmap path.
-	 */
-	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
-}
-
-void hal_mmu_flush_tlb_all(void)
-{
-	__asm__ volatile (
-		"mov %%cr3, %%rax\n\t"
-		"mov %%rax, %%cr3\n\t"
-		: /* no input */
-		: /* no output */
-		: "rax", "memory"
-	);
 }

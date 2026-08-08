@@ -2,15 +2,15 @@
 #include <string.h>
 
 #include <hal/mmu.h>
-#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 
 #include <plane/util.h>
 
 #include "support/test.h"
 
-uint64_t x86_64_mb2_early_pml4[X86_64_PAGING_TABLE_ENTRIES];
-uint64_t x86_64_mb2_early_pd_kernel[X86_64_PAGING_TABLE_ENTRIES];
-uint64_t x86_64_mb2_early_pd_fb[X86_64_PAGING_TABLE_ENTRIES];
+uint64_t x86_64_mb2_bootstrap_pml4[X86_64_PAGING_TABLE_ENTRIES];
+uint64_t x86_64_mb2_bootstrap_pd_kernel[X86_64_PAGING_TABLE_ENTRIES];
+uint64_t x86_64_mb2_bootstrap_pd_fb[X86_64_PAGING_TABLE_ENTRIES];
 
 static uintptr_t invalidated_vaddrs[X86_64_PAGING_TABLE_ENTRIES];
 static uint64_t invalidate_count;
@@ -42,10 +42,10 @@ void hal_mmu_flush_tlb_all(void)
 
 static void reset_state(void)
 {
-	memset(x86_64_mb2_early_pml4, 0, sizeof(x86_64_mb2_early_pml4));
-	memset(x86_64_mb2_early_pd_kernel, 0,
-	       sizeof(x86_64_mb2_early_pd_kernel));
-	memset(x86_64_mb2_early_pd_fb, 0, sizeof(x86_64_mb2_early_pd_fb));
+	memset(x86_64_mb2_bootstrap_pml4, 0, sizeof(x86_64_mb2_bootstrap_pml4));
+	memset(x86_64_mb2_bootstrap_pd_kernel, 0,
+	       sizeof(x86_64_mb2_bootstrap_pd_kernel));
+	memset(x86_64_mb2_bootstrap_pd_fb, 0, sizeof(x86_64_mb2_bootstrap_pd_fb));
 	memset(invalidated_vaddrs, 0, sizeof(invalidated_vaddrs));
 	invalidate_count = 0;
 	flush_count = 0;
@@ -61,10 +61,10 @@ static void reset_invalidation_state(void)
 
 static uint64_t *framebuffer_target_pd(void)
 {
-	uint64_t *target_pd = x86_64_mb2_early_pd_fb;
+	uint64_t *target_pd = x86_64_mb2_bootstrap_pd_fb;
 #if X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) == \
 	X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
-	target_pd = x86_64_mb2_early_pd_kernel;
+	target_pd = x86_64_mb2_bootstrap_pd_kernel;
 #endif
 	return target_pd;
 }
@@ -77,11 +77,11 @@ static uint64_t framebuffer_page_flags(void)
 	       X86_64_PAGING_ENTRY_PS;
 }
 
-static int page_physmapory_untouched(void)
+static int page_tables_untouched(void)
 {
 	for (uint64_t i = 0; i < X86_64_PAGING_TABLE_ENTRIES; i++) {
-		if (x86_64_mb2_early_pd_fb[i] != 0 ||
-		    x86_64_mb2_early_pd_kernel[i] != 0) {
+		if (x86_64_mb2_bootstrap_pd_fb[i] != 0 ||
+		    x86_64_mb2_bootstrap_pd_kernel[i] != 0) {
 			return 0;
 		}
 	}
@@ -102,7 +102,7 @@ static int test_maps_unaligned_framebuffer(void)
 	reset_state();
 
 	failures += test_expect_bool("map unaligned framebuffer",
-				     x86_64_mb2_early_map_framebuffer(
+				     x86_64_mb2_bootstrap_map_framebuffer(
 					     plane_paddr_make(phys_addr),
 					     0x300000, &vaddr),
 				     true);
@@ -111,13 +111,13 @@ static int test_maps_unaligned_framebuffer(void)
 				    X86_64_MB2_FRAMEBUFFER_VMA_BASE +
 					    page_offset);
 	failures += test_expect_u64("first framebuffer pde",
-				    x86_64_mb2_early_pd_fb[start_idx],
+				    x86_64_mb2_bootstrap_pd_fb[start_idx],
 				    phys_base | flags);
 	failures += test_expect_u64("second framebuffer pde",
-				    x86_64_mb2_early_pd_fb[start_idx + 1],
+				    x86_64_mb2_bootstrap_pd_fb[start_idx + 1],
 				    (phys_base + ARCH_LARGE_PAGE_SIZE) | flags);
 	failures += test_expect_u64("third framebuffer pde",
-				    x86_64_mb2_early_pd_fb[start_idx + 2],
+				    x86_64_mb2_bootstrap_pd_fb[start_idx + 2],
 				    (phys_base + (2 * ARCH_LARGE_PAGE_SIZE)) |
 					    flags);
 	failures += test_expect_u64("invalidate count", invalidate_count, 3);
@@ -136,14 +136,14 @@ static int check_map_failure(const char *name, uint64_t phys_addr,
 	reset_state();
 
 	failures += test_expect_bool(name,
-				     x86_64_mb2_early_map_framebuffer(
+				     x86_64_mb2_bootstrap_map_framebuffer(
 					     plane_paddr_make(phys_addr), size,
 					     &vaddr),
 				     false);
 	failures += test_expect_u64("failure leaves out address unchanged",
 				    plane_vaddr_raw(vaddr), 0xfeedface);
 	failures += test_expect_bool("failure leaves page directories untouched",
-				     page_physmapory_untouched(), true);
+				     page_tables_untouched(), true);
 	failures += test_expect_u64("failure does not invalidate tlb",
 				    invalidate_count, 0);
 
@@ -182,7 +182,7 @@ static int test_unmaps_unaligned_framebuffer(void)
 	reset_state();
 
 	failures += test_expect_bool("map before unmap",
-				     x86_64_mb2_early_map_framebuffer(
+				     x86_64_mb2_bootstrap_map_framebuffer(
 					     plane_paddr_make(phys_addr),
 					     0x300000, &vaddr),
 				     true);
@@ -192,7 +192,7 @@ static int test_unmaps_unaligned_framebuffer(void)
 
 	reset_invalidation_state();
 	failures += test_expect_bool("unmap framebuffer",
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     vaddr, 0x300000),
 				     true);
 	failures += test_expect_u64("first pde cleared",
@@ -234,21 +234,21 @@ static int check_unmap_failure(const char *name, plane_vaddr_t vaddr,
 	target_pd[start_idx + 1] =
 		(0x123000 + ARCH_LARGE_PAGE_SIZE) |
 		framebuffer_page_flags();
-	memcpy(before_fb, x86_64_mb2_early_pd_fb, sizeof(before_fb));
-	memcpy(before_kernel, x86_64_mb2_early_pd_kernel,
+	memcpy(before_fb, x86_64_mb2_bootstrap_pd_fb, sizeof(before_fb));
+	memcpy(before_kernel, x86_64_mb2_bootstrap_pd_kernel,
 	       sizeof(before_kernel));
 
 	failures += test_expect_bool(name,
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     vaddr, size),
 				     false);
 	failures += test_expect_bool("failed unmap leaves fb pd unchanged",
-				     memcmp(before_fb, x86_64_mb2_early_pd_fb,
+				     memcmp(before_fb, x86_64_mb2_bootstrap_pd_fb,
 					    sizeof(before_fb)) == 0,
 				     true);
 	failures += test_expect_bool("failed unmap leaves kernel pd unchanged",
 				     memcmp(before_kernel,
-					    x86_64_mb2_early_pd_kernel,
+					    x86_64_mb2_bootstrap_pd_kernel,
 					    sizeof(before_kernel)) == 0,
 				     true);
 	failures += test_expect_u64("failed unmap does not invalidate",
@@ -298,7 +298,7 @@ static int test_unmap_rejects_missing_physmap(void)
 	physmap_available = false;
 
 	failures += test_expect_bool("reject missing physmap",
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     plane_vaddr_make(
 						     X86_64_MB2_FRAMEBUFFER_VMA_BASE),
 					     ARCH_LARGE_PAGE_SIZE),
@@ -325,7 +325,7 @@ static int test_unmap_preflight_rejects_absent_or_non_large_pde(void)
 
 	reset_state();
 	failures += test_expect_bool("reject absent pde",
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     vaddr, ARCH_LARGE_PAGE_SIZE),
 				     false);
 
@@ -333,20 +333,20 @@ static int test_unmap_preflight_rejects_absent_or_non_large_pde(void)
 	target_pd = framebuffer_target_pd();
 	target_pd[start_idx] = X86_64_PAGING_ENTRY_WRITE |
 			       X86_64_PAGING_ENTRY_PS;
-	memcpy(before_fb, x86_64_mb2_early_pd_fb, sizeof(before_fb));
-	memcpy(before_kernel, x86_64_mb2_early_pd_kernel,
+	memcpy(before_fb, x86_64_mb2_bootstrap_pd_fb, sizeof(before_fb));
+	memcpy(before_kernel, x86_64_mb2_bootstrap_pd_kernel,
 	       sizeof(before_kernel));
 	failures += test_expect_bool("reject non-present pde",
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     vaddr, ARCH_LARGE_PAGE_SIZE),
 				     false);
 	failures += test_expect_bool("non-present leaves fb pd unchanged",
-				     memcmp(before_fb, x86_64_mb2_early_pd_fb,
+				     memcmp(before_fb, x86_64_mb2_bootstrap_pd_fb,
 					    sizeof(before_fb)) == 0,
 				     true);
 	failures += test_expect_bool("non-present leaves kernel pd unchanged",
 				     memcmp(before_kernel,
-					    x86_64_mb2_early_pd_kernel,
+					    x86_64_mb2_bootstrap_pd_kernel,
 					    sizeof(before_kernel)) == 0,
 				     true);
 
@@ -354,20 +354,20 @@ static int test_unmap_preflight_rejects_absent_or_non_large_pde(void)
 	target_pd = framebuffer_target_pd();
 	target_pd[start_idx] = X86_64_PAGING_ENTRY_PRESENT |
 			       X86_64_PAGING_ENTRY_WRITE;
-	memcpy(before_fb, x86_64_mb2_early_pd_fb, sizeof(before_fb));
-	memcpy(before_kernel, x86_64_mb2_early_pd_kernel,
+	memcpy(before_fb, x86_64_mb2_bootstrap_pd_fb, sizeof(before_fb));
+	memcpy(before_kernel, x86_64_mb2_bootstrap_pd_kernel,
 	       sizeof(before_kernel));
 	failures += test_expect_bool("reject non-large pde",
-				     x86_64_mb2_early_unmap_framebuffer(
+				     x86_64_mb2_bootstrap_unmap_framebuffer(
 					     vaddr, ARCH_LARGE_PAGE_SIZE),
 				     false);
 	failures += test_expect_bool("non-large leaves fb pd unchanged",
-				     memcmp(before_fb, x86_64_mb2_early_pd_fb,
+				     memcmp(before_fb, x86_64_mb2_bootstrap_pd_fb,
 					    sizeof(before_fb)) == 0,
 				     true);
 	failures += test_expect_bool("non-large leaves kernel pd unchanged",
 				     memcmp(before_kernel,
-					    x86_64_mb2_early_pd_kernel,
+					    x86_64_mb2_bootstrap_pd_kernel,
 					    sizeof(before_kernel)) == 0,
 				     true);
 	failures += test_expect_u64("preflight failures do not invalidate",
@@ -381,11 +381,11 @@ static int test_remove_identity_mapping_flushes_all(void)
 	int failures = 0;
 
 	reset_state();
-	x86_64_mb2_early_pml4[0] = 0x123000 | X86_64_PAGING_ENTRY_PRESENT;
+	x86_64_mb2_bootstrap_pml4[0] = 0x123000 | X86_64_PAGING_ENTRY_PRESENT;
 
-	x86_64_mb2_early_remove_identity_mapping();
+	x86_64_mb2_bootstrap_remove_identity_mapping();
 	failures += test_expect_u64("identity pml4 cleared",
-				    x86_64_mb2_early_pml4[0], 0);
+				    x86_64_mb2_bootstrap_pml4[0], 0);
 	failures += test_expect_u64("identity removal flushes",
 				    flush_count, 1);
 
@@ -404,6 +404,6 @@ int main(void)
 		TEST_CASE(test_remove_identity_mapping_flushes_all),
 	};
 
-	return test_run_cases("mb2_early_mmu_test",
+	return test_run_cases("mb2_bootstrap_map_test",
 			      cases, TEST_ARRAY_SIZE(cases));
 }

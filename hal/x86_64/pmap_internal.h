@@ -19,7 +19,7 @@ struct x86_64_pmap_skip_range {
 	uint64_t size;
 };
 
-plane_paddr_t x86_64_pmap_active_root_phys(void);
+plane_paddr_t x86_64_pmap_current_root_phys(void);
 
 bool x86_64_pmap_clone_kernel_page_tables(
 	plane_paddr_t source_pml4_phys,

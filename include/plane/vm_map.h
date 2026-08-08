@@ -18,7 +18,7 @@
 struct plane_vm_object;
 
 /*
- * Early kernel virtual map.
+ * Kernel virtual map.
  *
  * This is the small kernel_map foundation used by kmem. It only manages
  * virtual address ranges; physical backing and page-table mappings belong to
@@ -41,7 +41,7 @@ struct plane_vm_map_stats {
 
 /*
  * Callers provide entry storage, but treat both structs as vm_map-owned state.
- * They are exposed so early kernel users can instantiate maps without kmem.
+ * They are exposed so pre-kmem kernel users can instantiate maps.
  *
  * A plane_vm_map object must be zero-initialized before its first init call.
  * Entry storage does not need to be zeroed by callers; init resets it.

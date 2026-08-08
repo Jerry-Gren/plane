@@ -8,7 +8,7 @@
 #include <plane/bits.h>
 
 /*
- * Early VM page metadata facade.
+ * VM page metadata.
  *
  * This is the XNU-like layer for resident page metadata queries. It does not
  * allocate physical pages, implement pager state, handle pageout, or provide

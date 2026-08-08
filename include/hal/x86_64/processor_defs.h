@@ -8,8 +8,8 @@
  *
  * Intel SDM Vol.3 Chapters 2, 3, 10, and 11 plus AMD APM Vol.2 define
  * RFLAGS bits and CR0/CR4 paging controls. Keep this header scoped to the
- * current early long-mode and IRQ-save paths; WP, SMEP/SMAP, PGE, PCID, and
- * broader control-register policy are later milestones.
+ * bootstrap long-mode setup and current IRQ-save paths; WP, SMEP/SMAP, PGE,
+ * PCID, and broader control-register policy are later milestones.
  */
 #define X86_64_RFLAGS_IF BIT(9)
 #define X86_64_RFLAGS_ID BIT(21)

@@ -12,7 +12,7 @@ struct plane_vm_map;
 struct plane_vm_object;
 
 /*
- * Early kernel virtual allocator.
+ * Minimal kernel virtual allocator.
  *
  * This owns a kernel virtual address window. Byte-size allocations are rounded
  * up to whole pages; this is a small kmem/vm_map foundation, not a sub-page
@@ -29,7 +29,7 @@ struct plane_vm_object;
  * no resident guard page materialized in the object.
  * PLANE_KMEM_ALLOC_READONLY records read-only entry protection in the kernel
  * map; kmem consumes that protection when creating and protecting mappings.
- * Protect APIs only support exact allocation ranges in this early layer.
+ * Protect APIs only support exact allocation ranges in this minimal layer.
  * Page faults are routed through the private kernel map only; generic map
  * fault handling lives in the VM fault layer.
  */

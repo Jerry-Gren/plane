@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 
-#include <x86_64/msr_internal.h>
+#include <x86_64/msr.h>
 
 static bool pat_write_combine_ready;
 

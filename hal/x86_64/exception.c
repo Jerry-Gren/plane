@@ -92,7 +92,7 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 	}
 
 	/*
-	 * Match XNU's early trap direction: the architecture error code is
+	 * Match XNU's reduced trap direction: the architecture error code is
 	 * translated into VM protection bits, then VM decides whether the
 	 * kernel-map fault can be satisfied.
 	 */

@@ -4,7 +4,7 @@
 #include <hal/serial.h>
 
 #include <plane/boot_info.h>
-#include <plane/early_video.h>
+#include <plane/framebuffer.h>
 #include <plane/entry.h>
 #include <plane/io_map.h>
 #include <plane/kmem.h>
@@ -22,7 +22,7 @@ static uint64_t release_size;
 
 void hal_serial_init(void) {}
 
-bool hal_arch_early_init(void)
+bool hal_arch_startup_init(void)
 {
 	return true;
 }
@@ -42,7 +42,7 @@ uint32_t plane_cpu_current_id(void)
 	return 0;
 }
 
-bool plane_sanitize_memory_map(struct plane_mem_info *mem)
+bool plane_memmap_sanitize(struct plane_mem_info *mem)
 {
 	return mem != NULL;
 }
@@ -73,10 +73,10 @@ bool plane_io_map_init(void)
 	return true;
 }
 
-bool plane_early_video_remap_framebuffer(struct plane_video_info *video)
+bool plane_framebuffer_remap(struct plane_framebuffer_info *framebuffer_info)
 {
 	remap_step = ++current_step;
-	return video != NULL;
+	return framebuffer_info != NULL;
 }
 
 bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
@@ -86,7 +86,7 @@ bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 
 void plane_pmm_log_stats(void) {}
 
-bool plane_smp_prepare_ap_stacks(void)
+bool plane_smp_startup_prepare_ap_stacks(void)
 {
 	return true;
 }
@@ -96,12 +96,12 @@ uint32_t plane_cpu_parked_count(void)
 	return 0;
 }
 
-bool plane_early_video_draw_test_pattern(struct plane_video_info *video)
+bool plane_framebuffer_draw_test_pattern(struct plane_framebuffer_info *framebuffer_info)
 {
-	return video != NULL;
+	return framebuffer_info != NULL;
 }
 
-static bool release_framebuffer_boot_mapping(plane_vaddr_t vaddr,
+static bool release_framebuffer_bootstrap_mapping(plane_vaddr_t vaddr,
 					     uint64_t size)
 {
 	release_step = ++current_step;
@@ -120,24 +120,24 @@ static void reset_state(void)
 	release_size = 0;
 }
 
-static struct boot_info boot_info_fixture(void)
+static struct plane_boot_info boot_info_fixture(void)
 {
-	struct boot_info info = {0};
+	struct plane_boot_info info = {0};
 
-	info.video.framebuffer_addr = plane_vaddr_make(0xffffffffc0001234ull);
-	info.video.framebuffer_phys_addr = plane_paddr_make(0xe0001234ull);
-	info.video.framebuffer_size = 0x300000;
+	info.framebuffer.framebuffer_addr = plane_vaddr_make(0xffffffffc0001234ull);
+	info.framebuffer.framebuffer_phys_addr = plane_paddr_make(0xe0001234ull);
+	info.framebuffer.framebuffer_size = 0x300000;
 	return info;
 }
 
 static int test_release_callback_runs_before_page_table_ownership(void)
 {
-	struct boot_info info = boot_info_fixture();
+	struct plane_boot_info info = boot_info_fixture();
 	int failures = 0;
 
 	reset_state();
-	info.release_framebuffer_boot_mapping =
-		release_framebuffer_boot_mapping;
+	info.release_framebuffer_bootstrap_mapping =
+		release_framebuffer_bootstrap_mapping;
 
 	kmain(&info);
 	failures += test_expect_bool("release callback called",
@@ -159,7 +159,7 @@ static int test_release_callback_runs_before_page_table_ownership(void)
 
 static int test_null_release_callback_is_skipped(void)
 {
-	struct boot_info info = boot_info_fixture();
+	struct plane_boot_info info = boot_info_fixture();
 	int failures = 0;
 
 	reset_state();
@@ -182,6 +182,6 @@ int main(void)
 		TEST_CASE(test_null_release_callback_is_skipped),
 	};
 
-	return test_run_cases("main_boot_test",
+	return test_run_cases("kernel_startup_test",
 			      cases, TEST_ARRAY_SIZE(cases));
 }

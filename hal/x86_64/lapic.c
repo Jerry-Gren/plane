@@ -15,7 +15,7 @@
 #include <plane/smp.h>
 
 #include "lapic_regs.h"
-#include <x86_64/msr_internal.h>
+#include <x86_64/msr.h>
 
 /*
  * XNU-like local APIC foundation, narrowed to xAPIC MMIO setup and fixed IPI

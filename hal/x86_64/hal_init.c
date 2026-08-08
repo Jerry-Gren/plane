@@ -4,7 +4,7 @@
 #include <hal/x86_64/idt.h>
 #include <hal/x86_64/pat.h>
 
-bool hal_arch_early_init(void)
+bool hal_arch_startup_init(void)
 {
 	if (!x86_64_cpu_features_init()) {
 		return false;

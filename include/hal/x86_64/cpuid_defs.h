@@ -8,7 +8,7 @@
  *
  * Intel SDM Vol.2 CPUID and AMD APM Vol.3 CPUID define the architectural
  * leaves and bit assignments below. Keep this header limited to fields that
- * current boot CPU decoding consumes; cache descriptors, topology leaves,
+ * current BSP CPU decoding consumes; cache descriptors, topology leaves,
  * SGX, AVX-512 details, and xstate enable policy are later milestones.
  */
 #define X86_64_CPUID_LEAF_BASIC_MAX     0x00000000

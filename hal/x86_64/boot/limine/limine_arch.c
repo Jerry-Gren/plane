@@ -2,16 +2,14 @@
 
 #include <x86_64/physmap_internal.h>
 
-bool boot_limine_arch_init_handoff(
+bool boot_limine_arch_install_hhdm_physmap(
 	const struct boot_limine_arch_handoff *handoff)
 {
 	if (handoff == NULL || plane_vaddr_is_null(handoff->hhdm_base)) {
 		return false;
 	}
 
-	x86_64_physmap_set_bootstrap(handoff->hhdm_base,
-				     x86_64_physmap_window_size());
-	return true;
+	return x86_64_physmap_install_bootstrap_window(handoff->hhdm_base);
 }
 
 bool boot_limine_arch_hhdm_virt_to_phys(

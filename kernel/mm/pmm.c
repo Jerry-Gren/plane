@@ -57,8 +57,8 @@ static struct pmm_page_queue free_queue;
 static struct plane_pmm_stats pmm_stats;
 static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
-static struct plane_page guard_page_bootstrap_pool[PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE];
-static struct plane_vm_zone_segment guard_page_bootstrap_segment;
+static struct plane_page bootstrap_guard_page_pool[PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE];
+static struct plane_vm_zone_segment bootstrap_guard_page_segment;
 static struct plane_vm_zone guard_page_zone;
 
 static uint64_t page_count_for_region(uint64_t start, uint64_t end)
@@ -320,10 +320,10 @@ static bool ensure_guard_page_zone(void)
 	}
 
 	return plane_vm_zone_init(&guard_page_zone,
-				  sizeof(guard_page_bootstrap_pool[0]),
-				  guard_page_bootstrap_pool,
+				  sizeof(bootstrap_guard_page_pool[0]),
+				  bootstrap_guard_page_pool,
 				  PLANE_VM_GUARD_PAGE_BOOTSTRAP_POOL_SIZE,
-				  &guard_page_bootstrap_segment);
+				  &bootstrap_guard_page_segment);
 }
 
 static bool guard_page_known(const struct plane_page *page)
@@ -363,7 +363,7 @@ static void reset_resident_links(struct plane_page *page)
 static void reset_guard_page_zone(void)
 {
 	guard_page_zone = (struct plane_vm_zone){0};
-	guard_page_bootstrap_segment = (struct plane_vm_zone_segment){0};
+	bootstrap_guard_page_segment = (struct plane_vm_zone_segment){0};
 	BUG_ON_MSG(!ensure_guard_page_zone(),
 		   "failed to reset guard page zone");
 }

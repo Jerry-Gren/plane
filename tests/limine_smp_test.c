@@ -4,10 +4,10 @@
 #include <hal/cpu.h>
 #include <hal/irq.h>
 #include <hal/local_interrupt.h>
+#include <plane/kmem.h>
 #include <plane/smp.h>
 
 #include "../boot/limine/limine_smp_internal.h"
-#include "../kernel/smp_internal.h"
 #include "support/test.h"
 
 bool hal_cpu_set_current_data(struct plane_cpu_data *data)
@@ -56,6 +56,22 @@ void hal_cpu_enter_on_stack(plane_vaddr_t stack_top,
 	}
 }
 
+bool plane_kmem_alloc_pages(uint64_t page_count, uint32_t flags,
+			    plane_vaddr_t *addr)
+{
+	(void)page_count;
+	(void)flags;
+	(void)addr;
+	return false;
+}
+
+bool plane_kmem_free_pages(plane_vaddr_t vaddr, uint64_t page_count)
+{
+	(void)vaddr;
+	(void)page_count;
+	return true;
+}
+
 static int test_limine_start_preflights_and_sets_ap_entries(void)
 {
 	int failures = 0;
@@ -88,8 +104,8 @@ static int test_limine_start_preflights_and_sets_ap_entries(void)
 	failures += test_expect_bool("unprepared ap blocks start",
 				     boot_limine_smp_start_aps(), false);
 	failures += test_expect_u32("ap1 still prepared",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_PREPARED);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_PREPARED);
 	failures += test_expect_ptr("ap1 goto unchanged",
 				    ap1.goto_address, NULL);
 	failures += test_expect_u64("ap1 extra unchanged",
@@ -106,8 +122,8 @@ static int test_limine_start_preflights_and_sets_ap_entries(void)
 	failures += test_expect_bool("missing ap2 handle blocks start",
 				     boot_limine_smp_start_aps(), false);
 	failures += test_expect_u32("ap1 still prepared after missing handle",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_PREPARED);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_PREPARED);
 	failures += test_expect_ptr("ap1 goto still unchanged",
 				    ap1.goto_address, NULL);
 
@@ -117,19 +133,19 @@ static int test_limine_start_preflights_and_sets_ap_entries(void)
 	failures += test_expect_bool("start aps succeeds",
 				     boot_limine_smp_start_aps(), true);
 	failures += test_expect_u32("ap1 starting",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_STARTING);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_STARTING);
 	failures += test_expect_u32("ap2 starting",
-				    plane_cpu_boot_state(2),
-				    PLANE_CPU_BOOT_STARTING);
+				    plane_cpu_startup_state(2),
+				    PLANE_CPU_STARTUP_STARTING);
 	failures += test_expect_u64("ap1 extra points at cpu data",
 				    ap1.extra_argument,
 				    (uint64_t)(uintptr_t)
-					    plane_cpu_boot_data_get(1));
+					    plane_cpu_data_get(1));
 	failures += test_expect_u64("ap2 extra points at cpu data",
 				    ap2.extra_argument,
 				    (uint64_t)(uintptr_t)
-					    plane_cpu_boot_data_get(2));
+					    plane_cpu_data_get(2));
 	failures += test_expect_not_null("ap1 goto set", ap1.goto_address);
 	failures += test_expect_ptr("ap2 uses same ap entry",
 				    ap2.goto_address, ap1.goto_address);

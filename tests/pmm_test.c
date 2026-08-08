@@ -794,7 +794,7 @@ static int test_grub_like_reservations_are_counted(void)
 	int failures = 0;
 
 	add_region(&mem, 0x1000, 0x9000, PLANE_MEM_USABLE);
-	failures += test_expect_bool("grub reserve boot info",
+	failures += test_expect_bool("grub reserve handoff info",
 				plane_memmap_reserve(&mem, plane_paddr_make(0x2000), 0x1000,
 						     PLANE_MEM_BOOTLOADER_RECLAIMABLE),
 				true);
@@ -831,7 +831,7 @@ static int test_limine_like_rich_memmap_is_counted(void)
 	add_region(&mem, 0x8000, 0x2000, PLANE_MEM_USABLE);
 
 	failures += test_expect_bool("limine-like sanitize",
-				plane_sanitize_memory_map(&mem), true);
+				plane_memmap_sanitize(&mem), true);
 	failures += test_expect_bool("limine-like pmm init",
 				plane_pmm_init(&mem), true);
 	stats = plane_pmm_get_stats();

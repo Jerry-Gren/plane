@@ -1,5 +1,5 @@
-#ifndef HAL_ARCH_MMU_H
-#define HAL_ARCH_MMU_H
+#ifndef HAL_X86_64_ADDRESS_SPACE_H
+#define HAL_X86_64_ADDRESS_SPACE_H
 
 #include <hal/x86_64/paging_defs.h>
 
@@ -102,4 +102,4 @@
 	#error "x86_64 physmap overlaps kernel map"
 #endif
 
-#endif /* HAL_ARCH_MMU_H */
+#endif /* HAL_X86_64_ADDRESS_SPACE_H */

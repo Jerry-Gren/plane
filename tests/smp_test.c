@@ -73,6 +73,15 @@ void hal_cpu_hang(void)
 	}
 }
 
+void hal_cpu_enter_on_stack(plane_vaddr_t stack_top,
+			    void (*entry)(struct plane_cpu_data *data),
+			    struct plane_cpu_data *data)
+{
+	(void)stack_top;
+	entry(data);
+	hal_cpu_hang();
+}
+
 static void call_ap_park_entry(struct plane_cpu_data *data)
 {
 	hal_hang_trap_enabled = true;
@@ -241,8 +250,8 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 static int test_ap_stack_prepare_and_state_transitions(void)
 {
 	int failures = 0;
-	struct plane_cpu_data *ap1 = plane_cpu_boot_data_get(1);
-	struct plane_cpu_data *ap2 = plane_cpu_boot_data_get(2);
+	struct plane_cpu_data *ap1 = plane_cpu_startup_data_get(1);
+	struct plane_cpu_data *ap2 = plane_cpu_startup_data_get(2);
 
 	failures += test_expect_bool("prepare rejects bsp",
 				     plane_smp_prepare_ap_stack(
@@ -280,8 +289,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 					     1, plane_vaddr_make(0x900000), 1),
 				     false);
 	failures += test_expect_u32("ap1 state prepared",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_PREPARED);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_PREPARED);
 	if (ap1 != NULL) {
 		failures += test_expect_u64("ap1 stack base",
 					    plane_vaddr_raw(ap1->ap_stack_base),
@@ -298,8 +307,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_bool("start ap1 again rejected",
 				     plane_smp_mark_ap_starting(1), false);
 	failures += test_expect_u32("ap1 state starting",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_STARTING);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_STARTING);
 	call_ap_park_entry(ap1);
 	failures += test_expect_u32("park entry installs context",
 				    hal_install_context_count, 1);
@@ -314,8 +323,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_ptr("local interrupts sees ap1",
 				    hal_last_local_interrupts_data, ap1);
 	failures += test_expect_u32("ap1 state parked",
-				    plane_cpu_boot_state(1),
-				    PLANE_CPU_BOOT_PARKED);
+				    plane_cpu_startup_state(1),
+				    PLANE_CPU_STARTUP_PARKED);
 	failures += test_expect_u32("one parked ap",
 				    plane_cpu_parked_count(), 1);
 	failures += test_expect_bool("fail parked ap rejected",
@@ -331,12 +340,12 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	call_ap_park_entry(ap2);
 	hal_install_context_should_fail = false;
 	failures += test_expect_u32("ap2 state failed",
-				    plane_cpu_boot_state(2),
-				    PLANE_CPU_BOOT_FAILED);
+				    plane_cpu_startup_state(2),
+				    PLANE_CPU_STARTUP_FAILED);
 	failures += test_expect_u32("parked count unchanged",
 				    plane_cpu_parked_count(), 1);
 
-	struct plane_cpu_data *ap3 = plane_cpu_boot_data_get(3);
+	struct plane_cpu_data *ap3 = plane_cpu_startup_data_get(3);
 
 	failures += test_expect_bool("prepare ap3",
 				     plane_smp_prepare_ap_stack(
@@ -348,8 +357,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	call_ap_park_entry(ap3);
 	hal_local_interrupts_should_fail = false;
 	failures += test_expect_u32("ap3 state failed after local interrupts",
-				    plane_cpu_boot_state(3),
-				    PLANE_CPU_BOOT_FAILED);
+				    plane_cpu_startup_state(3),
+				    PLANE_CPU_STARTUP_FAILED);
 	failures += test_expect_u32("local interrupts called for ap3",
 				    hal_local_interrupts_count, 2);
 	failures += test_expect_ptr("local interrupts sees ap3",
@@ -362,7 +371,7 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 static int test_ap_stack_prepare_rejects_after_context_failure_path(void)
 {
 	int failures = 0;
-	struct plane_cpu_data *ap4 = plane_cpu_boot_data_get(4);
+	struct plane_cpu_data *ap4 = plane_cpu_startup_data_get(4);
 
 	hal_prepare_context_should_fail = true;
 	failures += test_expect_bool("prepare ap4 context failure rejected",
@@ -371,8 +380,8 @@ static int test_ap_stack_prepare_rejects_after_context_failure_path(void)
 				     false);
 	hal_prepare_context_should_fail = false;
 	failures += test_expect_u32("ap4 still offline",
-				    plane_cpu_boot_state(4),
-				    PLANE_CPU_BOOT_OFFLINE);
+				    plane_cpu_startup_state(4),
+				    PLANE_CPU_STARTUP_OFFLINE);
 	if (ap4 != NULL) {
 		failures += test_expect_u64("ap4 stack base cleared",
 					    plane_vaddr_raw(ap4->ap_stack_base),

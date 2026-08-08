@@ -2,7 +2,7 @@
 
 #include <boot/limine/limine_arch.h>
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 #include <plane/memmap.h>
 
 #include "support/test.h"
@@ -33,11 +33,13 @@ static int test_limine_arch_rejects_invalid_handoff(void)
 	plane_paddr_t phys_addr = test_paddr(UINT64_MAX);
 	int failures = 0;
 
-	failures += test_expect_bool("limine arch init null",
-				     boot_limine_arch_init_handoff(NULL),
+	failures += test_expect_bool("limine arch install null hhdm physmap",
+				     boot_limine_arch_install_hhdm_physmap(
+					     NULL),
 				     false);
-	failures += test_expect_bool("limine arch init null hhdm",
-				     boot_limine_arch_init_handoff(&null_hhdm),
+	failures += test_expect_bool("limine arch install null hhdm",
+				     boot_limine_arch_install_hhdm_physmap(
+					     &null_hhdm),
 				     false);
 	failures += test_expect_bool("limine arch convert null handoff",
 				     boot_limine_arch_hhdm_virt_to_phys(
@@ -87,7 +89,7 @@ static int test_limine_arch_hhdm_virt_to_phys(void)
 	return failures;
 }
 
-static int test_limine_arch_installs_bootstrap_physmap(void)
+static int test_limine_arch_installs_hhdm_physmap(void)
 {
 	struct boot_limine_arch_handoff handoff = {
 		.hhdm_base = test_vaddr(test_hhdm_base()),
@@ -101,8 +103,9 @@ static int test_limine_arch_installs_bootstrap_physmap(void)
 	mem.map[0].type = PLANE_MEM_USABLE;
 	mem.entry_count = 1;
 
-	failures += test_expect_bool("limine arch init hhdm",
-				     boot_limine_arch_init_handoff(&handoff),
+	failures += test_expect_bool("limine arch install hhdm physmap",
+				     boot_limine_arch_install_hhdm_physmap(
+					     &handoff),
 				     true);
 	failures += test_expect_bool("limine arch enable physmap",
 				     hal_mmu_enable_physmap(&mem), true);
@@ -119,7 +122,7 @@ int main(void)
 	static const struct test_case cases[] = {
 		TEST_CASE(test_limine_arch_rejects_invalid_handoff),
 		TEST_CASE(test_limine_arch_hhdm_virt_to_phys),
-		TEST_CASE(test_limine_arch_installs_bootstrap_physmap),
+		TEST_CASE(test_limine_arch_installs_hhdm_physmap),
 	};
 
 	return test_run_cases("x86_64_limine_arch_test", cases,

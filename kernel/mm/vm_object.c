@@ -11,9 +11,9 @@
 #include "vm_zone_internal.h"
 
 /*
- * Early fixed-size resident hash. XNU sizes vm_page_buckets from managed
+ * Fixed-size resident hash table. XNU sizes vm_page_buckets from managed
  * memory; Plane keeps a small static table until VM metadata allocation grows
- * past early boot constraints.
+ * enough to replace this startup storage.
  */
 #define PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS 256
 /*
@@ -23,8 +23,8 @@
 #define PLANE_VM_OBJECT_HASH_LOOKUP_THRESHOLD 10
 #define PLANE_VM_OBJECT_POOL_SIZE 256
 
-static struct plane_page *bootstrap_resident_hash[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
-static struct plane_page **resident_hash = bootstrap_resident_hash;
+static struct plane_page *bootstrap_resident_hash_buckets[PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS];
+static struct plane_page **resident_hash = bootstrap_resident_hash_buckets;
 static uint64_t resident_hash_bucket_count = PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS;
 static struct plane_vm_object bootstrap_object_pool[PLANE_VM_OBJECT_POOL_SIZE];
 static struct plane_vm_zone_segment bootstrap_object_segment;
@@ -435,9 +435,9 @@ void plane_vm_object_reset_bootstrap_for_tests(void)
 		bootstrap_object_pool[i] = (struct plane_vm_object){0};
 	}
 	for (uint64_t i = 0; i < PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS; i++) {
-		bootstrap_resident_hash[i] = NULL;
+		bootstrap_resident_hash_buckets[i] = NULL;
 	}
-	resident_hash = bootstrap_resident_hash;
+	resident_hash = bootstrap_resident_hash_buckets;
 	resident_hash_bucket_count = PLANE_VM_OBJECT_RESIDENT_HASH_BUCKETS;
 }
 

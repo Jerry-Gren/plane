@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 #include <hal/x86_64/pmap.h>
 #include <plane/compiler.h>
 #include <plane/mm.h>
@@ -51,7 +51,7 @@ static uint64_t test_paddr_raw(plane_paddr_t addr)
 	return plane_paddr_raw(addr);
 }
 
-plane_paddr_t x86_64_pmap_active_root_phys(void)
+plane_paddr_t x86_64_pmap_current_root_phys(void)
 {
 	return test_paddr(test_page_phys(0));
 }
@@ -207,6 +207,40 @@ bool x86_64_physmap_get_runtime(struct x86_64_physmap_runtime *runtime)
 void x86_64_physmap_commit_owned(void)
 {
 	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
+}
+
+static int test_kernel_vma_range(void)
+{
+	plane_vaddr_t base = {0};
+	uint64_t size = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("kernel range",
+				     hal_mmu_kernel_vma_range(&base, &size),
+				     true);
+	failures += test_expect_u64("kernel range base",
+				    plane_vaddr_raw(base),
+				    X86_64_KERNEL_MAP_BASE);
+	failures += test_expect_u64("kernel range size",
+				    size, X86_64_KERNEL_MAP_SIZE);
+	failures += test_expect_bool("kernel range null base",
+				     hal_mmu_kernel_vma_range(NULL, &size),
+				     false);
+	failures += test_expect_bool("kernel range null size",
+				     hal_mmu_kernel_vma_range(&base, NULL),
+				     false);
+	failures += test_expect_bool(
+		"kernel range avoids physmap",
+		X86_64_KERNEL_MAP_BASE >= X86_64_PHYSMAP_WINDOW_END ||
+		X86_64_KERNEL_MAP_END <= X86_64_PHYSMAP_BASE,
+		true);
+	failures += test_expect_bool(
+		"kernel range avoids kernel image",
+		KERNEL_VMA_BASE < X86_64_KERNEL_MAP_BASE ||
+		KERNEL_VMA_BASE >= X86_64_KERNEL_MAP_END,
+		true);
+
+	return failures;
 }
 
 static void *test_physmap_phys_to_virt(uint64_t phys_addr)
@@ -1108,14 +1142,14 @@ static int test_clone_skips_physmap_pml4_ranges(void)
 	};
 	uint64_t final_index =
 		X86_64_PAGING_PML4_INDEX(X86_64_PHYSMAP_BASE);
-	uint64_t boot_index = X86_64_PAGING_PML4_INDEX(
+	uint64_t bootstrap_index = X86_64_PAGING_PML4_INDEX(
 		X86_64_PHYSMAP_BASE + X86_64_PHYSMAP_WINDOW_SIZE);
 	int failures = 0;
 
 	pml4[final_index] = test_page_phys(1) |
 			    X86_64_PAGING_ENTRY_PRESENT |
 			    X86_64_PAGING_ENTRY_WRITE;
-	pml4[boot_index] = test_page_phys(2) |
+	pml4[bootstrap_index] = test_page_phys(2) |
 			   X86_64_PAGING_ENTRY_PRESENT |
 			   X86_64_PAGING_ENTRY_WRITE;
 	pml4[0] = test_page_phys(3) |
@@ -1135,8 +1169,8 @@ static int test_clone_skips_physmap_pml4_ranges(void)
 
 	failures += test_expect_u64("clone skips final physmap",
 				    new_pml4[final_index], 0);
-	failures += test_expect_u64("clone skips boot physmap",
-				    new_pml4[boot_index], 0);
+	failures += test_expect_u64("clone skips bootstrap physmap",
+				    new_pml4[bootstrap_index], 0);
 	failures += test_expect_bool("clone keeps ordinary pml4",
 				     x86_64_paging_entry_present(new_pml4[0]),
 				     true);
@@ -1353,6 +1387,7 @@ static int test_clone_physmap_failure_releases_allocated_tables(void)
 int main(void)
 {
 	static const struct test_case cases[] = {
+		TEST_CASE(test_kernel_vma_range),
 		TEST_CASE(test_map_page_allocates_missing_path),
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),

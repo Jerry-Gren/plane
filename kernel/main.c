@@ -1,5 +1,5 @@
 #include <plane/boot_info.h>
-#include <plane/early_video.h>
+#include <plane/framebuffer.h>
 #include <plane/entry.h>
 #include <plane/io_map.h>
 #include <plane/kmem.h>
@@ -13,27 +13,27 @@
 
 #include "smp_internal.h"
 
-void kmain(struct boot_info *info)
+void kmain(struct plane_boot_info *info)
 {
 	hal_serial_init();
-	BUG_ON_MSG(!hal_arch_early_init(),
-		   "failed to initialize architecture early runtime");
+	BUG_ON_MSG(!hal_arch_startup_init(),
+		   "failed to initialize architecture startup runtime");
 	BUG_ON_MSG(!plane_smp_init_bsp(&info->smp),
 		   "failed to initialize BSP SMP topology");
 	pr_info("SMP: cpus=%u bsp=%u\n",
 		plane_cpu_count(), plane_cpu_current_id());
 
-	BUG_ON_MSG(!plane_sanitize_memory_map(&info->mem),
-		   "failed to sanitize boot memory map");
+	BUG_ON_MSG(!plane_memmap_sanitize(&info->mem),
+		   "failed to sanitize memory map handoff");
 	BUG_ON_MSG(!hal_mmu_enable_physmap(&info->mem),
 		   "failed to enable kernel physmap");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
-	if (info->release_framebuffer_boot_mapping != NULL) {
-		BUG_ON_MSG(!info->release_framebuffer_boot_mapping(
-				   info->video.framebuffer_addr,
-				   info->video.framebuffer_size),
-			   "failed to release framebuffer boot mapping");
+	if (info->release_framebuffer_bootstrap_mapping != NULL) {
+		BUG_ON_MSG(!info->release_framebuffer_bootstrap_mapping(
+				   info->framebuffer.framebuffer_addr,
+				   info->framebuffer.framebuffer_size),
+			   "failed to release framebuffer bootstrap mapping");
 	}
 	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
@@ -41,13 +41,13 @@ void kmain(struct boot_info *info)
 		   "failed to initialize kernel memory allocator");
 	BUG_ON_MSG(!plane_io_map_init(),
 		   "failed to initialize kernel IO mapper");
-	BUG_ON_MSG(!plane_early_video_remap_framebuffer(&info->video),
-		   "failed to remap early framebuffer through IO map");
+	BUG_ON_MSG(!plane_framebuffer_remap(&info->framebuffer),
+		   "failed to remap framebuffer through IO map");
 	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
 		   "failed to initialize BSP local interrupts");
 	plane_pmm_log_stats();
 
-	BUG_ON_MSG(!plane_smp_prepare_ap_stacks(),
+	BUG_ON_MSG(!plane_smp_startup_prepare_ap_stacks(),
 		   "failed to prepare AP startup stacks");
 	if (info->start_aps != NULL) {
 		BUG_ON_MSG(!info->start_aps(),
@@ -59,8 +59,8 @@ void kmain(struct boot_info *info)
 	 * TODO:
 	 * vmm_init();
 	 */
-	BUG_ON_MSG(!plane_early_video_draw_test_pattern(&info->video),
-		   "failed to draw early framebuffer test pattern");
+	BUG_ON_MSG(!plane_framebuffer_draw_test_pattern(&info->framebuffer),
+		   "failed to draw framebuffer test pattern");
 
 	pr_info("Kernel initialization completed. System halted.\n");
 }

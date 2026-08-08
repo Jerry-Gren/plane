@@ -21,7 +21,7 @@ struct plane_vm_zone {
 };
 
 /*
- * Tiny early VM metadata zone.
+ * Tiny VM metadata zone allocator.
  *
  * This mirrors the ownership shape of XNU zones without implementing a
  * general-purpose allocator: callers supply storage and segment descriptors,

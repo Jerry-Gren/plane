@@ -5,19 +5,19 @@
 #include <stdint.h>
 
 /*
- * Early resident VM object metadata.
+ * Resident VM object metadata.
  *
  * This is an XNU-like foundation for associating object offsets with
  * resident physical page metadata. It does not own page lifetime and does
  * not allocate or free PMM pages.
  * Resident insert/remove maintains each page's object/offset identity.
  * ref_count is object lifetime ownership only. Resident and wired counts are
- * early page accounting only; they are not object references, pager
+ * current page accounting only; they are not object references, pager
  * accounting, ledgers, or pageout state.
  * internal is reserved for the later internal-vs-external object split.
- * allocated marks storage owned by the early fixed object pool. Allocate
+ * allocated marks storage owned by the object metadata zone. Allocate
  * returns one lifetime reference, mirroring XNU's object-zone allocation
- * boundary in a fixed early pool.
+ * boundary in Plane's reduced metadata allocator.
  *
  * A plane_vm_object must be zero-initialized before its first init call.
  */

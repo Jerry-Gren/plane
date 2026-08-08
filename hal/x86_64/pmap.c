@@ -1,9 +1,10 @@
 #include <stddef.h>
 
 #include <hal/mmu.h>
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 #include <hal/x86_64/pat.h>
 #include <hal/x86_64/pmap.h>
+#include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/overflow.h>
 #include <plane/printk.h>
@@ -14,9 +15,43 @@
 #include <x86_64/physmap_internal.h>
 #include <x86_64/pmap_internal.h>
 
-static plane_paddr_t pmap_current_root_phys(void)
+plane_paddr_t __weak x86_64_pmap_current_root_phys(void)
 {
-	return x86_64_pmap_active_root_phys();
+	uint64_t cr3;
+
+	__asm__ volatile ("mov %%cr3, %0" : "=r" (cr3));
+	return plane_paddr_make(cr3 & X86_64_PAGING_ENTRY_ADDR_MASK);
+}
+
+bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
+{
+	if (base == NULL || size == NULL) {
+		return false;
+	}
+
+	*base = plane_vaddr_make(X86_64_KERNEL_MAP_BASE);
+	*size = X86_64_KERNEL_MAP_SIZE;
+	return true;
+}
+
+void __weak hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
+{
+	/*
+	 * INVLPG invalidates cached translations for one linear address on the
+	 * current CPU. Cross-CPU shootdown comes with the later SMP pmap path.
+	 */
+	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
+}
+
+void __weak hal_mmu_flush_tlb_all(void)
+{
+	__asm__ volatile (
+		"mov %%cr3, %%rax\n\t"
+		"mov %%rax, %%cr3\n\t"
+		: /* no input */
+		: /* no output */
+		: "rax", "memory"
+	);
 }
 
 static void pmap_assert_page_table_phys(plane_paddr_t phys_addr)
@@ -682,7 +717,7 @@ bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
 				 plane_paddr_t phys_addr,
 				 struct hal_mmu_map_options options)
 {
-	if (!x86_64_pmap_map_page_in_owned_root(pmap_current_root_phys(),
+	if (!x86_64_pmap_map_page_in_owned_root(x86_64_pmap_current_root_phys(),
 						vaddr, phys_addr, options)) {
 		return false;
 	}
@@ -693,7 +728,7 @@ bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
 
 bool x86_64_pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 {
-	if (!x86_64_pmap_unmap_page_in_owned_root(pmap_current_root_phys(),
+	if (!x86_64_pmap_unmap_page_in_owned_root(x86_64_pmap_current_root_phys(),
 						  vaddr)) {
 		return false;
 	}
@@ -705,13 +740,13 @@ bool x86_64_pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 bool x86_64_pmap_translate_kernel_page(plane_vaddr_t vaddr,
 				       plane_paddr_t *phys_addr)
 {
-	return x86_64_pmap_translate_in_root(pmap_current_root_phys(),
+	return x86_64_pmap_translate_in_root(x86_64_pmap_current_root_phys(),
 					     vaddr, phys_addr);
 }
 
 bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
-	plane_paddr_t current_phys = pmap_current_root_phys();
+	plane_paddr_t current_phys = x86_64_pmap_current_root_phys();
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 	uint64_t *table;
 	uint64_t entry;
@@ -796,7 +831,7 @@ bool hal_mmu_take_kernel_page_table_ownership(void)
 	skip[1].base = plane_vaddr_make(X86_64_PHYSMAP_BASE);
 	skip[1].size = physmap.owned_window_size;
 
-	if (!x86_64_pmap_clone_kernel_page_tables(pmap_current_root_phys(),
+	if (!x86_64_pmap_clone_kernel_page_tables(x86_64_pmap_current_root_phys(),
 						  skip,
 						  ARRAY_SIZE(skip),
 						  &new_pml4_phys)) {

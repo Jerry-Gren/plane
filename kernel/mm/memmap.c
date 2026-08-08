@@ -53,7 +53,7 @@ static int mem_type_rank(uint32_t type)
 	 *   usable             : allocator input, lowest rank
 	 *   generic/untrusted  : unavailable, invalid, unknown, or mapped fallback
 	 *   specific reserved  : keeps boot protocol / hardware semantics
-	 *   bootloader handoff : protects data passed into early kernel C
+	 *   bootloader handoff : protects data passed into bootstrap kernel C
 	 */
 	switch (type) {
 	case PLANE_MEM_USABLE:
@@ -156,7 +156,7 @@ static bool choose_interval_type(const struct plane_mem_info *mem,
 	return true;
 }
 
-bool plane_sanitize_memory_map(struct plane_mem_info *mem)
+bool plane_memmap_sanitize(struct plane_mem_info *mem)
 {
 	if (mem->entry_count == 0) {
 		return true;
@@ -313,7 +313,7 @@ bool plane_memmap_reserve(struct plane_mem_info *mem, plane_paddr_t base,
 	tmp.map[index].length = reserve_end - reserve_base;
 	tmp.map[index].type = type;
 
-	if (!plane_sanitize_memory_map(&tmp)) {
+	if (!plane_memmap_sanitize(&tmp)) {
 		return false;
 	}
 

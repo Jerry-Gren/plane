@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-/* hal arch specific init */
-bool hal_arch_early_init(void);
+/* Architecture startup init before generic kernel subsystems come up. */
+bool hal_arch_startup_init(void);
 
 #endif /* HAL_HAL_H */

@@ -1,6 +1,6 @@
 #include <boot/multiboot2/mb2_arch.h>
 
-#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 
 #include <plane/memmap.h>
 #include <plane/overflow.h>
@@ -21,16 +21,17 @@ plane_vaddr_t boot_mb2_arch_phys_to_virt(plane_paddr_t phys_addr)
 	return plane_vaddr_make(vaddr);
 }
 
-bool boot_mb2_arch_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
-				   plane_vaddr_t *vaddr)
+bool boot_mb2_arch_map_bootstrap_framebuffer(plane_paddr_t phys_addr,
+					     uint64_t size,
+					     plane_vaddr_t *vaddr)
 {
-	return x86_64_mb2_early_map_framebuffer(phys_addr, size, vaddr);
+	return x86_64_mb2_bootstrap_map_framebuffer(phys_addr, size, vaddr);
 }
 
-bool boot_mb2_arch_release_framebuffer_mapping(plane_vaddr_t vaddr,
-					       uint64_t size)
+bool boot_mb2_arch_release_bootstrap_framebuffer_mapping(
+	plane_vaddr_t vaddr, uint64_t size)
 {
-	return x86_64_mb2_early_unmap_framebuffer(vaddr, size);
+	return x86_64_mb2_bootstrap_unmap_framebuffer(vaddr, size);
 }
 
 void boot_mb2_arch_reserve_kernel_image(struct plane_mem_info *mem)
@@ -48,5 +49,5 @@ void boot_mb2_arch_reserve_kernel_image(struct plane_mem_info *mem)
 
 void boot_mb2_arch_finish_handoff(void)
 {
-	x86_64_mb2_early_remove_identity_mapping();
+	x86_64_mb2_bootstrap_remove_identity_mapping();
 }

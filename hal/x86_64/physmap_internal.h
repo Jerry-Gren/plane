@@ -21,7 +21,8 @@ struct x86_64_physmap_runtime {
 };
 
 uint64_t x86_64_physmap_window_size(void);
-void x86_64_physmap_set_bootstrap(plane_vaddr_t base, uint64_t size);
+void x86_64_physmap_set_bootstrap_window(plane_vaddr_t base, uint64_t size);
+bool x86_64_physmap_install_bootstrap_window(plane_vaddr_t base);
 bool x86_64_physmap_get_runtime(struct x86_64_physmap_runtime *runtime);
 void x86_64_physmap_commit_owned(void);
 

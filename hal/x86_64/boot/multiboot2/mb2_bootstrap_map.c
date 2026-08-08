@@ -1,4 +1,4 @@
-#include <hal/x86_64/boot/multiboot2/mb2_early_mmu.h>
+#include <hal/x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 
 #include <hal/mmu.h>
 
@@ -18,16 +18,16 @@
 	 X86_64_PAGING_ENTRY_PWT | X86_64_PAGING_ENTRY_PS)
 
 /* in mb2_entry_entry.S */
-extern uint64_t x86_64_mb2_early_pml4[];
-extern uint64_t x86_64_mb2_early_pd_kernel[];
-extern uint64_t x86_64_mb2_early_pd_fb[];
+extern uint64_t x86_64_mb2_bootstrap_pml4[];
+extern uint64_t x86_64_mb2_bootstrap_pd_kernel[];
+extern uint64_t x86_64_mb2_bootstrap_pd_fb[];
 
 static uint64_t *mb2_framebuffer_pd(void)
 {
-	uint64_t *target_pd = x86_64_mb2_early_pd_fb;
+	uint64_t *target_pd = x86_64_mb2_bootstrap_pd_fb;
 #if X86_64_PAGING_PDPT_INDEX(KERNEL_VMA_BASE) == \
 	X86_64_PAGING_PDPT_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE)
-	target_pd = x86_64_mb2_early_pd_kernel;
+	target_pd = x86_64_mb2_bootstrap_pd_kernel;
 #endif
 	return target_pd;
 }
@@ -83,8 +83,9 @@ static bool mb2_framebuffer_pde_range(plane_vaddr_t vaddr,
 	return *page_count <= X86_64_PAGING_TABLE_ENTRIES - *start_idx;
 }
 
-bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
-				      plane_vaddr_t *vaddr)
+bool x86_64_mb2_bootstrap_map_framebuffer(plane_paddr_t phys_addr,
+					  uint64_t size,
+					  plane_vaddr_t *vaddr)
 {
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 
@@ -140,7 +141,7 @@ bool x86_64_mb2_early_map_framebuffer(plane_paddr_t phys_addr, uint64_t size,
 	return true;
 }
 
-bool x86_64_mb2_early_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
+bool x86_64_mb2_bootstrap_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 {
 	uint64_t start_idx;
 	uint64_t page_count;
@@ -176,8 +177,8 @@ bool x86_64_mb2_early_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 	return true;
 }
 
-void x86_64_mb2_early_remove_identity_mapping(void)
+void x86_64_mb2_bootstrap_remove_identity_mapping(void)
 {
-	x86_64_mb2_early_pml4[0] = 0;
+	x86_64_mb2_bootstrap_pml4[0] = 0;
 	hal_mmu_flush_tlb_all();
 }

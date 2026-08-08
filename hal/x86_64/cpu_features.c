@@ -9,7 +9,7 @@
  * CPUID leaves. vendor-specific leaves must be gated by vendor before use.
  */
 
-static struct x86_64_cpu_features boot_cpu_features;
+static struct x86_64_cpu_features bsp_cpu_features;
 
 static struct x86_64_cpuid_leaf cpuid_count(uint32_t leaf, uint32_t subleaf)
 {
@@ -553,9 +553,9 @@ void x86_64_cpu_features_decode(struct x86_64_cpu_features *features,
 
 static bool cpu_features_have_required(void)
 {
-	return boot_cpu_features.has[X86_64_CPU_FEATURE_MSR] &&
-	       boot_cpu_features.has[X86_64_CPU_FEATURE_PAT] &&
-	       boot_cpu_features.has[X86_64_CPU_FEATURE_LONG_MODE];
+	return bsp_cpu_features.has[X86_64_CPU_FEATURE_MSR] &&
+	       bsp_cpu_features.has[X86_64_CPU_FEATURE_PAT] &&
+	       bsp_cpu_features.has[X86_64_CPU_FEATURE_LONG_MODE];
 }
 
 static void collect_cpuid_raw(struct x86_64_cpuid_raw *raw)
@@ -592,14 +592,14 @@ bool x86_64_cpu_features_init(void)
 	struct x86_64_cpuid_raw raw;
 
 	collect_cpuid_raw(&raw);
-	x86_64_cpu_features_decode(&boot_cpu_features, &raw);
+	x86_64_cpu_features_decode(&bsp_cpu_features, &raw);
 
 	return cpu_features_have_required();
 }
 
 const struct x86_64_cpu_features *x86_64_cpu_features_get(void)
 {
-	return &boot_cpu_features;
+	return &bsp_cpu_features;
 }
 
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
@@ -608,5 +608,5 @@ bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 		return false;
 	}
 
-	return boot_cpu_features.has[feature];
+	return bsp_cpu_features.has[feature];
 }

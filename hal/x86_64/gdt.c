@@ -121,8 +121,8 @@ bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	struct x86_64_cpu_desc_context *ctx = desc_context_for_data(data);
 
 	if (ctx == NULL || data->is_bsp || !ctx->prepared ||
-	    plane_cpu_boot_state(data->logical_id) !=
-		    PLANE_CPU_BOOT_STARTING) {
+	    plane_cpu_startup_state(data->logical_id) !=
+		    PLANE_CPU_STARTUP_STARTING) {
 		return false;
 	}
 

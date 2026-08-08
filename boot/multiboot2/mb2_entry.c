@@ -20,7 +20,7 @@ struct multiboot_info_base {
     uint32_t reserved;
 };
 
-static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
+static void boot_mb2_collect_framebuffer(struct plane_framebuffer_info *framebuffer_info,
 					 struct multiboot_tag_framebuffer *fb_tag,
 					 plane_paddr_t *framebuffer_phys_addr,
 					 uint64_t *framebuffer_size)
@@ -65,42 +65,42 @@ static void boot_mb2_collect_framebuffer(struct plane_video_info *video,
 
 	struct multiboot_tag_framebuffer_common *fb_common = &fb_tag->common;
 
-	video->width  = fb_common->framebuffer_width;
-	video->height = fb_common->framebuffer_height;
-	video->pitch  = fb_common->framebuffer_pitch;
-	video->bpp    = fb_common->framebuffer_bpp;
+	framebuffer_info->width  = fb_common->framebuffer_width;
+	framebuffer_info->height = fb_common->framebuffer_height;
+	framebuffer_info->pitch  = fb_common->framebuffer_pitch;
+	framebuffer_info->bpp    = fb_common->framebuffer_bpp;
 
 	BUG_ON_MSG(fb_common->framebuffer_type != MULTIBOOT_FRAMEBUFFER_TYPE_RGB,
 		   "unsupported multiboot2 framebuffer type %u",
 		   fb_common->framebuffer_type);
 
-	video->red_mask_size    = fb_tag->framebuffer_red_mask_size;
-	video->red_mask_shift   = fb_tag->framebuffer_red_field_position;
-	video->green_mask_size  = fb_tag->framebuffer_green_mask_size;
-	video->green_mask_shift = fb_tag->framebuffer_green_field_position;
-	video->blue_mask_size   = fb_tag->framebuffer_blue_mask_size;
-	video->blue_mask_shift  = fb_tag->framebuffer_blue_field_position;
+	framebuffer_info->red_mask_size    = fb_tag->framebuffer_red_mask_size;
+	framebuffer_info->red_mask_shift   = fb_tag->framebuffer_red_field_position;
+	framebuffer_info->green_mask_size  = fb_tag->framebuffer_green_mask_size;
+	framebuffer_info->green_mask_shift = fb_tag->framebuffer_green_field_position;
+	framebuffer_info->blue_mask_size   = fb_tag->framebuffer_blue_mask_size;
+	framebuffer_info->blue_mask_shift  = fb_tag->framebuffer_blue_field_position;
 
 	plane_paddr_t phys_addr = plane_paddr_make(fb_common->framebuffer_addr);
 	plane_vaddr_t framebuffer_vaddr;
 	uint64_t fb_size;
 
-	BUG_ON_MSG(!plane_checked_mul_u64(video->pitch, video->height,
+	BUG_ON_MSG(!plane_checked_mul_u64(framebuffer_info->pitch, framebuffer_info->height,
 					  &fb_size),
 		   "multiboot2 framebuffer size overflow: pitch=%u height=%u",
-		   video->pitch, video->height);
+		   framebuffer_info->pitch, framebuffer_info->height);
 	BUG_ON_MSG(fb_size == 0, "multiboot2 framebuffer size is zero");
 
 	*framebuffer_phys_addr = phys_addr;
 	*framebuffer_size = fb_size;
-	video->framebuffer_phys_addr = phys_addr;
-	video->framebuffer_size = fb_size;
-	BUG_ON_MSG(!boot_mb2_arch_map_framebuffer(phys_addr, fb_size,
+	framebuffer_info->framebuffer_phys_addr = phys_addr;
+	framebuffer_info->framebuffer_size = fb_size;
+	BUG_ON_MSG(!boot_mb2_arch_map_bootstrap_framebuffer(phys_addr, fb_size,
 						  &framebuffer_vaddr),
 		   "failed to map multiboot2 framebuffer: phys=0x%016llx size=0x%016llx",
 		   (unsigned long long)plane_paddr_raw(phys_addr),
 		   (unsigned long long)fb_size);
-	video->framebuffer_addr = framebuffer_vaddr;
+	framebuffer_info->framebuffer_addr = framebuffer_vaddr;
 }
 
 static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_tag_mmap *mmap_tag)
@@ -164,7 +164,7 @@ static void boot_mb2_collect_mmap(struct plane_mem_info *mem, struct multiboot_t
 	}
 }
 
-static void boot_mb2_add_reservations(struct boot_info *info,
+static void boot_mb2_add_reservations(struct plane_boot_info *info,
 				      plane_paddr_t mb2_info_addr,
 				      uint64_t mb2_info_size,
 				      plane_paddr_t framebuffer_phys_addr,
@@ -196,7 +196,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 		   "bad multiboot2 magic: 0x%016llx",
 		   (unsigned long long)magic);
 
-	struct boot_info b_info = {0};
+	struct plane_boot_info b_info = {0};
 	plane_paddr_t mb2_info_phys = plane_paddr_make(info_addr);
 	plane_paddr_t framebuffer_phys_addr = plane_paddr_make(0);
 	uint64_t framebuffer_size = 0;
@@ -236,7 +236,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 
 		if (tag->type == MULTIBOOT_TAG_TYPE_FRAMEBUFFER) {
 			struct multiboot_tag_framebuffer *fb_tag = (struct multiboot_tag_framebuffer *)tag;
-			boot_mb2_collect_framebuffer(&b_info.video, fb_tag,
+			boot_mb2_collect_framebuffer(&b_info.framebuffer, fb_tag,
 						     &framebuffer_phys_addr,
 						     &framebuffer_size);
 		} else if (tag->type == MULTIBOOT_TAG_TYPE_MMAP) {
@@ -249,7 +249,7 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 	}
 
 	/* ensure we got a framebuffer */
-	BUG_ON_MSG(plane_vaddr_is_null(b_info.video.framebuffer_addr),
+	BUG_ON_MSG(plane_vaddr_is_null(b_info.framebuffer.framebuffer_addr),
 		   "multiboot2 framebuffer tag missing");
 
 	boot_mb2_arch_reserve_kernel_image(&b_info.mem);
@@ -257,8 +257,8 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 				  framebuffer_phys_addr, framebuffer_size);
 
 	boot_mb2_arch_finish_handoff();
-	b_info.release_framebuffer_boot_mapping =
-		boot_mb2_arch_release_framebuffer_mapping;
+	b_info.release_framebuffer_bootstrap_mapping =
+		boot_mb2_arch_release_bootstrap_framebuffer_mapping;
 
 	kmain(&b_info);
 

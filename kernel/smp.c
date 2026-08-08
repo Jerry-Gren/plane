@@ -128,7 +128,7 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 			.is_bsp = src->is_bsp,
 			.present = src->present,
 			.online = false,
-			.boot_state = PLANE_CPU_BOOT_OFFLINE
+			.startup_state = PLANE_CPU_STARTUP_OFFLINE
 		};
 	}
 
@@ -154,7 +154,7 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 				plane_vaddr_t stack_base,
 				uint64_t stack_pages)
 {
-	struct plane_cpu_data *cpu = plane_cpu_boot_data_get(logical_id);
+	struct plane_cpu_data *cpu = plane_cpu_startup_data_get(logical_id);
 	plane_vaddr_t stack_top;
 
 	if (!cpu_data_is_startable_ap(cpu) || stack_pages == 0 ||
@@ -164,8 +164,8 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 		return false;
 	}
 
-	if (plane_atomic_load_u32(&cpu->boot_state) !=
-	    PLANE_CPU_BOOT_OFFLINE) {
+	if (plane_atomic_load_u32(&cpu->startup_state) !=
+	    PLANE_CPU_STARTUP_OFFLINE) {
 		return false;
 	}
 
@@ -179,45 +179,45 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 		return false;
 	}
 
-	plane_atomic_store_u32(&cpu->boot_state, PLANE_CPU_BOOT_PREPARED);
+	plane_atomic_store_u32(&cpu->startup_state, PLANE_CPU_STARTUP_PREPARED);
 	return true;
 }
 
 bool plane_smp_mark_ap_starting(uint32_t logical_id)
 {
-	struct plane_cpu_data *cpu = plane_cpu_boot_data_get(logical_id);
-	uint32_t expected = PLANE_CPU_BOOT_PREPARED;
+	struct plane_cpu_data *cpu = plane_cpu_startup_data_get(logical_id);
+	uint32_t expected = PLANE_CPU_STARTUP_PREPARED;
 
 	if (!cpu_data_is_startable_ap(cpu)) {
 		return false;
 	}
 
-	return plane_atomic_compare_exchange_u32(&cpu->boot_state, &expected,
-						 PLANE_CPU_BOOT_STARTING);
+	return plane_atomic_compare_exchange_u32(&cpu->startup_state, &expected,
+						 PLANE_CPU_STARTUP_STARTING);
 }
 
 bool plane_smp_mark_ap_parked(struct plane_cpu_data *data)
 {
-	uint32_t expected = PLANE_CPU_BOOT_STARTING;
+	uint32_t expected = PLANE_CPU_STARTUP_STARTING;
 
 	if (!cpu_data_is_startable_ap(data) || data->self != data) {
 		return false;
 	}
 
-	return plane_atomic_compare_exchange_u32(&data->boot_state, &expected,
-						 PLANE_CPU_BOOT_PARKED);
+	return plane_atomic_compare_exchange_u32(&data->startup_state, &expected,
+						 PLANE_CPU_STARTUP_PARKED);
 }
 
 bool plane_smp_mark_ap_failed(struct plane_cpu_data *data)
 {
-	uint32_t expected = PLANE_CPU_BOOT_STARTING;
+	uint32_t expected = PLANE_CPU_STARTUP_STARTING;
 
 	if (!cpu_data_is_startable_ap(data) || data->self != data) {
 		return false;
 	}
 
-	return plane_atomic_compare_exchange_u32(&data->boot_state, &expected,
-						 PLANE_CPU_BOOT_FAILED);
+	return plane_atomic_compare_exchange_u32(&data->startup_state, &expected,
+						 PLANE_CPU_STARTUP_FAILED);
 }
 
 uint32_t plane_cpu_parked_count(void)
@@ -232,8 +232,8 @@ uint32_t plane_cpu_parked_count(void)
 		const struct plane_cpu_data *cpu = &cpu_data[i];
 
 		if (!cpu->is_bsp &&
-		    plane_atomic_load_u32(&cpu->boot_state) ==
-			    PLANE_CPU_BOOT_PARKED) {
+		    plane_atomic_load_u32(&cpu->startup_state) ==
+			    PLANE_CPU_STARTUP_PARKED) {
 			count++;
 		}
 	}
@@ -268,10 +268,10 @@ const struct plane_cpu_data *plane_cpu_current_data(void)
 
 const struct plane_cpu_data *plane_cpu_data_get(uint32_t logical_id)
 {
-	return plane_cpu_boot_data_get(logical_id);
+	return plane_cpu_startup_data_get(logical_id);
 }
 
-struct plane_cpu_data *plane_cpu_boot_data_get(uint32_t logical_id)
+struct plane_cpu_data *plane_cpu_startup_data_get(uint32_t logical_id)
 {
 	if (!smp_initialized || logical_id >= runtime_cpu_count) {
 		return NULL;
@@ -280,15 +280,15 @@ struct plane_cpu_data *plane_cpu_boot_data_get(uint32_t logical_id)
 	return &cpu_data[logical_id];
 }
 
-enum plane_cpu_boot_state plane_cpu_boot_state(uint32_t logical_id)
+enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 {
 	const struct plane_cpu_data *cpu = plane_cpu_data_get(logical_id);
 
 	if (cpu == NULL) {
-		return PLANE_CPU_BOOT_FAILED;
+		return PLANE_CPU_STARTUP_FAILED;
 	}
 
-	return plane_atomic_load_u32(&cpu->boot_state);
+	return plane_atomic_load_u32(&cpu->startup_state);
 }
 
 void plane_smp_ap_park_entry(struct plane_cpu_data *data)

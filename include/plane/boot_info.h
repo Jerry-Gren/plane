@@ -7,8 +7,7 @@
 #include <plane/memmap.h>
 #include <plane/smp.h>
 
-/* Video */
-struct plane_video_info {
+struct plane_framebuffer_info {
 	plane_vaddr_t framebuffer_addr;
 	plane_paddr_t framebuffer_phys_addr;
 	uint64_t framebuffer_size;
@@ -24,15 +23,14 @@ struct plane_video_info {
 	uint8_t  blue_mask_shift;
 };
 
-/* hand off to kmain() */
-struct boot_info {
-	struct plane_video_info video;
-	struct plane_mem_info   mem;
-	struct plane_smp_info   smp;
+struct plane_boot_info {
+	struct plane_framebuffer_info framebuffer;
+	struct plane_mem_info mem;
+	struct plane_smp_info smp;
 	bool (*start_aps)(void);
-	bool (*release_framebuffer_boot_mapping)(plane_vaddr_t vaddr,
+	bool (*release_framebuffer_bootstrap_mapping)(plane_vaddr_t vaddr,
 						 uint64_t size);
-	
+
 	/*
 	 * and more ...
 	 * struct plane_acpi_info  acpi;

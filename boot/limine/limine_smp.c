@@ -1,10 +1,6 @@
 #include "limine_smp_internal.h"
 
-#include <hal/cpu.h>
-
 #include <plane/smp.h>
-
-#include "../../kernel/smp_internal.h"
 
 static struct limine_mp_info *limine_cpu_handles[PLANE_MAX_CPUS];
 
@@ -31,12 +27,11 @@ static void boot_limine_ap_entry(struct limine_mp_info *cpu)
 	struct plane_cpu_data *data;
 
 	if (cpu == NULL || cpu->extra_argument == 0) {
-		hal_cpu_hang();
+		plane_smp_startup_enter_ap(NULL);
 	}
 
 	data = (struct plane_cpu_data *)(uintptr_t)cpu->extra_argument;
-	hal_cpu_enter_on_stack(data->ap_stack_top, plane_smp_ap_park_entry,
-			       data);
+	plane_smp_startup_enter_ap(data);
 }
 
 static bool limine_smp_preflight_aps(void)
@@ -51,7 +46,7 @@ static bool limine_smp_preflight_aps(void)
 			continue;
 		}
 		if (limine_cpu_handles[i] == NULL ||
-		    plane_cpu_boot_state(i) != PLANE_CPU_BOOT_PREPARED) {
+		    !plane_smp_startup_ap_is_launchable(i)) {
 			return false;
 		}
 	}
@@ -66,20 +61,18 @@ bool boot_limine_smp_start_aps(void)
 	}
 
 	for (uint32_t i = 0; i < plane_cpu_count(); i++) {
-		struct plane_cpu_data *data = plane_cpu_boot_data_get(i);
+		struct plane_smp_ap_launch launch;
 		struct limine_mp_info *cpu = limine_cpu_handles[i];
 
-		if (data == NULL) {
-			return false;
-		}
-		if (data->is_bsp) {
+		const struct plane_cpu_data *data = plane_cpu_data_get(i);
+		if (data == NULL || data->is_bsp) {
 			continue;
 		}
-		if (!plane_smp_mark_ap_starting(i)) {
+		if (!plane_smp_startup_prepare_ap_launch(i, &launch)) {
 			return false;
 		}
 
-		cpu->extra_argument = (uint64_t)(uintptr_t)data;
+		cpu->extra_argument = (uint64_t)(uintptr_t)launch.argument;
 		__atomic_store_n(&cpu->goto_address, boot_limine_ap_entry,
 				 __ATOMIC_RELEASE);
 	}

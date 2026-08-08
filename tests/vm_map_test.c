@@ -1663,7 +1663,7 @@ static int test_delete_range_rejects_object_ref_release_failure(void)
 					     PLANE_VM_MAP_ENTER_FIXED,
 					     &vaddr),
 				     true);
-	failures += test_expect_bool("delete object drop bootstrap",
+	failures += test_expect_bool("release anonymous object",
 				     plane_vm_object_deallocate(&test_object),
 				     true);
 	test_object.resident_page_count = 1;
@@ -2128,7 +2128,7 @@ static int test_fixed_overwrite_rejects_object_ref_release_failure(void)
 					     PLANE_VM_MAP_ENTER_FIXED,
 					     &old_vaddr),
 				     true);
-	failures += test_expect_bool("overwrite object drop bootstrap",
+	failures += test_expect_bool("release overwritten anonymous object",
 				     plane_vm_object_deallocate(&test_object),
 				     true);
 	test_object.resident_page_count = 1;

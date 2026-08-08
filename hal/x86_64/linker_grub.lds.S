@@ -1,4 +1,4 @@
-#include <hal/x86_64/arch_mmu.h>
+#include <hal/x86_64/address_space.h>
 
 /* Tell the linker that we want an x86_64 ELF64 output file */
 OUTPUT_FORMAT(elf64-x86-64)
