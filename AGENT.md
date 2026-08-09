@@ -326,6 +326,10 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   object, resident-hash, or VM page locks must use kernel/MM internal reference
   and hold helpers. `hold_count` is a transient fault/pmap-enter stabilization
   mechanism, not a public VM page API and not XNU-style busy/wanted state.
+- `kmem` has a narrow irqsave state lock for global readiness/context
+  publication only. Do not hold it across VM map, VM object, PMM, VM page,
+  pmap, or fault operations, and do not treat it as a transaction lock for
+  allocations.
 - `plane_vm_fault_pages()` is a side-effectful range prefault wrapper. It is not
   all-or-nothing.
 - `plane_vm_fault_wire_pages()` rolls back wiring added by the failed operation,
@@ -362,9 +366,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 
 - Current SMP support is a foundation only. APs may be discovered, prepared,
   started, and parked, but they must not enter general kernel execution.
-- MM, pmap, VM resident metadata, and kmem are still BSP-only unless a patch
-  explicitly introduces locking and verifies it. PMM has only the documented
-  allocator/free queue lock boundary.
+- MM has early owner-cluster locks for VM map, VM object, VM page metadata, PMM
+  allocation, active kernel pmap mutation, and kmem readiness. This is still
+  not a general concurrent VM system; APs must not enter allocator, fault,
+  pageout, or pmap mutation paths until TLB shootdown and the remaining runtime
+  lock contracts are explicitly added and verified.
 - `plane_cpu_data` owns per-CPU state; `self` must point to its own object.
 - BSP startup installs current CPU data through the arch hook before exposing
   initialized SMP state.

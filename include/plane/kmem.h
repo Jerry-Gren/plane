@@ -32,6 +32,11 @@ struct plane_vm_object;
  * Protect APIs only support exact allocation ranges in this minimal layer.
  * Page faults are routed through the private kernel map only; generic map
  * fault handling lives in the VM fault layer.
+ *
+ * Global kmem readiness is published under a small irqsave state lock. Actual
+ * allocation, free, protection, fault, object, page, PMM, and pmap concurrency
+ * is owned by the corresponding VM/pmap layers; kmem does not hold a broad
+ * lock across those operations.
  */
 
 enum plane_kmem_alloc_flags {
