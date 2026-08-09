@@ -1,6 +1,6 @@
 .section .text
 
-.extern x86_64_exception_handler
+.extern x86_64_trap_handler
 
 /* hardware does not push an error code, manually push 0 */
 .macro ISR_NOERRCODE vector
@@ -179,7 +179,7 @@ isr_common_stub:
 
     /* rsp now points to the x86_64_intr_frame structure */
     movq %rsp, %rdi
-    call x86_64_exception_handler
+    call x86_64_trap_handler
 
     popq %r15
     popq %r14

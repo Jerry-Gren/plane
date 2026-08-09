@@ -1,4 +1,4 @@
-#include <x86_64/exception.h>
+#include <x86_64/trap.h>
 #include <x86_64/linkage.h>
 #include <machine/local_interrupt.h>
 #include <plane/kmem.h>
@@ -7,7 +7,7 @@
 
 #define CODE_DUMP_BYTES 16
 
-static const char *exception_names[32] = {
+static const char *trap_names[32] = {
     "Divide Error (#DE)",                       /* 0 */
     "Debug Exception (#DB)",                    /* 1 */
     "NMI Interrupt",                            /* 2 */
@@ -42,8 +42,7 @@ static const char *exception_names[32] = {
     "Reserved"                                  /* 31 */
 };
 
-static int x86_64_exception_range_in_kernel_text(plane_vaddr_t addr,
-						 uint64_t size)
+static bool trap_range_in_kernel_text(plane_vaddr_t addr, uint64_t size)
 {
 	uint64_t raw_addr = plane_vaddr_raw(addr);
 	uint64_t text_start = (uint64_t)__kernel_text_start;
@@ -53,7 +52,7 @@ static int x86_64_exception_range_in_kernel_text(plane_vaddr_t addr,
 	       size <= text_end - raw_addr;
 }
 
-static void dump_code(uint64_t rip, uint64_t int_no)
+static void trap_dump_code(uint64_t rip, uint64_t int_no)
 {
 	uint64_t code_addr = rip;
 	plane_vaddr_t code_vaddr;
@@ -64,8 +63,7 @@ static void dump_code(uint64_t rip, uint64_t int_no)
 	uint64_t marker_addr = code_addr;
 	code_vaddr = plane_vaddr_make(code_addr);
 
-	if (!x86_64_exception_range_in_kernel_text(code_vaddr,
-						   CODE_DUMP_BYTES)) {
+	if (!trap_range_in_kernel_text(code_vaddr, CODE_DUMP_BYTES)) {
 		printk("Code: unavailable, rip is outside kernel .text\n");
 		return;
 	}
@@ -82,9 +80,9 @@ static void dump_code(uint64_t rip, uint64_t int_no)
 	printk("\n");
 }
 
-bool x86_64_try_handle_page_fault(uint64_t int_no,
-				  plane_vaddr_t fault_addr,
-				  uint64_t error_code)
+bool x86_64_trap_try_handle_page_fault(uint64_t int_no,
+				       plane_vaddr_t fault_addr,
+				       uint64_t error_code)
 {
 	if (int_no != X86_64_INTR_VECTOR_PAGE_FAULT ||
 	    !x86_64_intr_pf_error_is_plane_supported(error_code)) {
@@ -100,7 +98,29 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 		fault_addr, x86_64_intr_pf_error_fault_type(error_code));
 }
 
-void x86_64_exception_handler(struct x86_64_intr_frame *frame)
+static void trap_dump_frame(const struct x86_64_intr_frame *frame,
+			    uint64_t cr2)
+{
+	printk(" error code : 0x%016llx\n", frame->error_code);
+	printk(" rip: 0x%016llx   cs : 0x%04llx   rflags: 0x%016llx\n",
+		frame->rip, frame->cs, frame->rflags);
+	printk(" rsp: 0x%016llx   ss : 0x%04llx\n",
+		frame->rsp, frame->ss);
+	printk(" rax: 0x%016llx   rbx: 0x%016llx\n", frame->rax, frame->rbx);
+	printk(" rcx: 0x%016llx   rdx: 0x%016llx\n", frame->rcx, frame->rdx);
+	printk(" rsi: 0x%016llx   rdi: 0x%016llx\n", frame->rsi, frame->rdi);
+	printk(" rbp: 0x%016llx   r8 : 0x%016llx\n", frame->rbp, frame->r8);
+	printk(" r9 : 0x%016llx   r10: 0x%016llx\n", frame->r9, frame->r10);
+	printk(" r11: 0x%016llx   r12: 0x%016llx\n", frame->r11, frame->r12);
+	printk(" r13: 0x%016llx   r14: 0x%016llx\n", frame->r13, frame->r14);
+	printk(" r15: 0x%016llx\n", frame->r15);
+
+	if (frame->int_no == X86_64_INTR_VECTOR_PAGE_FAULT) {
+		printk(" cr2: 0x%016llx\n", cr2);
+	}
+}
+
+void x86_64_trap_handler(struct x86_64_intr_frame *frame)
 {
 	uint64_t cr2 = 0;
 
@@ -117,32 +137,15 @@ void x86_64_exception_handler(struct x86_64_intr_frame *frame)
 
 	if (frame->int_no == X86_64_INTR_VECTOR_PAGE_FAULT) {
 		cr2 = read_cr2();
-		if (x86_64_try_handle_page_fault(frame->int_no,
-						 plane_vaddr_make(cr2),
-						 frame->error_code)) {
+		if (x86_64_trap_try_handle_page_fault(frame->int_no,
+						      plane_vaddr_make(cr2),
+						      frame->error_code)) {
 			return;
 		}
 	}
 
-	printk(" error code : 0x%016llx\n", frame->error_code);
-	printk(" rip: 0x%016llx   cs : 0x%04llx   rflags: 0x%016llx\n", 
-		frame->rip, frame->cs, frame->rflags);
-	printk(" rsp: 0x%016llx   ss : 0x%04llx\n", 
-		frame->rsp, frame->ss);
-	printk(" rax: 0x%016llx   rbx: 0x%016llx\n", frame->rax, frame->rbx);
-	printk(" rcx: 0x%016llx   rdx: 0x%016llx\n", frame->rcx, frame->rdx);
-	printk(" rsi: 0x%016llx   rdi: 0x%016llx\n", frame->rsi, frame->rdi);
-	printk(" rbp: 0x%016llx   r8 : 0x%016llx\n", frame->rbp, frame->r8);
-	printk(" r9 : 0x%016llx   r10: 0x%016llx\n", frame->r9,  frame->r10);
-	printk(" r11: 0x%016llx   r12: 0x%016llx\n", frame->r11, frame->r12);
-	printk(" r13: 0x%016llx   r14: 0x%016llx\n", frame->r13, frame->r14);
-	printk(" r15: 0x%016llx\n", frame->r15);
+	trap_dump_frame(frame, cr2);
+	trap_dump_code(frame->rip, frame->int_no);
 
-	if (frame->int_no == X86_64_INTR_VECTOR_PAGE_FAULT) {
-		printk(" cr2: 0x%016llx\n", cr2);
-	}
-
-	dump_code(frame->rip, frame->int_no);
-
-	panic("Unhandled exception: %s", exception_names[frame->int_no]);
+	panic("Unhandled exception: %s", trap_names[frame->int_no]);
 }

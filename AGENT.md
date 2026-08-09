@@ -437,7 +437,7 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   pmap owns the TLB-flush update hook and later shootdown payload. Generic SMP
   may call `pmap_update_interrupt()` through `<machine/pmap.h>`, but must not
   include architecture-specific pmap headers. Do not put pmap shootdown policy
-  in the architecture exception handler or in LAPIC register code.
+  in the architecture trap handler or in LAPIC register code.
 - Keep SMP event names separate from hardware vector allocation. Use durable
   semantic names such as `PLANE_SMP_EVENT_AST` or
   `PLANE_SMP_EVENT_TLB_FLUSH`; use explicit vector-allocation names such as
