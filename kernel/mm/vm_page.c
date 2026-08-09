@@ -208,7 +208,7 @@ static void vm_page_init_locked(struct plane_page *page,
 			     plane_paddr_t phys_addr,
 			     enum plane_vm_page_state state)
 {
-	page->phys_addr = plane_paddr_raw(phys_addr);
+	page->phys_addr = phys_addr;
 	page->wire_count = 0;
 	page->hold_count = 0;
 	vm_page_reset_resident_links_locked(page);
@@ -334,7 +334,9 @@ static bool vm_page_queue_insert_ordered_locked(struct plane_vm_page_queue *queu
 		return false;
 	}
 
-	if (queue->tail == NULL || queue->tail->phys_addr < page->phys_addr) {
+	if (queue->tail == NULL ||
+	    plane_paddr_raw(queue->tail->phys_addr) <
+		    plane_paddr_raw(page->phys_addr)) {
 		page->queue_prev = queue->tail;
 		page->queue_next = NULL;
 		if (queue->tail != NULL) {
@@ -349,7 +351,9 @@ static bool vm_page_queue_insert_ordered_locked(struct plane_vm_page_queue *queu
 	}
 
 	next = queue->head;
-	while (next != NULL && next->phys_addr < page->phys_addr) {
+	while (next != NULL &&
+	       plane_paddr_raw(next->phys_addr) <
+		       plane_paddr_raw(page->phys_addr)) {
 		next = next->queue_next;
 	}
 
@@ -509,7 +513,7 @@ static struct plane_page *vm_page_guard_create_locked(void)
 		return NULL;
 	}
 
-	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS_RAW;
+	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS;
 	page->wire_count = 0;
 	page->hold_count = 0;
 	vm_page_reset_resident_links_locked(page);
@@ -544,7 +548,7 @@ static bool vm_page_guard_release_locked(struct plane_page *page)
 	}
 
 	vm_page_reset_resident_links_locked(page);
-	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
 	page->hold_count = 0;
 	vm_page_reset_queue_links(page);
 	page->state = PLANE_VM_PAGE_INVALID;
@@ -597,16 +601,18 @@ static struct plane_page *vm_page_from_phys_locked(plane_paddr_t phys_addr)
 	for (uint64_t i = 0; i < managed_range_count; i++) {
 		uint64_t managed_end;
 
-		if (!plane_checked_page_range_end(managed_ranges[i].base,
-					    managed_ranges[i].page_count,
-					    &managed_end)) {
+		uint64_t managed_base = plane_paddr_raw(managed_ranges[i].base);
+
+		if (!plane_checked_page_range_end(managed_base,
+						  managed_ranges[i].page_count,
+						  &managed_end)) {
 			return NULL;
 		}
 
-		if (raw_phys >= managed_ranges[i].base &&
+		if (raw_phys >= managed_base &&
 		    raw_phys < managed_end) {
 			uint64_t page_offset =
-				(raw_phys - managed_ranges[i].base) / PAGE_SIZE;
+				(raw_phys - managed_base) / PAGE_SIZE;
 
 			return &page_pool[managed_ranges[i].page_index +
 					  page_offset];
@@ -641,7 +647,7 @@ static plane_paddr_t vm_page_phys_locked(const struct plane_page *page)
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
-	return plane_paddr_make(page_pool[index].phys_addr);
+	return page_pool[index].phys_addr;
 }
 
 plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
@@ -1283,7 +1289,7 @@ bool plane_vm_page_release(struct plane_page *page)
 		return false;
 	}
 
-	phys_addr = plane_paddr_make(page->phys_addr);
+	phys_addr = page->phys_addr;
 	vm_page_metadata_unlock(state);
 
 	BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),

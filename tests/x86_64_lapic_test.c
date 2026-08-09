@@ -34,9 +34,9 @@ static uint64_t test_msr_write_value;
 static uint32_t test_irq_save_count;
 static uint32_t test_irq_restore_count;
 static uint32_t test_relax_count;
-static bool test_smp_handle_ipi_result;
-static uint32_t test_smp_handle_ipi_count;
-static uint8_t test_smp_last_ipi_vector;
+static bool test_smp_signal_handler_result;
+static uint32_t test_smp_signal_handler_count;
+static uint8_t test_smp_last_signal_vector;
 
 #include "../hal/x86_64/lapic.c"
 
@@ -126,11 +126,11 @@ void hal_cpu_relax(void)
 		~X86_64_LAPIC_ICR_PENDING;
 }
 
-bool plane_smp_handle_ipi(uint8_t vector)
+bool plane_smp_signal_handler(uint8_t vector)
 {
-	test_smp_handle_ipi_count++;
-	test_smp_last_ipi_vector = vector;
-	return test_smp_handle_ipi_result;
+	test_smp_signal_handler_count++;
+	test_smp_last_signal_vector = vector;
+	return test_smp_signal_handler_result;
 }
 
 static void reset_lapic_test(void)
@@ -159,9 +159,9 @@ static void reset_lapic_test(void)
 	test_irq_save_count = 0;
 	test_irq_restore_count = 0;
 	test_relax_count = 0;
-	test_smp_handle_ipi_result = true;
-	test_smp_handle_ipi_count = 0;
-	test_smp_last_ipi_vector = 0;
+	test_smp_signal_handler_result = true;
+	test_smp_signal_handler_count = 0;
+	test_smp_last_signal_vector = 0;
 	lapic_mmio_base = plane_vaddr_make(0);
 	lapic_cpu_count = 0;
 	lapic_initialized = false;
@@ -438,7 +438,7 @@ static int test_dispatch_forwards_to_smp_and_sends_eoi(void)
 				     hal_local_interrupt_dispatch(0xf0),
 				     false);
 	failures += test_expect_u32("dispatch before init no smp",
-				    test_smp_handle_ipi_count, 0);
+				    test_smp_signal_handler_count, 0);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
@@ -452,9 +452,9 @@ static int test_dispatch_forwards_to_smp_and_sends_eoi(void)
 				     hal_local_interrupt_dispatch(0xf0),
 				     true);
 	failures += test_expect_u32("dispatch calls smp",
-				    test_smp_handle_ipi_count, 1);
+				    test_smp_signal_handler_count, 1);
 	failures += test_expect_u32("dispatch vector",
-				    test_smp_last_ipi_vector, 0xf0);
+				    test_smp_last_signal_vector, 0xf0);
 	failures += test_expect_u32("dispatch sends eoi",
 				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
 				    0);
@@ -475,14 +475,14 @@ static int test_dispatch_unknown_vector_still_sends_eoi(void)
 	failures += test_expect_bool("bsp lapic init",
 				     hal_local_interrupt_init_bsp(&info),
 				     true);
-	test_smp_handle_ipi_result = false;
+	test_smp_signal_handler_result = false;
 	test_regs[reg_index(X86_64_LAPIC_REG_EOI)] = 0xfeedface;
 
 	failures += test_expect_bool("unknown dispatch unhandled",
 				     hal_local_interrupt_dispatch(0xf2),
 				     false);
 	failures += test_expect_u32("unknown calls smp",
-				    test_smp_handle_ipi_count, 1);
+				    test_smp_signal_handler_count, 1);
 	failures += test_expect_u32("unknown sends eoi",
 				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
 				    0);
@@ -491,7 +491,7 @@ static int test_dispatch_unknown_vector_still_sends_eoi(void)
 	failures += test_expect_bool("past idt rejected",
 				     hal_local_interrupt_dispatch(256), false);
 	failures += test_expect_u32("invalid vectors no extra smp",
-				    test_smp_handle_ipi_count, 1);
+				    test_smp_signal_handler_count, 1);
 	return failures;
 }
 

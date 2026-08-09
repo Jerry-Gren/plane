@@ -142,7 +142,7 @@ static void reset_vm_fault_test(void)
 	}
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		test_pages[i] = (struct plane_page){
-			.phys_addr = test_page_phys(i),
+			.phys_addr = plane_paddr_make(test_page_phys(i)),
 		};
 	}
 	for (uint64_t i = 0; i < TEST_MAPPING_COUNT; i++) {
@@ -386,7 +386,7 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
-	return plane_paddr_make(page->phys_addr);
+	return page->phys_addr;
 }
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
@@ -943,7 +943,7 @@ static int test_fault_resident_hit_rejects_invalid_phys(void)
 				     true);
 	failures += test_expect_bool("fault invalid phys grab",
 				     plane_vm_page_grab(0, &page), true);
-	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
+	page->phys_addr = PLANE_VM_PAGE_NO_PHYS;
 	failures += test_expect_bool("fault invalid phys insert",
 				     plane_vm_object_insert_page(
 					     &test_object, 0, page),

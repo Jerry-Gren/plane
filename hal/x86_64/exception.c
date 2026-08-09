@@ -49,30 +49,36 @@ static uint64_t read_cr2(void)
 	return cr2;
 }
 
-static int range_in_kernel_text(uint64_t addr, uint64_t size)
+static int x86_64_exception_range_in_kernel_text(plane_vaddr_t addr,
+						 uint64_t size)
 {
+	uint64_t raw_addr = plane_vaddr_raw(addr);
 	uint64_t text_start = (uint64_t)__kernel_text_start;
 	uint64_t text_end = (uint64_t)__kernel_text_end;
 
-	return addr >= text_start && addr <= text_end && size <= text_end - addr;
+	return raw_addr >= text_start && raw_addr <= text_end &&
+	       size <= text_end - raw_addr;
 }
 
 static void dump_code(uint64_t rip, uint64_t int_no)
 {
 	uint64_t code_addr = rip;
+	plane_vaddr_t code_vaddr;
 
 	if (int_no == X86_64_INTR_VECTOR_BREAKPOINT) {
 		code_addr--;
 	}
 	uint64_t marker_addr = code_addr;
+	code_vaddr = plane_vaddr_make(code_addr);
 
-	if (!range_in_kernel_text(code_addr, CODE_DUMP_BYTES)) {
+	if (!x86_64_exception_range_in_kernel_text(code_vaddr,
+						   CODE_DUMP_BYTES)) {
 		printk("Code: unavailable, rip is outside kernel .text\n");
 		return;
 	}
 
 	printk("Code: ");
-	uint8_t *pc = (uint8_t *)code_addr;
+	uint8_t *pc = plane_vaddr_to_ptr(code_vaddr);
 	for (int i = 0; i < CODE_DUMP_BYTES; i++) {
 		if ((uint64_t)&pc[i] == marker_addr) {
 			printk("<%02x> ", pc[i]);

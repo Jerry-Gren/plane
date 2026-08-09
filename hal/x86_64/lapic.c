@@ -20,7 +20,7 @@
 
 /*
  * XNU-like local APIC foundation, narrowed to xAPIC MMIO setup and fixed IPI
- * primitives. Timer/error payloads, full IPI event payloads, and x2APIC are
+ * primitives. Timer/error payloads, full signal payloads, and x2APIC are
  * intentionally left for later SMP milestones.
  */
 
@@ -205,7 +205,7 @@ bool hal_local_interrupt_dispatch(uint32_t vector)
 		return false;
 	}
 
-	handled = plane_smp_handle_ipi((uint8_t)vector);
+	handled = plane_smp_signal_handler((uint8_t)vector);
 	if (!handled) {
 		pr_warn("Unhandled local interrupt vector %u\n", vector);
 	}

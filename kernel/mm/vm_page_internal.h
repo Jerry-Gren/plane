@@ -23,7 +23,7 @@ struct plane_vm_page_queue {
 };
 
 struct plane_page {
-	uint64_t phys_addr;
+	plane_paddr_t phys_addr;
 	uint64_t wire_count;
 	uint64_t hold_count;
 	struct plane_vm_object *vm_object;
@@ -40,7 +40,7 @@ struct plane_page {
 };
 
 struct plane_vm_page_managed_range {
-	uint64_t base;
+	plane_paddr_t base;
 	uint64_t page_count;
 	uint64_t page_index;
 };

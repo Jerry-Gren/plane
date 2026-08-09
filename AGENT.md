@@ -386,9 +386,21 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   Generic HAL callers use `hal_local_interrupt_*`.
 - Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
   the frame and vector, the local interrupt controller owns EOI and dispatch
-  glue, SMP owns IPI event meaning, and pmap will own the later TLB shootdown
-  payload. Do not put pmap shootdown policy in the architecture exception
-  handler or in LAPIC register code.
+  glue, SMP owns inter-processor event meaning and CPU pending signal bits, and
+  pmap owns the TLB-flush update hook and later shootdown payload. Generic SMP
+  may call the generic `<hal/pmap.h>` hook, but must not include
+  architecture-specific pmap headers. Do not put pmap shootdown policy in the
+  architecture exception handler or in LAPIC register code.
+- Keep SMP event names separate from hardware vector allocation. Use durable
+  semantic names such as `PLANE_SMP_EVENT_AST` or
+  `PLANE_SMP_EVENT_TLB_FLUSH`; use explicit vector-allocation names such as
+  `PLANE_SMP_LOCAL_INTERRUPT_VECTOR_*` for x86_64 local interrupt vectors.
+  Do not encode vector numbers into the event enum unless the event and vector
+  are intentionally the same ABI.
+- Use `signal` for XNU-like cross-CPU delivery/pending state:
+  `plane_smp_signal_cpu()`, `plane_smp_signal_handler()`, and
+  `plane_cpu_data.cpu_signals`. Keep `IPI` only for HAL/LAPIC hardware send
+  primitives such as `hal_local_interrupt_send_ipi()`.
 
 ## Tests
 

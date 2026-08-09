@@ -4,6 +4,7 @@
 #include <hal/cpu.h>
 #include <hal/irq.h>
 #include <hal/local_interrupt.h>
+#include <hal/pmap.h>
 #include <plane/kmem.h>
 #include <plane/smp.h>
 
@@ -33,6 +34,17 @@ bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
 	return data != NULL;
+}
+
+bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+{
+	(void)logical_id;
+	(void)vector;
+	return false;
+}
+
+void hal_pmap_update_interrupt(void)
+{
 }
 
 void hal_irq_disable(void)

@@ -4,6 +4,7 @@
 #include <hal/cpu.h>
 #include <hal/irq.h>
 #include <hal/local_interrupt.h>
+#include <hal/pmap.h>
 #include <plane/smp.h>
 
 #include "../kernel/smp_internal.h"
@@ -13,11 +14,16 @@ static bool hal_install_should_fail;
 static bool hal_prepare_context_should_fail;
 static bool hal_install_context_should_fail;
 static bool hal_local_interrupts_should_fail;
+static bool hal_send_ipi_should_fail;
 static uint32_t hal_install_count;
 static uint32_t hal_prepare_context_count;
 static uint32_t hal_install_context_count;
 static uint32_t hal_local_interrupts_count;
+static uint32_t hal_send_ipi_count;
+static uint32_t hal_last_send_ipi_logical_id;
+static uint8_t hal_last_send_ipi_vector;
 static uint32_t hal_hang_count;
+static uint32_t pmap_update_interrupt_count;
 static struct plane_cpu_data *hal_last_current_data;
 static struct plane_cpu_data *hal_last_prepare_context_data;
 static struct plane_cpu_data *hal_last_install_context_data;
@@ -56,6 +62,19 @@ bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
 	hal_local_interrupts_count++;
 	hal_last_local_interrupts_data = data;
 	return !hal_local_interrupts_should_fail;
+}
+
+bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+{
+	hal_send_ipi_count++;
+	hal_last_send_ipi_logical_id = logical_id;
+	hal_last_send_ipi_vector = vector;
+	return !hal_send_ipi_should_fail;
+}
+
+void hal_pmap_update_interrupt(void)
+{
+	pmap_update_interrupt_count++;
 }
 
 void hal_irq_disable(void)
@@ -177,13 +196,13 @@ static int test_runtime_rejects_invalid_before_init(void)
 				    plane_cpu_current_data(), NULL);
 	failures += test_expect_ptr("uninitialized cpu data get",
 				    plane_cpu_get_data(0), NULL);
-	failures += test_expect_bool("uninitialized ipi rejected",
-				     plane_smp_handle_ipi(
-					     PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+	failures += test_expect_bool("uninitialized signal rejected",
+				     plane_smp_signal_handler(
+					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH),
 				     false);
-	failures += test_expect_u64("uninitialized ipi count",
-				    plane_smp_ipi_count(
-					    PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+	failures += test_expect_u64("uninitialized event count",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_TLB_FLUSH),
 				    0);
 	failures += test_expect_bool("uninitialized prepare rejected",
 				     plane_smp_prepare_ap_stack(
@@ -255,30 +274,143 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	return failures;
 }
 
-static int test_ipi_dispatch_counts_known_vectors(void)
+static int test_signal_handler_counts_known_events(void)
 {
 	int failures = 0;
+	const struct plane_cpu_data *current = plane_cpu_current_data();
+	uint32_t pmap_updates = pmap_update_interrupt_count;
 
-	failures += test_expect_bool("reschedule ipi handled",
-				     plane_smp_handle_ipi(
-					     PLANE_SMP_IPI_VECTOR_RESCHEDULE),
+	failures += test_expect_bool("AST event handled",
+				     plane_smp_signal_handler(
+					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
 				     true);
-	failures += test_expect_bool("pmap update ipi handled",
-				     plane_smp_handle_ipi(
-					     PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+	failures += test_expect_bool("TLB flush event handled",
+				     plane_smp_signal_handler(
+					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH),
 				     true);
-	failures += test_expect_bool("unknown ipi rejected",
-				     plane_smp_handle_ipi(0xef), false);
-	failures += test_expect_u64("reschedule ipi count",
-				    plane_smp_ipi_count(
-					    PLANE_SMP_IPI_VECTOR_RESCHEDULE),
+	failures += test_expect_bool("unknown signal rejected",
+				     plane_smp_signal_handler(0xef), false);
+	if (current != NULL) {
+		failures += test_expect_u32("signals consumed",
+					    current->cpu_signals, 0);
+	}
+	failures += test_expect_u64("AST event count",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_AST),
 				    1);
-	failures += test_expect_u64("pmap update ipi count",
-				    plane_smp_ipi_count(
-					    PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+	failures += test_expect_u64("TLB flush event count",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_TLB_FLUSH),
 				    1);
-	failures += test_expect_u64("unknown ipi count",
-				    plane_smp_ipi_count(0xef), 0);
+	failures += test_expect_u64("unknown preserves AST event",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_AST),
+				    1);
+	failures += test_expect_u64("unknown preserves TLB flush event",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_TLB_FLUSH),
+				    1);
+	failures += test_expect_u32("TLB flush calls pmap hook",
+				    pmap_update_interrupt_count,
+				    pmap_updates + 1);
+	return failures;
+}
+
+static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
+{
+	int failures = 0;
+	struct plane_cpu_data *bsp = plane_cpu_get_startup_data(0);
+	uint64_t ast_count = plane_smp_event_count(PLANE_SMP_EVENT_AST);
+
+	hal_send_ipi_should_fail = false;
+	failures += test_expect_bool("signal cpu sends AST",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_AST),
+				     true);
+	failures += test_expect_u32("signal cpu sends once",
+				    hal_send_ipi_count, 1);
+	failures += test_expect_u32("signal cpu target",
+				    hal_last_send_ipi_logical_id, 0);
+	failures += test_expect_u32("signal cpu vector",
+				    hal_last_send_ipi_vector,
+				    PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST);
+	if (bsp != NULL) {
+		failures += test_expect_u32("signal cpu sets pending bit",
+					    bsp->cpu_signals,
+					    1u << PLANE_SMP_EVENT_AST);
+	}
+
+	failures += test_expect_bool("handler consumes pending AST",
+				     plane_smp_signal_handler(
+					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
+				     true);
+	failures += test_expect_u64("handler updates AST count",
+				    plane_smp_event_count(PLANE_SMP_EVENT_AST),
+				    ast_count + 1);
+	if (bsp != NULL) {
+		failures += test_expect_u32("handler clears pending bit",
+					    bsp->cpu_signals, 0);
+	}
+
+	uint64_t next_ast_count = plane_smp_event_count(PLANE_SMP_EVENT_AST);
+	uint64_t tlb_count = plane_smp_event_count(PLANE_SMP_EVENT_TLB_FLUSH);
+	uint32_t pmap_updates = pmap_update_interrupt_count;
+
+	failures += test_expect_bool("signal cpu sends TLB flush",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_TLB_FLUSH),
+				     true);
+	if (bsp != NULL) {
+		failures += test_expect_u32("TLB flush pending bit set",
+					    bsp->cpu_signals,
+					    1u << PLANE_SMP_EVENT_TLB_FLUSH);
+	}
+	failures += test_expect_bool("handler drains pending signals",
+				     plane_smp_signal_handler(
+					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
+				     true);
+	failures += test_expect_u64("pending AST handled",
+				    plane_smp_event_count(PLANE_SMP_EVENT_AST),
+				    next_ast_count + 1);
+	failures += test_expect_u64("pending TLB flush handled",
+				    plane_smp_event_count(
+					    PLANE_SMP_EVENT_TLB_FLUSH),
+				    tlb_count + 1);
+	failures += test_expect_u32("pending TLB flush calls pmap hook",
+				    pmap_update_interrupt_count,
+				    pmap_updates + 1);
+	if (bsp != NULL) {
+		failures += test_expect_u32("pending signals drained",
+					    bsp->cpu_signals, 0);
+	}
+
+	hal_send_ipi_should_fail = true;
+	failures += test_expect_bool("send failure rejects signal",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_TLB_FLUSH),
+				     false);
+	hal_send_ipi_should_fail = false;
+	if (bsp != NULL) {
+		failures += test_expect_u32("send failure rolls back signal",
+					    bsp->cpu_signals, 0);
+	}
+	uint32_t send_count = hal_send_ipi_count;
+
+	failures += test_expect_bool("offline ap signal rejected",
+				     plane_smp_signal_cpu(
+					     1, PLANE_SMP_EVENT_AST),
+				     false);
+	failures += test_expect_bool("bad event rejected",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_COUNT),
+				     false);
+	failures += test_expect_bool("bad cpu rejected",
+				     plane_smp_signal_cpu(
+					     PLANE_MAX_CPUS,
+					     PLANE_SMP_EVENT_AST),
+				     false);
+	failures += test_expect_u32("invalid signal does not send",
+				    hal_send_ipi_count, send_count);
 	return failures;
 }
 
@@ -486,7 +618,8 @@ int main(void)
 		TEST_CASE(test_builder_truncates_extra_cpus),
 		TEST_CASE(test_runtime_rejects_invalid_before_init),
 		TEST_CASE(test_runtime_accepts_multi_cpu_bsp_topology),
-		TEST_CASE(test_ipi_dispatch_counts_known_vectors),
+		TEST_CASE(test_signal_handler_counts_known_events),
+		TEST_CASE(test_signal_cpu_sets_pending_signal_and_sends_vector),
 		TEST_CASE(test_ap_stack_prepare_and_state_transitions),
 		TEST_CASE(test_ap_stack_prepare_rejects_after_context_failure_path),
 		TEST_CASE(test_runtime_rejects_reinit_without_state_change),
