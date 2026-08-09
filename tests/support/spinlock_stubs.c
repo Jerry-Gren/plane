@@ -48,7 +48,7 @@ void hal_irq_enable(void)
 	test_irq_enabled = true;
 }
 
-bool hal_irq_enabled(void)
+bool hal_irq_is_enabled(void)
 {
 	return test_irq_enabled;
 }

@@ -6,7 +6,7 @@
 
 #include "vm_zone_internal.h"
 
-static bool elem_size_valid(size_t elem_size)
+static bool elem_size_is_valid(size_t elem_size)
 {
 	return elem_size >= sizeof(void *) &&
 	       (elem_size % sizeof(void *)) == 0;
@@ -55,7 +55,7 @@ static uintptr_t segment_end(const struct plane_vm_zone *zone,
 	return end;
 }
 
-static bool elem_in_segment(const struct plane_vm_zone *zone,
+static bool elem_is_in_segment(const struct plane_vm_zone *zone,
 			    const struct plane_vm_zone_segment *segment,
 			    const void *elem)
 {
@@ -74,7 +74,7 @@ static bool elem_belongs_to_zone(const struct plane_vm_zone *zone,
 	const struct plane_vm_zone_segment *segment = zone->segments;
 
 	while (segment != NULL) {
-		if (elem_in_segment(zone, segment, elem)) {
+		if (elem_is_in_segment(zone, segment, elem)) {
 			return true;
 		}
 		segment = segment->next;
@@ -83,7 +83,7 @@ static bool elem_belongs_to_zone(const struct plane_vm_zone *zone,
 	return false;
 }
 
-static bool elem_on_free_list(const struct plane_vm_zone *zone,
+static bool elem_is_on_free_list(const struct plane_vm_zone *zone,
 			      const void *elem)
 {
 	const void *current = zone->free_list;
@@ -134,7 +134,7 @@ static bool storage_overlaps_existing(const struct plane_vm_zone *zone,
 	return false;
 }
 
-static bool segment_valid(const struct plane_vm_zone *zone,
+static bool segment_is_valid(const struct plane_vm_zone *zone,
 			  const void *storage,
 			  uint64_t count,
 			  struct plane_vm_zone_segment *segment,
@@ -167,7 +167,7 @@ bool plane_vm_zone_add_storage(struct plane_vm_zone *zone,
 	uint8_t *cursor = storage;
 	uint64_t new_capacity;
 
-	if (!segment_valid(zone, storage, count, segment, &new_capacity)) {
+	if (!segment_is_valid(zone, storage, count, segment, &new_capacity)) {
 		return false;
 	}
 
@@ -199,7 +199,7 @@ bool plane_vm_zone_init(struct plane_vm_zone *zone,
 
 	if (zone == NULL ||
 	    zone->initialized ||
-	    !elem_size_valid(elem_size) ||
+	    !elem_size_is_valid(elem_size) ||
 	    storage == NULL ||
 	    count == 0 ||
 	    segment == NULL) {
@@ -242,7 +242,7 @@ bool plane_vm_zone_free(struct plane_vm_zone *zone, void *elem)
 	    elem == NULL ||
 	    zone->allocated == 0 ||
 	    !elem_belongs_to_zone(zone, elem) ||
-	    elem_on_free_list(zone, elem)) {
+	    elem_is_on_free_list(zone, elem)) {
 		return false;
 	}
 

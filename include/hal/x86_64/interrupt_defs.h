@@ -147,14 +147,14 @@ static inline bool x86_64_intr_vector_is_exception(uint64_t vector)
 	return vector < 32;
 }
 
-static inline bool x86_64_intr_pf_error_known(uint64_t error_code)
+static inline bool x86_64_intr_pf_error_is_known(uint64_t error_code)
 {
 	return (error_code & ~X86_64_INTR_PF_ERROR_KNOWN) == 0;
 }
 
-static inline bool x86_64_intr_pf_error_plane_supported(uint64_t error_code)
+static inline bool x86_64_intr_pf_error_is_plane_supported(uint64_t error_code)
 {
-	return x86_64_intr_pf_error_known(error_code) &&
+	return x86_64_intr_pf_error_is_known(error_code) &&
 	       (error_code & X86_64_INTR_PF_ERROR_PLANE_REJECT) == 0;
 }
 

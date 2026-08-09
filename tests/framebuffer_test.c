@@ -142,16 +142,16 @@ static int test_format_supported(void)
 	mask_overflow.red_mask_size = 8;
 
 	failures += test_expect_bool("valid format",
-				     plane_framebuffer_format_supported(&valid),
+				     plane_framebuffer_is_format_supported(&valid),
 				     true);
 	failures += test_expect_bool("bad bpp",
-				     plane_framebuffer_format_supported(&bad_bpp),
+				     plane_framebuffer_is_format_supported(&bad_bpp),
 				     false);
 	failures += test_expect_bool("empty mask",
-				     plane_framebuffer_format_supported(&empty_mask),
+				     plane_framebuffer_is_format_supported(&empty_mask),
 				     false);
 	failures += test_expect_bool("mask overflow",
-				     plane_framebuffer_format_supported(&mask_overflow),
+				     plane_framebuffer_is_format_supported(&mask_overflow),
 				     false);
 
 	return failures;

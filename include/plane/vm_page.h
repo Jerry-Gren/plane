@@ -12,8 +12,9 @@
  *
  * This is the XNU-like layer for resident page metadata queries. It does not
  * allocate physical pages, implement pager state, handle pageout, or provide a
- * full VM page lock. PMM protects only allocator lifecycle and free queue
- * membership for managed pages.
+ * full VM page concurrency contract. Plane currently has an early irqsave
+ * lock for page-local metadata snapshots and updates; PMM protects allocator
+ * lifecycle and free queue policy for managed pages.
  * VM object fields are resident-page metadata only; they do not imply object
  * reference counts, pager state, shadow objects, or pageout behavior.
  * plane_vm_page_grab() is the XNU-like entry for resident backing pages;

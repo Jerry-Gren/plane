@@ -21,7 +21,7 @@ void hal_irq_enable(void)
 	__asm__ volatile ("sti" ::: "memory");
 }
 
-bool hal_irq_enabled(void)
+bool hal_irq_is_enabled(void)
 {
 	return (x86_64_read_rflags() & X86_64_RFLAGS_IF) != 0;
 }
@@ -29,7 +29,7 @@ bool hal_irq_enabled(void)
 plane_irq_state_t hal_irq_save(void)
 {
 	plane_irq_state_t state = {
-		.enabled = hal_irq_enabled()
+		.enabled = hal_irq_is_enabled()
 	};
 
 	hal_irq_disable();

@@ -110,7 +110,7 @@ bool plane_vm_object_init(struct plane_vm_object *object,
 	if (object == NULL ||
 	    object->initialized ||
 	    offset_limit == 0 ||
-	    !plane_is_page_aligned(offset_limit)) {
+	    !plane_addr_is_page_aligned(offset_limit)) {
 		return false;
 	}
 
@@ -130,7 +130,7 @@ bool plane_vm_object_allocate(uint64_t offset_limit,
 {
 	if (object == NULL ||
 	    offset_limit == 0 ||
-	    !plane_is_page_aligned(offset_limit)) {
+	    !plane_addr_is_page_aligned(offset_limit)) {
 		return false;
 	}
 

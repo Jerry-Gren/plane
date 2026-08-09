@@ -29,7 +29,7 @@ static uint32_t lapic_cpu_count;
 static bool lapic_initialized;
 static volatile uint32_t lapic_write_flush_value;
 
-static bool lapic_id_valid(uint32_t lapic_id)
+static bool lapic_id_is_valid(uint32_t lapic_id)
 {
 	return lapic_id <= X86_64_LAPIC_ID_MASK;
 }
@@ -142,7 +142,7 @@ bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
 		uint32_t lapic_id = cpu->physical_id;
 
 		if (!cpu->present || cpu->logical_id != i ||
-		    !lapic_id_valid(lapic_id)) {
+		    !lapic_id_is_valid(lapic_id)) {
 			return false;
 		}
 		lapic_id_by_logical_id[i] = lapic_id;
@@ -201,7 +201,7 @@ bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 	uint32_t lapic_id;
 
 	if (!lapic_initialized || logical_id >= lapic_cpu_count ||
-	    !x86_64_lapic_external_vector_valid(vector)) {
+	    !x86_64_lapic_external_vector_is_valid(vector)) {
 		return false;
 	}
 

@@ -15,7 +15,7 @@ void hal_serial_init(void)
 	outb(COM1_PORT + 4, 0x0b);    /* enable irqs */
 }
 
-static int serial_is_transmit_empty(void)
+static int serial_transmit_is_empty(void)
 {
 	return inb(COM1_PORT + 5) & 0x20;
 }
@@ -26,7 +26,7 @@ void hal_serial_putchar(char c)
 		hal_serial_putchar('\r');
 	}
 
-	while (serial_is_transmit_empty() == 0) {
+	while (serial_transmit_is_empty() == 0) {
 		/* do nothing */
 	}
 

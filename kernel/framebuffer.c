@@ -34,7 +34,7 @@ static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel)
 	}
 }
 
-bool plane_framebuffer_format_supported(const struct plane_framebuffer_info *info)
+bool plane_framebuffer_is_format_supported(const struct plane_framebuffer_info *info)
 {
 	if (info->bpp != 16 && info->bpp != 24 && info->bpp != 32) {
 		return false;
@@ -80,7 +80,7 @@ bool plane_framebuffer_remap(struct plane_framebuffer_info *info)
 
 bool plane_framebuffer_draw_test_pattern(struct plane_framebuffer_info *info)
 {
-	if (!plane_framebuffer_format_supported(info) ||
+	if (!plane_framebuffer_is_format_supported(info) ||
 	    plane_vaddr_is_null(info->framebuffer_addr) ||
 	    info->width == 0 ||
 	    info->height == 0) {

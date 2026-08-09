@@ -11,7 +11,7 @@
 
 static bool io_map_initialized;
 
-static bool io_map_cache_valid(enum plane_io_map_cache cache)
+static bool io_map_cache_is_valid(enum plane_io_map_cache cache)
 {
 	return cache == PLANE_IO_MAP_CACHE_DEVICE ||
 	       cache == PLANE_IO_MAP_CACHE_WRITE_COMBINE;
@@ -96,8 +96,8 @@ bool plane_io_map(plane_paddr_t phys_addr,
 
 	if (!io_map_initialized ||
 	    vaddr == NULL ||
-	    !io_map_cache_valid(cache) ||
-	    !plane_vm_prot_valid(prot) ||
+	    !io_map_cache_is_valid(cache) ||
+	    !plane_vm_prot_is_valid(prot) ||
 	    !io_page_range(phys_addr, size, &phys_base, &page_offset,
 			   &page_count) ||
 	    !plane_kmem_reserve_va_pages(page_count, prot, &va_base)) {

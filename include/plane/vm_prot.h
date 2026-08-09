@@ -21,16 +21,16 @@ enum plane_vm_prot {
 	PLANE_VM_PROT_ALL = PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE,
 };
 
-static inline bool plane_vm_prot_valid(uint32_t prot)
+static inline bool plane_vm_prot_is_valid(uint32_t prot)
 {
 	return prot != PLANE_VM_PROT_NONE &&
 	       (prot & ~PLANE_VM_PROT_ALL) == 0;
 }
 
-static inline bool plane_vm_prot_allowed(uint32_t prot, uint32_t max_prot)
+static inline bool plane_vm_prot_is_allowed(uint32_t prot, uint32_t max_prot)
 {
-	return plane_vm_prot_valid(prot) &&
-	       plane_vm_prot_valid(max_prot) &&
+	return plane_vm_prot_is_valid(prot) &&
+	       plane_vm_prot_is_valid(max_prot) &&
 	       (prot & ~max_prot) == 0;
 }
 

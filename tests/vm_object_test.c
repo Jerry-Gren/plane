@@ -137,7 +137,7 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 	return page->object_hash_next;
 }
 
-bool plane_vm_page_object_tabled(const struct plane_page *page)
+bool plane_vm_page_object_is_tabled(const struct plane_page *page)
 {
 	if (page == NULL) {
 		return false;
@@ -146,7 +146,7 @@ bool plane_vm_page_object_tabled(const struct plane_page *page)
 	return page->object_tabled;
 }
 
-bool plane_vm_page_object_hashed(const struct plane_page *page)
+bool plane_vm_page_object_is_hashed(const struct plane_page *page)
 {
 	if (page == NULL) {
 		return false;
@@ -600,11 +600,11 @@ static int test_deallocate_final_empty_object(void)
 	failures += test_expect_null("object final remove rejected",
 				     plane_vm_object_remove_page(&test_object, 0));
 	failures += test_expect_bool("object final wire accounting rejected",
-				     plane_vm_object_page_became_wired(
+				     plane_vm_object_account_page_wired(
 					     &test_object),
 				     false);
 	failures += test_expect_bool("object final unwire accounting rejected",
-				     plane_vm_object_page_became_unwired(
+				     plane_vm_object_account_page_unwired(
 					     &test_object),
 				     false);
 	return failures;

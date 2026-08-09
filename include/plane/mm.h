@@ -33,7 +33,7 @@
 #endif
 
 #ifndef __ASSEMBLER__
-static inline bool plane_is_page_aligned(uint64_t value)
+static inline bool plane_addr_is_page_aligned(uint64_t value)
 {
 	return (value & (PAGE_SIZE - 1)) == 0;
 }

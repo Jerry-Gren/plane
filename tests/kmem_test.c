@@ -26,7 +26,6 @@ static struct plane_vm_map_entry test_map_entries[TEST_ALLOCATION_RECORDS];
 static struct plane_vm_map test_map;
 static struct plane_vm_object test_object;
 
-
 struct test_mapping {
 	uint64_t vaddr;
 	uint64_t phys_addr;
@@ -66,28 +65,28 @@ static void cleanup_test_object(void)
 	}
 }
 
-static bool is_test_page(const struct plane_page *page)
+static bool test_page_is_managed(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page >= &test_pages[0] &&
 	       page < &test_pages[TEST_PAGE_COUNT];
 }
 
-static bool is_test_guard_page(const struct plane_page *page)
+static bool test_guard_page_is_storage(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page >= &test_guard_pages[0] &&
 	       page < &test_guard_pages[TEST_GUARD_PAGE_COUNT];
 }
 
-static bool is_test_active_guard_page(const struct plane_page *page)
+static bool test_guard_page_is_active(const struct plane_page *page)
 {
-	return is_test_guard_page(page) && page->state == PLANE_VM_PAGE_GUARD;
+	return test_guard_page_is_storage(page) && page->state == PLANE_VM_PAGE_GUARD;
 }
 
-static bool is_test_vm_page(const struct plane_page *page)
+static bool test_page_is_known(const struct plane_page *page)
 {
-	return is_test_page(page) || is_test_active_guard_page(page);
+	return test_page_is_managed(page) || test_guard_page_is_active(page);
 }
 
 static void reset_kmem_test(void)
@@ -141,7 +140,7 @@ static void reset_kmem_test(void)
 	}
 }
 
-static uint64_t allocated_page_count(void)
+static uint64_t pmm_allocated_page_count(void)
 {
 	uint64_t count = 0;
 
@@ -353,7 +352,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
-	if (!plane_vm_prot_valid(options.prot) ||
+	if (!plane_vm_prot_is_valid(options.prot) ||
 	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL ||
 	    map_attempts++ >= map_fail_after) {
@@ -389,7 +388,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
-	if (!plane_vm_prot_valid(prot)) {
+	if (!plane_vm_prot_is_valid(prot)) {
 		return false;
 	}
 
@@ -445,7 +444,7 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 
 bool plane_vm_page_release(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
 	    page->vm_object != NULL) {
@@ -461,7 +460,7 @@ bool plane_vm_page_release(struct plane_page *page)
 
 bool plane_vm_page_wire(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == UINT64_MAX) {
 		return false;
@@ -473,7 +472,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 
 bool plane_vm_page_unwire(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == 0) {
 		return false;
@@ -498,11 +497,11 @@ struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 
 plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
-	if (is_test_guard_page(page)) {
+	if (test_guard_page_is_storage(page)) {
 		return page->state == PLANE_VM_PAGE_GUARD ? PLANE_VM_PAGE_GUARD_PHYS :
 				     PLANE_VM_PAGE_NO_PHYS;
 	}
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
@@ -511,11 +510,11 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
-	if (is_test_guard_page(page)) {
+	if (test_guard_page_is_storage(page)) {
 		return page->state == PLANE_VM_PAGE_GUARD ?
 		       PLANE_VM_PAGE_GUARD : PLANE_VM_PAGE_INVALID;
 	}
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return PLANE_VM_PAGE_INVALID;
 	}
 
@@ -530,7 +529,7 @@ bool plane_vm_page_is_guard(const struct plane_page *page)
 
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -541,7 +540,7 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
-	    !is_test_vm_page(page) ||
+	    !test_page_is_known(page) ||
 	    page->vm_object == NULL) {
 		return false;
 	}
@@ -554,7 +553,7 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (!is_test_vm_page(page) ||
+	if (!test_page_is_known(page) ||
 	    object == NULL ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD) ||
@@ -571,7 +570,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (!is_test_vm_page(page) ||
+	if (!test_page_is_known(page) ||
 	    object == NULL ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD) ||
@@ -587,7 +586,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -596,7 +595,7 @@ struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -605,25 +604,25 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
 	return page->object_hash_next;
 }
 
-bool plane_vm_page_object_tabled(const struct plane_page *page)
+bool plane_vm_page_object_is_tabled(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
 	return page->object_tabled;
 }
 
-bool plane_vm_page_object_hashed(const struct plane_page *page)
+bool plane_vm_page_object_is_hashed(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -633,8 +632,8 @@ bool plane_vm_page_object_hashed(const struct plane_page *page)
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
-	if (!is_test_vm_page(page) ||
-	    (prev != NULL && !is_test_vm_page(prev))) {
+	if (!test_page_is_known(page) ||
+	    (prev != NULL && !test_page_is_known(prev))) {
 		return false;
 	}
 
@@ -645,8 +644,8 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 bool plane_vm_page_set_object_next(struct plane_page *page,
 				   struct plane_page *next)
 {
-	if (!is_test_vm_page(page) ||
-	    (next != NULL && !is_test_vm_page(next))) {
+	if (!test_page_is_known(page) ||
+	    (next != NULL && !test_page_is_known(next))) {
 		return false;
 	}
 
@@ -657,8 +656,8 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 					struct plane_page *next)
 {
-	if (!is_test_vm_page(page) ||
-	    (next != NULL && !is_test_vm_page(next))) {
+	if (!test_page_is_known(page) ||
+	    (next != NULL && !test_page_is_known(next))) {
 		return false;
 	}
 
@@ -668,7 +667,7 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 
 bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -678,7 +677,7 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 
 bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -689,7 +688,7 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
-	    !is_test_vm_page(page)) {
+	    !test_page_is_known(page)) {
 		return false;
 	}
 
@@ -741,7 +740,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 
 bool plane_vm_page_release_guard(struct plane_page *page)
 {
-	if (!is_test_guard_page(page) ||
+	if (!test_guard_page_is_storage(page) ||
 	    page->state != PLANE_VM_PAGE_GUARD ||
 	    page->wire_count != 0 ||
 	    page->vm_object != NULL ||
@@ -769,7 +768,7 @@ static int test_alloc_and_free_pages(void)
 				     test_kmem_alloc_pages_in_map(&test_map, &test_object, 2, 0, &addr),
 				     true);
 	failures += test_expect_ptr("alloc addr", addr, (void *)TEST_KMEM_BASE);
-	failures += test_expect_u64("alloc backing pages", allocated_page_count(), 2);
+	failures += test_expect_u64("alloc backing pages", pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("alloc wired pages", wired_page_count(), 2);
 	failures += test_expect_u64("alloc object pages", object_page_count(), 2);
 	failures += test_expect_u64("alloc object resident count",
@@ -825,7 +824,7 @@ static int test_alloc_and_free_pages(void)
 
 	failures += test_expect_bool("free pages",
 				     test_kmem_free_pages_in_map(&test_map, &test_object, addr, 2), true);
-	failures += test_expect_u64("free backing pages", allocated_page_count(), 0);
+	failures += test_expect_u64("free backing pages", pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("free wired pages", wired_page_count(), 0);
 	failures += test_expect_u64("free object pages", object_page_count(), 0);
 	failures += test_expect_u64("free object resident count",
@@ -861,7 +860,7 @@ static int test_readonly_alloc_maps_without_write_flag(void)
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("readonly backing pages",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_bool("readonly free",
 				     test_kmem_free_pages_in_map(&test_map, &test_object, addr, 1), true);
 	return failures;
@@ -1092,7 +1091,7 @@ static int test_guard_alloc_and_free_pages(void)
 	failures += test_expect_ptr("guard user addr",
 				    addr, (void *)kmem_page_vaddr(1));
 	failures += test_expect_u64("guard backing pages",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("guard wired pages", wired_page_count(), 2);
 	failures += test_expect_u64("guard object pages", object_page_count(), 2);
 	failures += test_expect_u64("guard active pages", guard_page_count(), 0);
@@ -1139,7 +1138,7 @@ static int test_guard_alloc_and_free_pages(void)
 	failures += test_expect_bool("guard free",
 				     test_kmem_free_pages_in_map(&test_map, &test_object, addr, 2), true);
 	failures += test_expect_u64("guard free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("guard free wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard free object pages",
@@ -1181,7 +1180,7 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 	failures += test_expect_ptr("lazy addr", addr,
 				    (void *)TEST_KMEM_BASE);
 	failures += test_expect_u64("lazy no backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy no wired pages", wired_page_count(),
 				    0);
 	failures += test_expect_u64("lazy no object pages",
@@ -1209,7 +1208,7 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 						    PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy fault backing pages",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("lazy fault wired pages",
 				    wired_page_count(), 1);
 	failures += test_expect_u64("lazy fault object pages",
@@ -1243,7 +1242,7 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 						    PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy repeat no new backing",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	mapping = find_mapping(TEST_KMEM_BASE);
 	if (mapping != NULL) {
 		failures += test_expect_u64("lazy repeat same phys",
@@ -1255,7 +1254,7 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 					     &test_map, &test_object, addr, 2),
 				     true);
 	failures += test_expect_u64("lazy free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy free wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("lazy free object pages",
@@ -1285,7 +1284,7 @@ static int test_lazy_readonly_fault_protection(void)
 							    PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("lazy readonly write no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy readonly write no object",
 				    object_page_count(), 0);
 	failures += test_expect_u64("lazy readonly write no mapping",
@@ -1313,7 +1312,7 @@ static int test_lazy_readonly_fault_protection(void)
 					    mapping->prot, PLANE_VM_PROT_READ);
 	}
 	failures += test_expect_u64("lazy readonly backing",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_bool("lazy readonly free",
 				     test_kmem_free_pages_in_map(
 					     &test_map, &test_object, addr, 1),
@@ -1336,7 +1335,7 @@ static int test_lazy_guard_faults_only_user_pages(void)
 	failures += test_expect_ptr("lazy guard user addr", addr,
 				    (void *)kmem_page_vaddr(1));
 	failures += test_expect_u64("lazy guard no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy guard no mappings",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy guard left fault",
@@ -1344,13 +1343,13 @@ static int test_lazy_guard_faults_only_user_pages(void)
 						    PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("lazy guard left no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_bool("lazy guard user fault",
 				     fault_test_map(kmem_page_vaddr(1),
 						    PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy guard user backing",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_not_null("lazy guard user mapping",
 					 find_mapping(kmem_page_vaddr(1)));
 	failures += test_expect_bool("lazy guard right fault",
@@ -1358,13 +1357,13 @@ static int test_lazy_guard_faults_only_user_pages(void)
 						    PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("lazy guard right stable",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_bool("lazy guard free",
 				     test_kmem_free_pages_in_map(
 					     &test_map, &test_object, addr, 2),
 				     true);
 	failures += test_expect_u64("lazy guard free backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy guard free mappings",
 				    mapping_count(), 0);
 	failures += test_expect_u64("lazy guard active pages",
@@ -1390,7 +1389,7 @@ static int test_lazy_protect_before_and_after_fault(void)
 					     PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy protect no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy protect no mappings",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy protected read fault",
@@ -1409,7 +1408,7 @@ static int test_lazy_protect_before_and_after_fault(void)
 							    PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("lazy protected write stable pages",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_null("lazy protected second absent",
 				     find_mapping(kmem_page_vaddr(1)));
 
@@ -1459,7 +1458,7 @@ static int test_lazy_free_before_fault(void)
 					     &addr),
 				     true);
 	failures += test_expect_u64("lazy free-before no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy free-before no mapping",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy free before fault",
@@ -1467,7 +1466,7 @@ static int test_lazy_free_before_fault(void)
 					     &test_map, &test_object, addr, 2),
 				     true);
 	failures += test_expect_u64("lazy free-before pages freed",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy free-before mappings freed",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy free-before reuse",
@@ -1498,7 +1497,7 @@ static int test_lazy_range_fault_populates_all_pages(void)
 					     2, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy range backing",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("lazy range wired",
 				    wired_page_count(), 2);
 	failures += test_expect_u64("lazy range object pages",
@@ -1514,7 +1513,7 @@ static int test_lazy_range_fault_populates_all_pages(void)
 					     &test_map, &test_object, addr, 2),
 				     true);
 	failures += test_expect_u64("lazy range free backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy range free mappings",
 				    mapping_count(), 0);
 	return failures;
@@ -1552,7 +1551,7 @@ static int test_lazy_range_fault_wire_populates_and_can_unwire(void)
 	failures += expect_page_wire_count("lazy fault-wire second count",
 					   second_page, 2);
 	failures += test_expect_u64("lazy fault-wire backing",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("lazy fault-wire mappings",
 				    mapping_count(), 2);
 
@@ -1570,7 +1569,7 @@ static int test_lazy_range_fault_wire_populates_and_can_unwire(void)
 					     &test_map, &test_object, addr, 2),
 				     true);
 	failures += test_expect_u64("lazy fault-wire free backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy fault-wire free mappings",
 				    mapping_count(), 0);
 	return failures;
@@ -1600,7 +1599,7 @@ static int test_lazy_readonly_range_fault_protection(void)
 						     PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("lazy ro write no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy ro write no mappings",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy ro range read fault",
@@ -1649,7 +1648,7 @@ static int test_lazy_guard_range_fault_uses_user_pages(void)
 					     2, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("lazy guard range backing",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_not_null("lazy guard range first mapping",
 					 find_mapping(kmem_page_vaddr(1)));
 	failures += test_expect_not_null("lazy guard range second mapping",
@@ -1673,7 +1672,7 @@ static int test_lazy_guard_range_fault_uses_user_pages(void)
 					     3, PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("lazy guard range guard no backing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("lazy guard range guard no mapping",
 				    mapping_count(), 0);
 	failures += test_expect_bool("lazy guard range second free",
@@ -1691,12 +1690,12 @@ static int test_alloc_and_free_bytes(void)
 	failures += test_expect_bool("byte alloc",
 				     test_kmem_alloc_in_map(&test_map, &test_object, 1, 0, &addr), true);
 	failures += test_expect_ptr("byte addr", addr, (void *)TEST_KMEM_BASE);
-	failures += test_expect_u64("byte backing pages", allocated_page_count(), 1);
+	failures += test_expect_u64("byte backing pages", pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("byte wired pages", wired_page_count(), 1);
 	failures += test_expect_u64("byte mappings", mapping_count(), 1);
 	failures += test_expect_bool("byte free", test_kmem_free_in_map(&test_map, &test_object, addr, 1), true);
 	failures += test_expect_u64("byte free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("byte free wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("byte free mappings", mapping_count(), 0);
@@ -1715,7 +1714,7 @@ static int test_byte_guard_alloc_and_free(void)
 	failures += test_expect_ptr("byte guard user addr",
 				    addr, (void *)kmem_page_vaddr(1));
 	failures += test_expect_u64("byte guard backing pages",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("byte guard wired pages",
 				    wired_page_count(), 1);
 	failures += test_expect_u64("byte guard object pages",
@@ -1740,7 +1739,7 @@ static int test_byte_guard_alloc_and_free(void)
 	failures += test_expect_bool("byte guard free",
 				     test_kmem_free_in_map(&test_map, &test_object, addr, 1), true);
 	failures += test_expect_u64("byte guard free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("byte guard free wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("byte guard free object pages",
@@ -1768,14 +1767,14 @@ static int test_byte_alloc_rounds_up_to_pages(void)
 	failures += test_expect_bool("round alloc",
 				     test_kmem_alloc_in_map(&test_map, &test_object, PAGE_SIZE + 1, 0, &addr),
 				     true);
-	failures += test_expect_u64("round backing pages", allocated_page_count(), 2);
+	failures += test_expect_u64("round backing pages", pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("round wired pages", wired_page_count(), 2);
 	failures += test_expect_u64("round mappings", mapping_count(), 2);
 	failures += test_expect_bool("round free",
 				     test_kmem_free_in_map(&test_map, &test_object, addr, PAGE_SIZE + 1),
 				     true);
 	failures += test_expect_u64("round free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("round free wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("round free mappings", mapping_count(), 0);
@@ -1806,7 +1805,7 @@ static int test_byte_zero_flag_reaches_all_pages(void)
 						      &addr),
 				     true);
 	failures += test_expect_u64("byte zero backing pages",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("byte zero flagged pages",
 				    allocated_page_count_with_flags(
 					    PLANE_VM_PAGE_GRAB_ZERO),
@@ -1828,7 +1827,7 @@ static int test_readonly_zero_maps_without_write_and_zeros_pages(void)
 						      &addr),
 				     true);
 	failures += test_expect_u64("readonly zero backing pages",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("readonly zero flagged pages",
 				    allocated_page_count_with_flags(
 					    PLANE_VM_PAGE_GRAB_ZERO),
@@ -1860,7 +1859,7 @@ static int test_guard_zero_flag_reaches_user_pages(void)
 					     &addr),
 				     true);
 	failures += test_expect_u64("guard zero backing pages",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("guard zero flagged pages",
 				    allocated_page_count_with_flags(
 					    PLANE_VM_PAGE_GRAB_ZERO),
@@ -1918,7 +1917,7 @@ static int test_byte_guard_zero_flag_reaches_user_pages(void)
 						      &addr),
 				     true);
 	failures += test_expect_u64("byte guard zero backing pages",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("byte guard zero flagged pages",
 				    allocated_page_count_with_flags(
 					    PLANE_VM_PAGE_GRAB_ZERO),
@@ -1938,7 +1937,7 @@ static int test_grab_failure_rolls_back_vaddr(void)
 				     test_kmem_alloc_pages_in_map(&test_map, &test_object, 2, 0, &addr),
 				     false);
 	failures += test_expect_u64("grab fail backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("grab fail wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("grab fail object pages",
@@ -1973,7 +1972,7 @@ static int test_map_failure_rolls_back_pages(void)
 				     test_kmem_alloc_pages_in_map(&test_map, &test_object, 2, 0, &addr),
 				     false);
 	failures += test_expect_u64("map fail allocated pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("map fail wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("map fail object pages",
@@ -2008,7 +2007,7 @@ static int test_guard_failures_roll_back_vaddr(void)
 				     test_kmem_alloc_pages_in_map(&test_map, &test_object, 2, PLANE_KMEM_ALLOC_GUARD, &addr),
 				     false);
 	failures += test_expect_u64("guard grab fail backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("guard grab fail wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard grab fail object pages",
@@ -2032,7 +2031,7 @@ static int test_guard_failures_roll_back_vaddr(void)
 				     test_kmem_alloc_pages_in_map(&test_map, &test_object, 2, PLANE_KMEM_ALLOC_GUARD, &addr),
 				     false);
 	failures += test_expect_u64("guard map fail pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("guard map fail wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("guard map fail object pages",
@@ -2081,7 +2080,7 @@ static int test_alloc_rejects_object_too_small_for_auto_offset(void)
 	failures += test_expect_u64("small object ref unchanged",
 				    plane_vm_object_ref_count(&small_object), 1);
 	failures += test_expect_u64("small object backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("small object wired pages",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("small object mappings",
@@ -2163,13 +2162,13 @@ static int test_byte_free_size_mismatch_does_not_unmap(void)
 	failures += test_expect_bool("mismatch free",
 				     test_kmem_free_in_map(&test_map, &test_object, addr, 1), false);
 	failures += test_expect_u64("mismatch backing pages",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("mismatch mappings", mapping_count(), 2);
 	failures += test_expect_bool("mismatch exact free",
 				     test_kmem_free_in_map(&test_map, &test_object, addr, PAGE_SIZE + 1),
 				     true);
 	failures += test_expect_u64("mismatch free backing pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("mismatch free mappings", mapping_count(), 0);
 	return failures;
 }

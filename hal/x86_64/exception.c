@@ -87,7 +87,7 @@ bool x86_64_try_handle_page_fault(uint64_t int_no,
 				  uint64_t error_code)
 {
 	if (int_no != X86_64_INTR_VECTOR_PAGE_FAULT ||
-	    !x86_64_intr_pf_error_plane_supported(error_code)) {
+	    !x86_64_intr_pf_error_is_plane_supported(error_code)) {
 		return false;
 	}
 

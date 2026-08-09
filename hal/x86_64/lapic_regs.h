@@ -73,7 +73,7 @@ static inline bool x86_64_lapic_version_supported(uint32_t version_reg)
 	return x86_64_lapic_version(version_reg) >= X86_64_LAPIC_MIN_VERSION;
 }
 
-static inline bool x86_64_lapic_external_vector_valid(uint8_t vector)
+static inline bool x86_64_lapic_external_vector_is_valid(uint8_t vector)
 {
 	return vector >= X86_64_LAPIC_VECTOR_MIN;
 }

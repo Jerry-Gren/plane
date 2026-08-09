@@ -39,9 +39,9 @@ static int test_entry_helpers_decode_current_bits(void)
 	int failures = 0;
 
 	failures += test_expect_bool("present entry",
-				     x86_64_paging_entry_present(entry), true);
+				     x86_64_paging_entry_is_present(entry), true);
 	failures += test_expect_bool("absent entry",
-				     x86_64_paging_entry_present(0), false);
+				     x86_64_paging_entry_is_present(0), false);
 	failures += test_expect_u64("entry phys",
 				    x86_64_paging_entry_phys(entry), phys);
 	failures += test_expect_u64("entry flags",
@@ -59,20 +59,20 @@ static int test_leaf_helper_matches_current_pmap_levels(void)
 	int failures = 0;
 
 	failures += test_expect_bool("pt entry is leaf",
-				     x86_64_paging_entry_leaf(
+				     x86_64_paging_entry_is_leaf(
 					     X86_64_PAGING_ENTRY_PRESENT, 1),
 				     true);
 	failures += test_expect_bool("pd ps entry is leaf",
-				     x86_64_paging_entry_leaf(ps_entry, 2),
+				     x86_64_paging_entry_is_leaf(ps_entry, 2),
 				     true);
 	failures += test_expect_bool("pdpt ps entry is leaf",
-				     x86_64_paging_entry_leaf(ps_entry, 3),
+				     x86_64_paging_entry_is_leaf(ps_entry, 3),
 				     true);
 	failures += test_expect_bool("pml4 ps bit is not leaf",
-				     x86_64_paging_entry_leaf(ps_entry, 4),
+				     x86_64_paging_entry_is_leaf(ps_entry, 4),
 				     false);
 	failures += test_expect_bool("non-ps pd entry is table",
-				     x86_64_paging_entry_leaf(
+				     x86_64_paging_entry_is_leaf(
 					     X86_64_PAGING_ENTRY_PRESENT, 2),
 				     false);
 

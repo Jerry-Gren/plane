@@ -104,6 +104,15 @@ Preferred owner/verb/object order:
   Keep the verb immediately after the owner cluster so related actions line up,
   such as `plane_vm_page_reset_runtime()` and
   `plane_vm_page_reset_resident_links()`.
+- Predicate helpers follow the same owner-first shape. Public or cross-file
+  predicates should read as `owner_is_property()`, such as
+  `plane_vm_page_is_guard()`. File-local predicates may omit the public module
+  prefix, but should still keep the entity before `is`, such as
+  `guard_page_is_active()`, when that reads clearly.
+- Relation and capability predicates may keep natural verb forms when `is`
+  would make the name worse: `owner_can_action()`, `range_contains()`,
+  `range_overlaps()`, `entry_contains_addr()`, or `elem_belongs_to_zone()`.
+  Do not mechanically force every boolean helper into an `is_*` shape.
 - Apply the same rule to arch-private helpers:
   `x86_64_physmap_set_bootstrap_window()`,
   `x86_64_physmap_install_bootstrap_window()`, and
@@ -118,7 +127,10 @@ Preferred owner/verb/object order:
   public API names. Do not churn them opportunistically in unrelated patches.
 - Do not force static file-local helpers to carry public owner prefixes just to
   match exported symbols. Prefer concise local names when the containing file
-  already makes the owner obvious.
+  already makes the owner obvious, but keep the function's action or predicate
+  role explicit. For example, `reset_runtime_locked()` is acceptable in a file
+  that only owns one runtime, while boolean locals and parameters should use
+  `is_*`, `has_*`, or `can_*`, such as `is_writable`.
 
 Avoid these stale names in new code:
 
@@ -257,10 +269,18 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - Add locks at owner-cluster boundaries and document what each lock protects.
   Prefer a small explicit lock order over broad lock nesting. Current VM object
   internal order is object lock before resident hash lock. Current cross-owner
-  MM order is VM map lock before VM object lock.
+  MM order is VM map lock before VM object lock, then resident hash lock, then
+  VM page lock for page-local metadata updates.
 - PMM has its own irqsave spinlock for allocator globals, metadata placement,
   free queue use, and allocator lifecycle transitions in `struct plane_page`.
-  Do not allocate/free PMM pages while holding VM map or VM object locks.
+  PMM may briefly enter VM page helpers while holding the PMM lock. Do not
+  allocate/free PMM pages while holding VM map, VM object, resident hash, or VM
+  page locks.
+- VM page metadata has an early irqsave lock for `struct plane_page` local
+  fields, guard metadata, queue membership snapshots, and resident link field
+  reads/writes. The allowed lock directions are VM object -> resident hash ->
+  VM page, and PMM -> VM page. Never call VM object accounting or PMM
+  allocation/free while holding the VM page lock.
 - Physical page 0 is reserved as a null physical guard. PMM must never allocate
   or manage it.
 - `struct plane_page` is the XNU-like page metadata foundation. Do not expand

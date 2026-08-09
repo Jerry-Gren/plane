@@ -68,7 +68,7 @@ static int test_pat_init_requires_features(void)
 	failures += test_expect_u32("missing msr no write",
 				    test_write_count, 0);
 	failures += test_expect_bool("missing msr leaves wc not ready",
-				     x86_64_pat_write_combine_ready(), false);
+				     x86_64_pat_write_combine_is_ready(), false);
 
 	reset_pat_test();
 	test_has_pat = false;
@@ -78,7 +78,7 @@ static int test_pat_init_requires_features(void)
 	failures += test_expect_u32("missing pat no write",
 				    test_write_count, 0);
 	failures += test_expect_bool("missing pat leaves wc not ready",
-				     x86_64_pat_write_combine_ready(), false);
+				     x86_64_pat_write_combine_is_ready(), false);
 
 	return failures;
 }
@@ -103,7 +103,7 @@ static int test_pat_init_sets_entry_one_to_write_combine(void)
 	failures += test_expect_u64("pat entry one wc",
 				    test_last_write_value, expected);
 	failures += test_expect_bool("wc ready",
-				     x86_64_pat_write_combine_ready(), true);
+				     x86_64_pat_write_combine_is_ready(), true);
 
 	return failures;
 }
@@ -118,7 +118,7 @@ static int test_pat_init_propagates_write_failure(void)
 				     x86_64_pat_init(), false);
 	failures += test_expect_u32("write attempted", test_write_count, 1);
 	failures += test_expect_bool("write failure leaves wc not ready",
-				     x86_64_pat_write_combine_ready(), false);
+				     x86_64_pat_write_combine_is_ready(), false);
 
 	return failures;
 }

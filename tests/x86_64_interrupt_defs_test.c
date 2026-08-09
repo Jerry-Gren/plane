@@ -91,23 +91,23 @@ static int test_page_fault_error_helpers(void)
 	int failures = 0;
 
 	failures += test_expect_bool("known pf bits",
-				     x86_64_intr_pf_error_known(known), true);
+				     x86_64_intr_pf_error_is_known(known), true);
 	failures += test_expect_bool("unknown pf bit",
-				     x86_64_intr_pf_error_known(BIT_ULL(5)),
+				     x86_64_intr_pf_error_is_known(BIT_ULL(5)),
 				     false);
 	failures += test_expect_bool("kernel read supported",
-				     x86_64_intr_pf_error_plane_supported(0),
+				     x86_64_intr_pf_error_is_plane_supported(0),
 				     true);
 	failures += test_expect_bool("kernel write supported",
-				     x86_64_intr_pf_error_plane_supported(
+				     x86_64_intr_pf_error_is_plane_supported(
 					     X86_64_INTR_PF_ERROR_WRITE),
 				     true);
 	failures += test_expect_bool("user fault rejected",
-				     x86_64_intr_pf_error_plane_supported(
+				     x86_64_intr_pf_error_is_plane_supported(
 					     X86_64_INTR_PF_ERROR_USER),
 				     false);
 	failures += test_expect_bool("execute fault rejected",
-				     x86_64_intr_pf_error_plane_supported(
+				     x86_64_intr_pf_error_is_plane_supported(
 					     X86_64_INTR_PF_ERROR_EXECUTE),
 				     false);
 	failures += test_expect_u32("read fault type",

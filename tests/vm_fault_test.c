@@ -62,14 +62,14 @@ static uint64_t test_page_phys(uint64_t page)
 	return 0x100000 + page * PAGE_SIZE;
 }
 
-static bool is_test_page(const struct plane_page *page)
+static bool test_page_is_managed(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page >= &test_pages[0] &&
 	       page < &test_pages[TEST_PAGE_COUNT];
 }
 
-static uint64_t allocated_page_count(void)
+static uint64_t pmm_allocated_page_count(void)
 {
 	uint64_t count = 0;
 
@@ -274,7 +274,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 
 	if (map_force_fail ||
-	    !plane_vm_prot_valid(options.prot) ||
+	    !plane_vm_prot_is_valid(options.prot) ||
 	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
@@ -318,7 +318,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
-	if (protect_force_fail || !plane_vm_prot_valid(prot)) {
+	if (protect_force_fail || !plane_vm_prot_is_valid(prot)) {
 		return false;
 	}
 
@@ -355,7 +355,7 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 
 bool plane_vm_page_release(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
 	    page->vm_object != NULL) {
@@ -368,7 +368,7 @@ bool plane_vm_page_release(struct plane_page *page)
 
 plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
-	if (!is_test_page(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
+	if (!test_page_is_managed(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
@@ -377,7 +377,7 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
-	if (!is_test_page(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
+	if (!test_page_is_managed(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return PLANE_VM_PAGE_INVALID;
 	}
 
@@ -387,7 +387,7 @@ enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 bool plane_vm_page_wire(struct plane_page *page)
 {
 	if (wire_call_count >= wire_fail_after ||
-	    !is_test_page(page) ||
+	    !test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == UINT64_MAX) {
 		return false;
@@ -395,7 +395,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 
 	if (page->vm_object != NULL &&
 	    page->wire_count == 0 &&
-	    !plane_vm_object_page_became_wired(page->vm_object)) {
+	    !plane_vm_object_account_page_wired(page->vm_object)) {
 		return false;
 	}
 
@@ -406,7 +406,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 
 bool plane_vm_page_unwire(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == 0) {
 		return false;
@@ -414,7 +414,7 @@ bool plane_vm_page_unwire(struct plane_page *page)
 
 	if (page->vm_object != NULL &&
 	    page->wire_count == 1 &&
-	    !plane_vm_object_page_became_unwired(page->vm_object)) {
+	    !plane_vm_object_account_page_unwired(page->vm_object)) {
 		return false;
 	}
 
@@ -426,7 +426,7 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 			      uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
-	    !is_test_page(page) ||
+	    !test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return false;
 	}
@@ -437,7 +437,7 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
-	if (!is_test_page(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
+	if (!test_page_is_managed(page) || page->state != PLANE_VM_PAGE_ALLOCATED) {
 		return NULL;
 	}
 
@@ -448,7 +448,7 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
-	    !is_test_page(page) ||
+	    !test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->vm_object == NULL) {
 		return false;
@@ -463,7 +463,7 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 				 uint64_t offset)
 {
 	if (attach_force_fail ||
-	    !is_test_page(page) ||
+	    !test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    object == NULL ||
 	    page->vm_object != NULL) {
@@ -484,7 +484,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->vm_object != object ||
 	    page->vm_object_offset != offset) {
@@ -503,33 +503,33 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 {
-	return is_test_page(page) ? page->object_prev : NULL;
+	return test_page_is_managed(page) ? page->object_prev : NULL;
 }
 
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 {
-	return is_test_page(page) ? page->object_next : NULL;
+	return test_page_is_managed(page) ? page->object_next : NULL;
 }
 
 struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 {
-	return is_test_page(page) ? page->object_hash_next : NULL;
+	return test_page_is_managed(page) ? page->object_hash_next : NULL;
 }
 
-bool plane_vm_page_object_tabled(const struct plane_page *page)
+bool plane_vm_page_object_is_tabled(const struct plane_page *page)
 {
-	return is_test_page(page) && page->object_tabled;
+	return test_page_is_managed(page) && page->object_tabled;
 }
 
-bool plane_vm_page_object_hashed(const struct plane_page *page)
+bool plane_vm_page_object_is_hashed(const struct plane_page *page)
 {
-	return is_test_page(page) && page->object_hashed;
+	return test_page_is_managed(page) && page->object_hashed;
 }
 
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
-	if (!is_test_page(page) || (prev != NULL && !is_test_page(prev))) {
+	if (!test_page_is_managed(page) || (prev != NULL && !test_page_is_managed(prev))) {
 		return false;
 	}
 
@@ -540,7 +540,7 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 bool plane_vm_page_set_object_next(struct plane_page *page,
 				   struct plane_page *next)
 {
-	if (!is_test_page(page) || (next != NULL && !is_test_page(next))) {
+	if (!test_page_is_managed(page) || (next != NULL && !test_page_is_managed(next))) {
 		return false;
 	}
 
@@ -551,7 +551,7 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 					struct plane_page *next)
 {
-	if (!is_test_page(page) || (next != NULL && !is_test_page(next))) {
+	if (!test_page_is_managed(page) || (next != NULL && !test_page_is_managed(next))) {
 		return false;
 	}
 
@@ -561,7 +561,7 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 
 bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 {
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return false;
 	}
 
@@ -571,7 +571,7 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 
 bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 {
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return false;
 	}
 
@@ -613,7 +613,7 @@ static int test_fault_rejects_invalid_or_unmapped_access(void)
 							 PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("fault invalid allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault invalid resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -647,7 +647,7 @@ static int test_fault_miss_allocates_zero_page_and_maps(void)
 	failures += test_expect_not_null("fault miss resident", page);
 	failures += test_expect_not_null("fault miss mapping", mapping);
 	failures += test_expect_u64("fault miss allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("fault miss resident count",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -725,7 +725,7 @@ static int test_fault_resident_hit_repairs_absent_pmap(void)
 	mapping = find_mapping(vaddr);
 	failures += test_expect_not_null("fault hit mapping", mapping);
 	failures += test_expect_u64("fault hit allocated unchanged",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u32("fault hit no new grab",
 				    last_grab_flags, 0);
 	failures += test_expect_u64("fault hit map calls", map_call_count, 1);
@@ -827,7 +827,7 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 					    &test_object),
 				    1);
 	failures += test_expect_u64("fault protect fail allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("fault protect fail calls",
 				    protect_call_count, 0);
 	return failures;
@@ -900,7 +900,7 @@ static int test_fault_resident_hit_rejects_invalid_phys(void)
 					    &test_object),
 				    1);
 	failures += test_expect_u64("fault invalid phys allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("fault invalid phys map calls",
 				    map_call_count, 0);
 	failures += test_expect_u64("fault invalid phys protect calls",
@@ -933,7 +933,7 @@ static int test_fault_miss_rejects_stale_pmap_mapping(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault stale allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault stale resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -967,7 +967,7 @@ static int test_fault_rejects_va_only_reservation(void)
 	failures += test_expect_u64("va-only no grab flags",
 				    last_grab_flags, 0);
 	failures += test_expect_u64("va-only no pages",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("va-only no mappings",
 				    mapping_count(), 0);
 	return failures;
@@ -1079,7 +1079,7 @@ static int test_fault_multi_wire_failure_rolls_back_all_wires(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault multiwire fail allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault multiwire fail wired",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("fault multiwire fail resident",
@@ -1118,7 +1118,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault grab fail allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	grab_force_fail = false;
 
 	wire_fail_after = 0;
@@ -1127,7 +1127,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault wire fail allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault wire fail wired",
 				    wired_page_count(), 0);
 	wire_fail_after = UINT64_MAX;
@@ -1138,7 +1138,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault insert fail allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault insert fail resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1151,7 +1151,7 @@ static int test_fault_rolls_back_allocation_failures(void)
 							 PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("fault map fail allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault map fail wired",
 				    wired_page_count(), 0);
 	failures += test_expect_u64("fault map fail resident",
@@ -1184,7 +1184,7 @@ static int test_fault_pages_faults_contiguous_range(void)
 						      PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("range fault allocated",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 	failures += test_expect_u64("range fault resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1251,7 +1251,7 @@ static int test_fault_pages_rejects_invalid_inputs(void)
 						      2, PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("range invalid allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("range invalid resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1285,7 +1285,7 @@ static int test_fault_pages_keeps_prefix_before_hole(void)
 						      PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("range hole allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("range hole resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1328,7 +1328,7 @@ static int test_fault_pages_keeps_prefix_before_protection_failure(void)
 							      PLANE_VM_PROT_WRITE),
 				     false);
 	failures += test_expect_u64("range prot allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("range prot resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1432,7 +1432,7 @@ static int test_fault_pages_keeps_prefix_on_map_failure(void)
 						      PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_u64("range map fail allocated",
-				    allocated_page_count(), 1);
+				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("range map fail resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1484,7 +1484,7 @@ static int test_fault_wire_pages_faults_and_wires_lazy_range(void)
 				    lookup_page_wired_count(vaddr + PAGE_SIZE),
 				    1);
 	failures += test_expect_u64("fault wire range allocated",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("fault wire range resident",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1664,7 +1664,7 @@ static int test_fault_wire_pages_rejects_hole_without_mutation(void)
 	failures += test_expect_u64("fault wire hole second map",
 				    lookup_page_wired_count(second), 0);
 	failures += test_expect_u64("fault wire hole allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault wire hole mappings",
 				    mapping_count(), 0);
 	return failures;
@@ -1734,7 +1734,7 @@ static int test_fault_wire_unwire_rejects_invalid_inputs(void)
 	failures += test_expect_u64("fault wire invalid map count",
 				    lookup_page_wired_count(vaddr), 0);
 	failures += test_expect_u64("fault wire invalid allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault wire invalid mappings",
 				    mapping_count(), 0);
 	return failures;
@@ -1774,7 +1774,7 @@ static int test_fault_unwire_pages_unwires_resident_without_freeing(void)
 				    lookup_page_wired_count(vaddr + PAGE_SIZE),
 				    0);
 	failures += test_expect_u64("fault unwire allocated kept",
-				    allocated_page_count(), 2);
+				    pmm_allocated_page_count(), 2);
 	failures += test_expect_u64("fault unwire resident kept",
 				    plane_vm_object_resident_page_count(
 					    &test_object),
@@ -1813,7 +1813,7 @@ static int test_fault_unwire_pages_allows_absent_lazy_pages(void)
 				    lookup_page_wired_count(vaddr + PAGE_SIZE),
 				    0);
 	failures += test_expect_u64("fault unwire absent allocated",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault unwire absent mappings",
 				    mapping_count(), 0);
 	return failures;

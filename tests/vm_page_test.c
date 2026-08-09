@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <plane/compiler.h>
@@ -22,6 +23,10 @@ static uint64_t physmap_limit = PHYSMAP_STORAGE_SIZE;
 static uint8_t physmap_storage[PHYSMAP_STORAGE_SIZE] __aligned(PAGE_SIZE);
 static uint8_t extra_guard_storage[PAGE_SIZE] __aligned(PAGE_SIZE);
 static struct plane_vm_zone_segment extra_guard_segment;
+
+void test_spinlock_stub_reset_counts(void);
+uint64_t test_spinlock_stub_irqsave_depth(void);
+uint64_t test_spinlock_stub_irqsave_max_depth(void);
 
 static plane_paddr_t test_paddr(uint64_t raw)
 {
@@ -66,6 +71,25 @@ static void reset_physmap_stub(void)
 	memset(physmap_storage, 0, sizeof(physmap_storage));
 	memset(extra_guard_storage, 0, sizeof(extra_guard_storage));
 	extra_guard_segment = (struct plane_vm_zone_segment){0};
+	test_spinlock_stub_reset_counts();
+}
+
+static int check_spinlock_depth(const char *prefix,
+				uint64_t max_depth,
+				uint64_t depth)
+{
+	int failures = 0;
+	char name[96];
+
+	snprintf(name, sizeof(name), "%s max depth", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqsave_max_depth(),
+				    max_depth);
+	snprintf(name, sizeof(name), "%s depth", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqsave_depth(),
+				    depth);
+	return failures;
 }
 
 static void add_region(struct plane_mem_info *mem, uint64_t base,
@@ -412,6 +436,28 @@ static int test_vm_page_grab_allocates_and_releases_metadata(void)
 	return failures;
 }
 
+static int test_vm_page_release_drops_page_lock_before_pmm_free(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *page;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("release lock pmm init",
+				     plane_pmm_init(&mem), true);
+	failures += test_expect_bool("release lock grab",
+				     plane_vm_page_grab(0, &page), true);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("release lock release",
+				     plane_vm_page_release(page), true);
+	failures += check_spinlock_depth("release lock", 2, 0);
+	failures += check_page_state("release lock state",
+				     plane_vm_page_state(page),
+				     PLANE_VM_PAGE_FREE);
+	return failures;
+}
+
 static int test_vm_page_zero_grab_clears_page(void)
 {
 	struct plane_mem_info mem = {0};
@@ -635,6 +681,46 @@ static int test_vm_page_guard_metadata(void)
 	return failures;
 }
 
+static int test_vm_page_guard_operations_take_page_lock(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *guard;
+	uint64_t storage_size = 0;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("guard lock pmm init",
+				     plane_pmm_init(&mem), true);
+
+	test_spinlock_stub_reset_counts();
+	guard = plane_vm_page_create_guard();
+	failures += test_expect_not_null("guard lock create", guard);
+	failures += check_spinlock_depth("guard create lock", 1, 0);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("guard lock release",
+				     plane_vm_page_release_guard(guard), true);
+	failures += check_spinlock_depth("guard release lock", 1, 0);
+
+	failures += test_expect_bool("guard lock storage size",
+				     plane_vm_page_guard_storage_size(
+					     TEST_GUARD_EXTRA_COUNT,
+					     &storage_size),
+				     true);
+	failures += test_expect_bool("guard lock storage fits",
+				     storage_size <= sizeof(extra_guard_storage),
+				     true);
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("guard lock add storage",
+				     plane_vm_page_add_guard_storage(
+					     extra_guard_storage,
+					     TEST_GUARD_EXTRA_COUNT,
+					     &extra_guard_segment),
+				     true);
+	failures += check_spinlock_depth("guard add storage lock", 1, 0);
+	return failures;
+}
+
 static int test_vm_page_guard_zone_extends_bootstrap_storage(void)
 {
 	struct plane_mem_info mem = {0};
@@ -784,23 +870,33 @@ static int test_vm_page_object_identity_blocks_free(void)
 	failures += test_expect_u64("object identity offset", offset, 0x4000);
 	failures += test_expect_bool("object identity free rejected",
 				     plane_pmm_free_page_phys(phys), false);
+	test_spinlock_stub_reset_counts();
 	failures += test_expect_bool("object identity wire",
 				     plane_vm_page_wire(page), true);
+	failures += check_spinlock_depth("object identity wire lock", 1, 0);
 	failures += test_expect_u64("object identity wired once",
 				    plane_vm_object_wired_page_count(&object),
 				    1);
+	test_spinlock_stub_reset_counts();
 	failures += test_expect_bool("object identity wire twice",
 				     plane_vm_page_wire(page), true);
+	failures += check_spinlock_depth("object identity wire twice lock", 1,
+					 0);
 	failures += test_expect_u64("object identity wired count stable",
 				    plane_vm_object_wired_page_count(&object),
 				    1);
+	test_spinlock_stub_reset_counts();
 	failures += test_expect_bool("object identity unwire once",
 				     plane_vm_page_unwire(page), true);
+	failures += check_spinlock_depth("object identity unwire lock", 1, 0);
 	failures += test_expect_u64("object identity still wired",
 				    plane_vm_object_wired_page_count(&object),
 				    1);
+	test_spinlock_stub_reset_counts();
 	failures += test_expect_bool("object identity unwire twice",
 				     plane_vm_page_unwire(page), true);
+	failures += check_spinlock_depth("object identity unwire twice lock",
+					 1, 0);
 	failures += test_expect_u64("object identity unwired",
 				    plane_vm_object_wired_page_count(&object),
 				    0);
@@ -830,10 +926,12 @@ int main(void)
 		TEST_CASE(test_vm_page_queue_insert_orders_by_phys),
 		TEST_CASE(test_vm_page_queue_remove_and_pop_clear_membership),
 		TEST_CASE(test_vm_page_grab_allocates_and_releases_metadata),
+		TEST_CASE(test_vm_page_release_drops_page_lock_before_pmm_free),
 		TEST_CASE(test_vm_page_zero_grab_clears_page),
 		TEST_CASE(test_vm_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_vm_page_wire_rejects_invalid_pages),
 		TEST_CASE(test_vm_page_guard_metadata),
+		TEST_CASE(test_vm_page_guard_operations_take_page_lock),
 		TEST_CASE(test_vm_page_guard_zone_extends_bootstrap_storage),
 		TEST_CASE(test_vm_page_object_identity_blocks_free),
 	};

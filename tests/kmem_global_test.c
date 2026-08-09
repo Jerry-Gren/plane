@@ -34,14 +34,14 @@ static uint64_t runtime_guard_page_count;
 static struct test_mapping test_mappings[TEST_MAP_COUNT];
 static uint8_t test_kmem_storage[TEST_KMEM_SIZE] __aligned(PAGE_SIZE);
 
-static bool is_test_page(const struct plane_page *page)
+static bool test_page_is_managed(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page >= &test_pages[0] &&
 	       page < &test_pages[TEST_PAGE_COUNT];
 }
 
-static bool is_test_guard_page(const struct plane_page *page)
+static bool test_guard_page_is_storage(const struct plane_page *page)
 {
 	if (page == NULL) {
 		return false;
@@ -55,17 +55,17 @@ static bool is_test_guard_page(const struct plane_page *page)
 	       page < runtime_guard_pages + runtime_guard_page_count;
 }
 
-static bool is_test_active_guard_page(const struct plane_page *page)
+static bool test_guard_page_is_active(const struct plane_page *page)
 {
-	return is_test_guard_page(page) && page->state == PLANE_VM_PAGE_GUARD;
+	return test_guard_page_is_storage(page) && page->state == PLANE_VM_PAGE_GUARD;
 }
 
-static bool is_test_vm_page(const struct plane_page *page)
+static bool test_page_is_known(const struct plane_page *page)
 {
-	return is_test_page(page) || is_test_active_guard_page(page);
+	return test_page_is_managed(page) || test_guard_page_is_active(page);
 }
 
-static uint64_t allocated_page_count(void)
+static uint64_t pmm_allocated_page_count(void)
 {
 	uint64_t count = 0;
 
@@ -183,7 +183,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
-	if (!plane_vm_prot_valid(options.prot) ||
+	if (!plane_vm_prot_is_valid(options.prot) ||
 	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
@@ -218,7 +218,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
-	if (!plane_vm_prot_valid(prot) || mapping == NULL) {
+	if (!plane_vm_prot_is_valid(prot) || mapping == NULL) {
 		return false;
 	}
 
@@ -264,7 +264,7 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 
 bool plane_vm_page_release(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
 	    page->vm_object != NULL) {
@@ -279,7 +279,7 @@ bool plane_vm_page_release(struct plane_page *page)
 
 bool plane_vm_page_wire(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == UINT64_MAX) {
 		return false;
@@ -291,7 +291,7 @@ bool plane_vm_page_wire(struct plane_page *page)
 
 bool plane_vm_page_unwire(struct plane_page *page)
 {
-	if (!is_test_page(page) ||
+	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count == 0) {
 		return false;
@@ -316,11 +316,11 @@ struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 
 plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 {
-	if (is_test_guard_page(page)) {
+	if (test_guard_page_is_storage(page)) {
 		return page->state == PLANE_VM_PAGE_GUARD ? PLANE_VM_PAGE_GUARD_PHYS :
 				     PLANE_VM_PAGE_NO_PHYS;
 	}
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return PLANE_VM_PAGE_NO_PHYS;
 	}
 
@@ -329,11 +329,11 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 
 enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 {
-	if (is_test_guard_page(page)) {
+	if (test_guard_page_is_storage(page)) {
 		return page->state == PLANE_VM_PAGE_GUARD ?
 		       PLANE_VM_PAGE_GUARD : PLANE_VM_PAGE_INVALID;
 	}
-	if (!is_test_page(page)) {
+	if (!test_page_is_managed(page)) {
 		return PLANE_VM_PAGE_INVALID;
 	}
 
@@ -348,7 +348,7 @@ bool plane_vm_page_is_guard(const struct plane_page *page)
 
 struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -359,7 +359,7 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 				 uint64_t *offset)
 {
 	if (offset == NULL ||
-	    !is_test_vm_page(page) ||
+	    !test_page_is_known(page) ||
 	    page->vm_object == NULL) {
 		return false;
 	}
@@ -372,7 +372,7 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (!is_test_vm_page(page) ||
+	if (!test_page_is_known(page) ||
 	    object == NULL ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD) ||
@@ -389,7 +389,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
 {
-	if (!is_test_vm_page(page) ||
+	if (!test_page_is_known(page) ||
 	    object == NULL ||
 	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
 	     page->state != PLANE_VM_PAGE_GUARD) ||
@@ -405,7 +405,7 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -414,7 +414,7 @@ struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
@@ -423,25 +423,25 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 
 struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return NULL;
 	}
 
 	return page->object_hash_next;
 }
 
-bool plane_vm_page_object_tabled(const struct plane_page *page)
+bool plane_vm_page_object_is_tabled(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
 	return page->object_tabled;
 }
 
-bool plane_vm_page_object_hashed(const struct plane_page *page)
+bool plane_vm_page_object_is_hashed(const struct plane_page *page)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -451,8 +451,8 @@ bool plane_vm_page_object_hashed(const struct plane_page *page)
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev)
 {
-	if (!is_test_vm_page(page) ||
-	    (prev != NULL && !is_test_vm_page(prev))) {
+	if (!test_page_is_known(page) ||
+	    (prev != NULL && !test_page_is_known(prev))) {
 		return false;
 	}
 
@@ -463,8 +463,8 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 bool plane_vm_page_set_object_next(struct plane_page *page,
 				   struct plane_page *next)
 {
-	if (!is_test_vm_page(page) ||
-	    (next != NULL && !is_test_vm_page(next))) {
+	if (!test_page_is_known(page) ||
+	    (next != NULL && !test_page_is_known(next))) {
 		return false;
 	}
 
@@ -475,8 +475,8 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 					struct plane_page *next)
 {
-	if (!is_test_vm_page(page) ||
-	    (next != NULL && !is_test_vm_page(next))) {
+	if (!test_page_is_known(page) ||
+	    (next != NULL && !test_page_is_known(next))) {
 		return false;
 	}
 
@@ -486,7 +486,7 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 
 bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -496,7 +496,7 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 
 bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 {
-	if (!is_test_vm_page(page)) {
+	if (!test_page_is_known(page)) {
 		return false;
 	}
 
@@ -507,7 +507,7 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_count)
 {
 	if (wire_count == NULL ||
-	    !is_test_vm_page(page)) {
+	    !test_page_is_known(page)) {
 		return false;
 	}
 
@@ -573,7 +573,7 @@ struct plane_page *plane_vm_page_create_guard(void)
 
 bool plane_vm_page_release_guard(struct plane_page *page)
 {
-	if (!is_test_guard_page(page) ||
+	if (!test_guard_page_is_storage(page) ||
 	    page->state != PLANE_VM_PAGE_GUARD ||
 	    page->wire_count != 0 ||
 	    page->vm_object != NULL ||
@@ -628,7 +628,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     1, PLANE_VM_PROT_READ),
 				     false);
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
-	init_allocated = allocated_page_count();
+	init_allocated = pmm_allocated_page_count();
 	init_mappings = mapping_count();
 	init_wired = wired_page_count();
 	failures += test_expect_bool("global metadata eager backing",
@@ -700,7 +700,7 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_u64("global fault mapped count",
 				    mapping_count(), init_mappings + 2);
 	failures += test_expect_u64("global fault allocated stable",
-				    allocated_page_count(), init_allocated + 2);
+				    pmm_allocated_page_count(), init_allocated + 2);
 	failures += test_expect_u64("global fault wired stable",
 				    wired_page_count(), init_wired + 2);
 	failures += test_expect_bool("global repeat init",
@@ -708,7 +708,7 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_bool("global preserved free",
 				     test_kmem_free_pages(addr, 2), true);
 	failures += test_expect_u64("global free backing pages",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global free wired pages",
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global free mappings",
@@ -762,7 +762,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				     test_kmem_free_pages(readonly_addr, 1),
 				     true);
 	failures += test_expect_u64("global readonly free backing pages",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global readonly free mappings",
 				    mapping_count(), init_mappings);
 
@@ -772,7 +772,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     &lazy_addr),
 				     true);
 	failures += test_expect_u64("global lazy no eager backing",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global lazy no eager wiring",
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global lazy no eager mapping",
@@ -793,7 +793,7 @@ static int test_global_kmem_init_is_one_shot(void)
 						    PLANE_VM_PROT_WRITE);
 	}
 	failures += test_expect_u64("global lazy fault backing",
-				    allocated_page_count(), init_allocated + 1);
+				    pmm_allocated_page_count(), init_allocated + 1);
 	failures += test_expect_u64("global lazy fault wired",
 				    wired_page_count(), init_wired + 1);
 	failures += test_expect_u64("global lazy fault mapping count",
@@ -802,7 +802,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				     test_kmem_free_pages(lazy_addr, 2),
 				     true);
 	failures += test_expect_u64("global lazy free backing",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global lazy free wired",
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global lazy free mappings",
@@ -814,7 +814,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     &lazy_range_addr),
 				     true);
 	failures += test_expect_u64("global lazy range no eager backing",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global lazy range no eager wiring",
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global lazy range no eager mapping",
@@ -827,7 +827,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     2, PLANE_VM_PROT_READ),
 				     true);
 	failures += test_expect_u64("global lazy range backing",
-				    allocated_page_count(), init_allocated + 2);
+				    pmm_allocated_page_count(), init_allocated + 2);
 	failures += test_expect_u64("global lazy range wired",
 				    wired_page_count(), init_wired + 2);
 	failures += test_expect_u64("global lazy range mappings",
@@ -842,7 +842,7 @@ static int test_global_kmem_init_is_one_shot(void)
 				     test_kmem_free_pages(lazy_range_addr, 2),
 				     true);
 	failures += test_expect_u64("global lazy range free backing",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global lazy range free wired",
 				    wired_page_count(), init_wired);
 	failures += test_expect_u64("global lazy range free mappings",
@@ -855,7 +855,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     true);
 	}
 	failures += test_expect_u64("global small allocated pages",
-				    allocated_page_count(),
+				    pmm_allocated_page_count(),
 				    init_allocated + TEST_SMALL_ALLOC_COUNT);
 	for (uint64_t i = 0; i < TEST_SMALL_ALLOC_COUNT; i++) {
 		failures += test_expect_bool("global small free",
@@ -864,7 +864,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					     true);
 	}
 	failures += test_expect_u64("global small free backing pages",
-				    allocated_page_count(), init_allocated);
+				    pmm_allocated_page_count(), init_allocated);
 	failures += test_expect_u64("global small free mappings",
 				    mapping_count(), init_mappings);
 	return failures;

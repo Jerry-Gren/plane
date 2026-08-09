@@ -51,6 +51,9 @@ struct plane_vm_page_managed_range {
  * Queue links are owned by plane_vm_page_queue_* helpers; PMM owns the free
  * allocator policy and protects free queue use with the PMM lock, but not the
  * queue linkage mechanics or full resident metadata concurrency.
+ * VM object resident paths may enter these helpers while holding object and
+ * resident hash locks; helpers must only take the short VM page metadata lock
+ * and must not call back into VM object or PMM.
  */
 void plane_vm_page_reset_runtime(void);
 bool plane_vm_page_install_pool(
@@ -64,7 +67,7 @@ void plane_vm_page_init(struct plane_page *page,
 void plane_vm_page_reset_resident_links(struct plane_page *page);
 bool plane_vm_page_set_state(struct plane_page *page,
 			     enum plane_vm_page_state state);
-bool plane_vm_page_allocated_unwired_no_object(const struct plane_page *page);
+bool plane_vm_page_is_releasable_to_pmm(const struct plane_page *page);
 bool plane_vm_page_queue_init(struct plane_vm_page_queue *queue,
 			      enum plane_vm_page_queue_state state);
 bool plane_vm_page_queue_insert_ordered(struct plane_vm_page_queue *queue,
@@ -91,8 +94,8 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 struct plane_page *plane_vm_page_object_prev(const struct plane_page *page);
 struct plane_page *plane_vm_page_object_next(const struct plane_page *page);
 struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page);
-bool plane_vm_page_object_tabled(const struct plane_page *page);
-bool plane_vm_page_object_hashed(const struct plane_page *page);
+bool plane_vm_page_object_is_tabled(const struct plane_page *page);
+bool plane_vm_page_object_is_hashed(const struct plane_page *page);
 bool plane_vm_page_set_object_prev(struct plane_page *page,
 				   struct plane_page *prev);
 bool plane_vm_page_set_object_next(struct plane_page *page,

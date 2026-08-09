@@ -29,7 +29,7 @@ bool x86_64_pat_init(void)
 	return true;
 }
 
-bool x86_64_pat_write_combine_ready(void)
+bool x86_64_pat_write_combine_is_ready(void)
 {
 	return pat_write_combine_ready;
 }

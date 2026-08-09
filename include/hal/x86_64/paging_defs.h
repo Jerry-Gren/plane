@@ -61,12 +61,12 @@ static inline uint64_t x86_64_paging_index(uint8_t level, uint64_t vaddr)
 	}
 }
 
-static inline bool x86_64_paging_entry_present(uint64_t entry)
+static inline bool x86_64_paging_entry_is_present(uint64_t entry)
 {
 	return (entry & X86_64_PAGING_ENTRY_PRESENT) != 0;
 }
 
-static inline bool x86_64_paging_entry_leaf(uint64_t entry, uint8_t level)
+static inline bool x86_64_paging_entry_is_leaf(uint64_t entry, uint8_t level)
 {
 	return level == 1 ||
 	       (level < 4 && (entry & X86_64_PAGING_ENTRY_PS) != 0);

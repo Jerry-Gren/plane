@@ -9,7 +9,7 @@ typedef struct {
 
 void hal_irq_disable(void);
 void hal_irq_enable(void);
-bool hal_irq_enabled(void);
+bool hal_irq_is_enabled(void);
 plane_irq_state_t hal_irq_save(void);
 void hal_irq_restore(plane_irq_state_t state);
 

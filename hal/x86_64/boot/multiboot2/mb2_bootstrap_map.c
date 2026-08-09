@@ -158,8 +158,8 @@ bool x86_64_mb2_bootstrap_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 	for (uint64_t i = 0; i < page_count; i++) {
 		uint64_t entry = target_pd[start_idx + i];
 
-		if (!x86_64_paging_entry_present(entry) ||
-		    !x86_64_paging_entry_leaf(entry, 2)) {
+		if (!x86_64_paging_entry_is_present(entry) ||
+		    !x86_64_paging_entry_is_leaf(entry, 2)) {
 			return false;
 		}
 	}

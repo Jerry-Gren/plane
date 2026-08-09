@@ -71,7 +71,7 @@ static uint64_t pte_phys(uint64_t entry)
 	return x86_64_paging_entry_phys(entry);
 }
 
-static uint64_t allocated_page_count(void)
+static uint64_t pmm_allocated_page_count(void)
 {
 	uint64_t count = 0;
 
@@ -185,7 +185,7 @@ bool plane_pmm_free_page_phys(plane_paddr_t phys_addr)
 	return true;
 }
 
-bool x86_64_pat_write_combine_ready(void)
+bool x86_64_pat_write_combine_is_ready(void)
 {
 	return test_pat_wc_ready;
 }
@@ -445,7 +445,7 @@ static int test_map_page_allocates_missing_path(void)
 						     PLANE_VM_PROT_WRITE)),
 				     true);
 	failures += test_expect_u64("map allocated intermediate tables",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 	failures += test_expect_u64("root map does not invalidate",
 				    invalidate_count, 0);
 	failures += test_expect_u64("root map leaves invalidated vaddr",
@@ -497,7 +497,7 @@ static int test_map_page_reuses_existing_tables(void)
 								  PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_u64("map reuse allocation count",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 	failures += test_expect_u64("root map reuse invalidate count",
 				    invalidate_count, 0);
 
@@ -776,7 +776,7 @@ static int test_map_page_rejects_invalid_inputs(void)
 								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map invalid inputs allocate nothing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -801,7 +801,7 @@ static int test_map_page_rejects_existing_leaf(void)
 								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map duplicate does not allocate",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 
 	return failures;
 }
@@ -825,7 +825,7 @@ static int test_map_page_rejects_huge_intermediate(void)
 								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map huge allocate nothing",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -844,7 +844,7 @@ static int test_map_page_rolls_back_on_allocation_failure(void)
 								  PLANE_VM_PROT_READ)),
 				     false);
 	failures += test_expect_u64("map allocation rollback",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -928,7 +928,7 @@ static int test_unmap_page_clears_leaf(void)
 	failures += test_expect_u64("root unmap leaves invalidated vaddr",
 				    invalidated_vaddr, UINTPTR_MAX);
 	failures += test_expect_u64("root unmap frees empty tables",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 	failures += test_expect_bool("unmap translate missing",
 				     x86_64_pmap_translate_in_root(test_page_phys(0),
 							    vaddr, &out),
@@ -988,19 +988,19 @@ static int test_unmap_keeps_shared_tables_until_empty(void)
 						     PLANE_VM_PROT_READ)),
 				     true);
 	failures += test_expect_u64("shared setup tables",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 	failures += test_expect_bool("shared unmap first",
 				     x86_64_pmap_unmap_page_in_owned_root(
 					     test_page_phys(0), vaddr),
 				     true);
 	failures += test_expect_u64("shared tables remain",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 	failures += test_expect_bool("shared unmap second",
 				     x86_64_pmap_unmap_page_in_owned_root(
 					     test_page_phys(0), next_vaddr),
 				     true);
 	failures += test_expect_u64("shared tables freed",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -1060,7 +1060,7 @@ static int test_clone_copies_4k_leaf_path(void)
 	failures += test_expect_bool("clone pml4 phys nonzero",
 				     new_pml4_phys != 0, true);
 	failures += test_expect_u64("clone 4k allocated tables",
-				    allocated_page_count(), 4);
+				    pmm_allocated_page_count(), 4);
 
 	new_pml4 = hal_mmu_physmap_phys_to_virt(new_pml4_phys);
 	new_pdpt_phys = pte_phys(new_pml4[1]);
@@ -1111,7 +1111,7 @@ static int test_clone_preserves_huge_leaf_entries(void)
 	failures += test_expect_bool("clone huge pml4 phys nonzero",
 				     new_pml4_phys != 0, true);
 	failures += test_expect_u64("clone huge allocated tables",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 
 	new_pml4 = hal_mmu_physmap_phys_to_virt(new_pml4_phys);
 	new_pdpt = hal_mmu_physmap_phys_to_virt(pte_phys(new_pml4[0]));
@@ -1172,7 +1172,7 @@ static int test_clone_skips_physmap_pml4_ranges(void)
 	failures += test_expect_u64("clone skips bootstrap physmap",
 				    new_pml4[bootstrap_index], 0);
 	failures += test_expect_bool("clone keeps ordinary pml4",
-				     x86_64_paging_entry_present(new_pml4[0]),
+				     x86_64_paging_entry_is_present(new_pml4[0]),
 				     true);
 
 	return failures;
@@ -1197,7 +1197,7 @@ static int test_physmap_builder_uses_2m_leaves(void)
 			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		true);
 	failures += test_expect_u64("build physmap allocations",
-				    allocated_page_count(), 3);
+				    pmm_allocated_page_count(), 3);
 
 	pdpt = hal_mmu_physmap_phys_to_virt(pte_phys(pml4[pml4_index]));
 	pd0 = hal_mmu_physmap_phys_to_virt(pte_phys(pdpt[0]));
@@ -1243,11 +1243,11 @@ static int test_physmap_builder_crosses_pml4_slots(void)
 			2 * X86_64_PAGING_PML4_SLOT_SIZE),
 		true);
 	failures += test_expect_bool("first pml4 present",
-				     x86_64_paging_entry_present(
+				     x86_64_paging_entry_is_present(
 					     pml4[first_index]),
 				     true);
 	failures += test_expect_bool("second pml4 present",
-				     x86_64_paging_entry_present(
+				     x86_64_paging_entry_is_present(
 					     pml4[second_index]),
 				     true);
 
@@ -1286,7 +1286,7 @@ static int test_physmap_builder_failure_rolls_back(void)
 	failures += test_expect_u64("build physmap rollback entry",
 				    pml4[pml4_index], 0);
 	failures += test_expect_u64("build physmap rollback allocations",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -1316,7 +1316,7 @@ static int test_physmap_builder_rejects_existing_range(void)
 				    X86_64_PAGING_ENTRY_PRESENT |
 				    X86_64_PAGING_ENTRY_WRITE);
 	failures += test_expect_u64("build physmap existing no alloc",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -1335,7 +1335,7 @@ static int test_physmap_builder_rejects_non_final_base(void)
 			X86_64_PHYSMAP_BOOTSTRAP_SIZE),
 		false);
 	failures += test_expect_u64("build non-final base no alloc",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -1360,7 +1360,7 @@ static int test_clone_failure_releases_allocated_tables(void)
 					     test_page_phys(0), &new_pml4_phys),
 				     false);
 	failures += test_expect_u64("clone allocation rollback",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
@@ -1379,7 +1379,7 @@ static int test_clone_physmap_failure_releases_allocated_tables(void)
 					     test_page_phys(0), &new_pml4_phys),
 				     false);
 	failures += test_expect_u64("clone physmap rollback",
-				    allocated_page_count(), 0);
+				    pmm_allocated_page_count(), 0);
 
 	return failures;
 }
