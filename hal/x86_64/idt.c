@@ -35,7 +35,7 @@ static void *x86_64_isr_stub_table[32] = {
 	x86_64_isr28, x86_64_isr29, x86_64_isr30, x86_64_isr31
 };
 
-static void set_idt_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes)
+static void idt_set_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes)
 {
 	x86_64_intr_set_idt_entry(&idt[vector], isr,
 				  X86_64_DESC_SELECTOR_KERNEL_CS, 0,
@@ -50,7 +50,7 @@ void x86_64_idt_init(void)
 
 	/* fill all entries with default isr handler */
 	for (int i = 0; i < X86_64_INTR_IDT_ENTRIES; i++) {
-		set_idt_descriptor(
+		idt_set_descriptor(
 			i, (uintptr_t)x86_64_isr_default,
 			x86_64_intr_idt_attr(
 				true, X86_64_DESC_DPL_KERNEL,
@@ -59,7 +59,7 @@ void x86_64_idt_init(void)
 
 	/* override entries for first 32 vectors */
 	for (int i = 0; i < 32; i++) {
-		set_idt_descriptor(
+		idt_set_descriptor(
 			i, (uintptr_t)x86_64_isr_stub_table[i],
 			x86_64_intr_idt_attr(
 				true, X86_64_DESC_DPL_KERNEL,

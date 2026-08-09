@@ -23,12 +23,12 @@
  */
 static struct plane_spinlock kernel_pmap_lock = PLANE_SPINLOCK_INIT;
 
-static plane_irq_state_t lock_pmap(void)
+static plane_irq_state_t pmap_lock(void)
 {
 	return plane_spin_lock_irqsave(&kernel_pmap_lock);
 }
 
-static void unlock_pmap(plane_irq_state_t state)
+static void pmap_unlock(plane_irq_state_t state)
 {
 	plane_spin_unlock_irqrestore(&kernel_pmap_lock, state);
 }
@@ -186,7 +186,7 @@ static bool pmap_skip_ranges_are_valid(const struct x86_64_pmap_skip_range *skip
 	return true;
 }
 
-static bool free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)
+static bool pmap_free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)
 {
 	uint64_t *table = pmap_table_from_phys(table_phys);
 
@@ -202,7 +202,7 @@ static bool free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)
 			continue;
 		}
 
-		if (!free_cloned_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
+		if (!pmap_free_cloned_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
 					    level - 1)) {
 			return false;
 		}
@@ -213,7 +213,7 @@ static bool free_cloned_page_table(plane_paddr_t table_phys, uint8_t level)
 	return true;
 }
 
-static bool clone_page_table(plane_paddr_t source_phys,
+static bool pmap_clone_page_table(plane_paddr_t source_phys,
 			     uint8_t level,
 			     const struct x86_64_pmap_skip_range *skip,
 			     uint64_t skip_count,
@@ -250,10 +250,10 @@ static bool clone_page_table(plane_paddr_t source_phys,
 			continue;
 		}
 
-		if (!clone_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
+		if (!pmap_clone_page_table(plane_paddr_make(x86_64_paging_entry_phys(entry)),
 				      level - 1, skip, skip_count,
 				      &child_clone_phys)) {
-			if (!free_cloned_page_table(new_phys, level)) {
+			if (!pmap_free_cloned_page_table(new_phys, level)) {
 				return false;
 			}
 			return false;
@@ -279,7 +279,7 @@ bool x86_64_pmap_clone_kernel_page_tables(plane_paddr_t source_pml4_phys,
 		return false;
 	}
 
-	return clone_page_table(source_pml4_phys, 4, skip, skip_count,
+	return pmap_clone_page_table(source_pml4_phys, 4, skip, skip_count,
 				new_pml4_phys);
 }
 
@@ -381,7 +381,7 @@ static void pmap_physmap_rollback(uint64_t *root,
 
 		BUG_ON_MSG(x86_64_paging_entry_is_leaf(entry, 4),
 			   "physmap rollback found leaf PML4 entry");
-		BUG_ON_MSG(!free_cloned_page_table(
+		BUG_ON_MSG(!pmap_free_cloned_page_table(
 				   plane_paddr_make(x86_64_paging_entry_phys(entry)),
 				   3),
 			   "failed to rollback physmap page tables");
@@ -790,13 +790,13 @@ bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
 	plane_irq_state_t state;
 	bool mapped;
 
-	state = lock_pmap();
+	state = pmap_lock();
 	mapped = x86_64_pmap_map_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr, phys_addr, options);
 	if (mapped) {
 		hal_mmu_invalidate_tlb(vaddr);
 	}
-	unlock_pmap(state);
+	pmap_unlock(state);
 	return mapped;
 }
 
@@ -805,13 +805,13 @@ bool x86_64_pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 	plane_irq_state_t state;
 	bool unmapped;
 
-	state = lock_pmap();
+	state = pmap_lock();
 	unmapped = x86_64_pmap_unmap_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr);
 	if (unmapped) {
 		hal_mmu_invalidate_tlb(vaddr);
 	}
-	unlock_pmap(state);
+	pmap_unlock(state);
 	return unmapped;
 }
 
@@ -821,10 +821,10 @@ bool x86_64_pmap_translate_kernel_page(plane_vaddr_t vaddr,
 	plane_irq_state_t state;
 	bool translated;
 
-	state = lock_pmap();
+	state = pmap_lock();
 	translated = x86_64_pmap_translate_in_root(
 		x86_64_pmap_current_root_phys(), vaddr, phys_addr);
-	unlock_pmap(state);
+	pmap_unlock(state);
 	return translated;
 }
 
@@ -833,13 +833,13 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 	plane_irq_state_t state;
 	bool protected;
 
-	state = lock_pmap();
+	state = pmap_lock();
 	protected = x86_64_pmap_protect_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr, prot);
 	if (protected) {
 		hal_mmu_invalidate_tlb(vaddr);
 	}
-	unlock_pmap(state);
+	pmap_unlock(state);
 	return protected;
 }
 
@@ -895,7 +895,7 @@ bool hal_mmu_take_kernel_page_table_ownership(void)
 	if (!x86_64_pmap_build_physmap_in_owned_root(
 		    new_pml4_phys, plane_vaddr_make(X86_64_PHYSMAP_BASE),
 		    physmap.required_size, physmap.owned_window_size)) {
-		if (!free_cloned_page_table(new_pml4_phys, 4)) {
+		if (!pmap_free_cloned_page_table(new_pml4_phys, 4)) {
 			return false;
 		}
 		return false;

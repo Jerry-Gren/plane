@@ -4,7 +4,7 @@
 
 #define PLANE_MEMMAP_MAX_BOUNDARIES (PLANE_MAX_MEMMAP_ENTRIES * 2)
 
-static bool append_clean_region(struct plane_mem_region *clean_map,
+static bool memmap_append_clean_region(struct plane_mem_region *clean_map,
 				uint64_t *clean_count,
 				struct plane_mem_region region)
 {
@@ -46,7 +46,7 @@ static bool append_clean_region(struct plane_mem_region *clean_map,
 	return true;
 }
 
-static int mem_type_rank(uint32_t type)
+static int memmap_type_rank(uint32_t type)
 {
 	/*
 	 * Overlap priority:
@@ -75,7 +75,7 @@ static int mem_type_rank(uint32_t type)
 	}
 }
 
-static bool append_boundary(uint64_t *boundaries, uint64_t *boundary_count,
+static bool memmap_append_boundary(uint64_t *boundaries, uint64_t *boundary_count,
 			    uint64_t boundary)
 {
 	for (uint64_t i = 0; i < *boundary_count; i++) {
@@ -131,7 +131,7 @@ static bool choose_interval_type(const struct plane_mem_info *mem,
 			continue;
 		}
 
-		int rank = mem_type_rank(region->type);
+		int rank = memmap_type_rank(region->type);
 		if (!*covered || rank > best_rank) {
 			best_rank = rank;
 			best_type = region->type;
@@ -221,9 +221,9 @@ bool plane_memmap_sanitize(struct plane_mem_info *mem)
 			return false;
 		}
 
-		if (!append_boundary(boundaries, &boundary_count,
+		if (!memmap_append_boundary(boundaries, &boundary_count,
 				     map_base) ||
-		    !append_boundary(boundaries, &boundary_count, end)) {
+		    !memmap_append_boundary(boundaries, &boundary_count, end)) {
 			return false;
 		}
 	}
@@ -261,7 +261,7 @@ bool plane_memmap_sanitize(struct plane_mem_info *mem)
 			continue;
 		}
 
-		if (!append_clean_region(clean_map, &clean_count,
+		if (!memmap_append_clean_region(clean_map, &clean_count,
 					 (struct plane_mem_region){
 						 .base = plane_paddr_make(base),
 						 .length = end - base,

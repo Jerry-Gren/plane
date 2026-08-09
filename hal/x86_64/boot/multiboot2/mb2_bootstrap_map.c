@@ -45,7 +45,7 @@ static uint64_t *mb2_framebuffer_pd_physmap(void)
 	return plane_vaddr_to_ptr(vaddr);
 }
 
-static bool mb2_framebuffer_pde_range(plane_vaddr_t vaddr,
+static bool mb2_bootstrap_framebuffer_pde_range(plane_vaddr_t vaddr,
 				      uint64_t size,
 				      uint64_t *start_idx,
 				      uint64_t *page_count)
@@ -150,7 +150,7 @@ bool x86_64_mb2_bootstrap_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 		X86_64_PAGING_PD_INDEX(X86_64_MB2_FRAMEBUFFER_VMA_BASE);
 
 	if (target_pd == NULL ||
-	    !mb2_framebuffer_pde_range(vaddr, size, &start_idx,
+	    !mb2_bootstrap_framebuffer_pde_range(vaddr, size, &start_idx,
 				       &page_count)) {
 		return false;
 	}

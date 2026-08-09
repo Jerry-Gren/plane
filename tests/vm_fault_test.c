@@ -95,6 +95,19 @@ static uint64_t wired_page_count(void)
 	return count;
 }
 
+static uint64_t held_page_count(void)
+{
+	uint64_t count = 0;
+
+	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
+		if (test_pages[i].hold_count != 0) {
+			count++;
+		}
+	}
+
+	return count;
+}
+
 static uint64_t mapping_count(void)
 {
 	uint64_t count = 0;
@@ -358,6 +371,7 @@ bool plane_vm_page_release(struct plane_page *page)
 	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL) {
 		return false;
 	}
@@ -432,6 +446,43 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 	}
 
 	*wire_count = page->wire_count;
+	return true;
+}
+
+bool plane_vm_page_hold(struct plane_page *page)
+{
+	if (!test_page_is_managed(page) ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED ||
+	    page->hold_count == UINT64_MAX) {
+		return false;
+	}
+
+	page->hold_count++;
+	return true;
+}
+
+bool plane_vm_page_unhold(struct plane_page *page)
+{
+	if (!test_page_is_managed(page) ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED ||
+	    page->hold_count == 0) {
+		return false;
+	}
+
+	page->hold_count--;
+	return true;
+}
+
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count)
+{
+	if (hold_count == NULL ||
+	    !test_page_is_managed(page) ||
+	    page->state != PLANE_VM_PAGE_ALLOCATED) {
+		return false;
+	}
+
+	*hold_count = page->hold_count;
 	return true;
 }
 
@@ -729,6 +780,8 @@ static int test_fault_resident_hit_repairs_absent_pmap(void)
 	failures += test_expect_u32("fault hit no new grab",
 				    last_grab_flags, 0);
 	failures += test_expect_u64("fault hit map calls", map_call_count, 1);
+	failures += test_expect_u64("fault hit holds released",
+				    held_page_count(), 0);
 	if (mapping != NULL) {
 		failures += test_expect_u32("fault hit readonly prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
@@ -773,6 +826,8 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 				    map_call_count, 1);
 	failures += test_expect_u64("fault protect calls",
 				    protect_call_count, 1);
+	failures += test_expect_u64("fault protect holds released",
+				    held_page_count(), 0);
 	if (mapping != NULL) {
 		failures += test_expect_u32("fault protect prot",
 					    mapping->prot, PLANE_VM_PROT_READ);
@@ -830,6 +885,8 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 				    pmm_allocated_page_count(), 1);
 	failures += test_expect_u64("fault protect fail calls",
 				    protect_call_count, 0);
+	failures += test_expect_u64("fault protect fail holds released",
+				    held_page_count(), 0);
 	return failures;
 }
 
@@ -1119,6 +1176,8 @@ static int test_fault_rolls_back_allocation_failures(void)
 				     false);
 	failures += test_expect_u64("fault grab fail allocated",
 				    pmm_allocated_page_count(), 0);
+	failures += test_expect_u64("fault grab fail holds released",
+				    held_page_count(), 0);
 	grab_force_fail = false;
 
 	wire_fail_after = 0;
@@ -1130,6 +1189,8 @@ static int test_fault_rolls_back_allocation_failures(void)
 				    pmm_allocated_page_count(), 0);
 	failures += test_expect_u64("fault wire fail wired",
 				    wired_page_count(), 0);
+	failures += test_expect_u64("fault wire fail holds released",
+				    held_page_count(), 0);
 	wire_fail_after = UINT64_MAX;
 
 	attach_force_fail = true;
@@ -1143,6 +1204,8 @@ static int test_fault_rolls_back_allocation_failures(void)
 				    plane_vm_object_resident_page_count(
 					    &test_object),
 				    0);
+	failures += test_expect_u64("fault insert fail holds released",
+				    held_page_count(), 0);
 	attach_force_fail = false;
 
 	map_force_fail = true;
@@ -1164,6 +1227,8 @@ static int test_fault_rolls_back_allocation_failures(void)
 				    0);
 	failures += test_expect_u64("fault map fail mappings",
 				    mapping_count(), 0);
+	failures += test_expect_u64("fault map fail holds released",
+				    held_page_count(), 0);
 	return failures;
 }
 

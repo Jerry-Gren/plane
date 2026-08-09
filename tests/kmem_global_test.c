@@ -253,6 +253,7 @@ bool plane_vm_page_grab(uint32_t flags, struct plane_page **page)
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		if (test_pages[i].state != PLANE_VM_PAGE_ALLOCATED) {
 			test_pages[i].phys_addr = i * PAGE_SIZE;
+			test_pages[i].hold_count = 0;
 			test_pages[i].state = PLANE_VM_PAGE_ALLOCATED;
 			*page = &test_pages[i];
 			return true;
@@ -267,6 +268,7 @@ bool plane_vm_page_release(struct plane_page *page)
 	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL) {
 		return false;
 	}
@@ -515,6 +517,46 @@ bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_coun
 	return true;
 }
 
+bool plane_vm_page_hold(struct plane_page *page)
+{
+	if (!test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == UINT64_MAX) {
+		return false;
+	}
+
+	page->hold_count++;
+	return true;
+}
+
+bool plane_vm_page_unhold(struct plane_page *page)
+{
+	if (!test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == 0) {
+		return false;
+	}
+
+	page->hold_count--;
+	return true;
+}
+
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count)
+{
+	if (hold_count == NULL ||
+	    !test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD)) {
+		return false;
+	}
+
+	*hold_count = page->hold_count;
+	return true;
+}
+
 bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size)
 {
 	if (size == NULL ||
@@ -576,6 +618,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	if (!test_guard_page_is_storage(page) ||
 	    page->state != PLANE_VM_PAGE_GUARD ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL ||
 	    page->object_prev != NULL ||
 	    page->object_next != NULL ||

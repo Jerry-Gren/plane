@@ -23,7 +23,7 @@ static struct x86_64_cpu_desc_context cpu_desc_contexts[PLANE_MAX_CPUS];
 extern void x86_64_gdt_flush(uint64_t gdtr_addr);
 extern void x86_64_tss_flush(void);
 
-static bool cpu_data_valid_index(const struct plane_cpu_data *data)
+static bool desc_context_cpu_data_is_valid(const struct plane_cpu_data *data)
 {
 	return data != NULL && data->self == data &&
 	       data->logical_id < PLANE_MAX_CPUS;
@@ -32,14 +32,14 @@ static bool cpu_data_valid_index(const struct plane_cpu_data *data)
 static struct x86_64_cpu_desc_context *
 desc_context_for_data(const struct plane_cpu_data *data)
 {
-	if (!cpu_data_valid_index(data)) {
+	if (!desc_context_cpu_data_is_valid(data)) {
 		return NULL;
 	}
 
 	return &cpu_desc_contexts[data->logical_id];
 }
 
-static void set_flat_descriptor(struct x86_64_cpu_desc_context *ctx,
+static void desc_context_set_flat_descriptor(struct x86_64_cpu_desc_context *ctx,
 				uint8_t slot,
 				uint8_t dpl,
 				uint8_t type,
@@ -52,7 +52,7 @@ static void set_flat_descriptor(struct x86_64_cpu_desc_context *ctx,
 		x86_64_desc_flags(true, default_big, long_mode, false));
 }
 
-static void build_desc_context(struct x86_64_cpu_desc_context *ctx,
+static void desc_context_build(struct x86_64_cpu_desc_context *ctx,
 				      uintptr_t rsp0)
 {
 	memset(ctx, 0, sizeof(*ctx));
@@ -60,16 +60,16 @@ static void build_desc_context(struct x86_64_cpu_desc_context *ctx,
 	ctx->gdtr.limit = sizeof(ctx->gdt) - 1;
 	ctx->gdtr.base = (uint64_t)&ctx->gdt;
 
-	set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_CODE,
+	desc_context_set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_CODE,
 			    X86_64_DESC_DPL_KERNEL,
 			    X86_64_DESC_TYPE_CODE_XR, true, false);
-	set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_DATA,
+	desc_context_set_flat_descriptor(ctx, X86_64_DESC_GDT_KERNEL_DATA,
 			    X86_64_DESC_DPL_KERNEL,
 			    X86_64_DESC_TYPE_DATA_RW, false, true);
-	set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_DATA,
+	desc_context_set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_DATA,
 			    X86_64_DESC_DPL_USER,
 			    X86_64_DESC_TYPE_DATA_RW, false, true);
-	set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_CODE,
+	desc_context_set_flat_descriptor(ctx, X86_64_DESC_GDT_USER_CODE,
 			    X86_64_DESC_DPL_USER,
 			    X86_64_DESC_TYPE_CODE_XR, true, false);
 
@@ -92,7 +92,7 @@ void x86_64_gdt_init(void)
 {
 	struct x86_64_cpu_desc_context *ctx = &cpu_desc_contexts[0];
 
-	build_desc_context(ctx, 0);
+	desc_context_build(ctx, 0);
 	x86_64_gdt_flush((uint64_t)&ctx->gdtr);
 	x86_64_tss_flush();
 }
@@ -111,7 +111,7 @@ bool hal_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
 		return false;
 	}
 
-	build_desc_context(ctx,
+	desc_context_build(ctx,
 				  (uintptr_t)plane_vaddr_raw(data->ap_stack_top));
 	return true;
 }

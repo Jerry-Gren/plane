@@ -455,6 +455,79 @@ static int test_vm_page_release_drops_page_lock_before_pmm_free(void)
 	return failures;
 }
 
+static int test_vm_page_hold_blocks_release_until_unheld(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *page;
+	uint64_t hold_count = UINT64_MAX;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("hold pmm init", plane_pmm_init(&mem),
+				     true);
+	failures += test_expect_bool("hold grab", plane_vm_page_grab(0, &page),
+				     true);
+	failures += test_expect_bool("hold initial count",
+				     plane_vm_page_hold_count(page,
+							      &hold_count),
+				     true);
+	failures += test_expect_u64("hold initial count value",
+				    hold_count, 0);
+	failures += test_expect_bool("hold page", plane_vm_page_hold(page),
+				     true);
+	failures += test_expect_bool("hold count",
+				     plane_vm_page_hold_count(page,
+							      &hold_count),
+				     true);
+	failures += test_expect_u64("hold count value", hold_count, 1);
+	failures += test_expect_bool("held release rejected",
+				     plane_vm_page_release(page), false);
+	failures += test_expect_bool("unhold page", plane_vm_page_unhold(page),
+				     true);
+	failures += test_expect_bool("unhold zero rejected",
+				     plane_vm_page_unhold(page), false);
+	failures += test_expect_bool("release unheld page",
+				     plane_vm_page_release(page), true);
+
+	return failures;
+}
+
+static int test_vm_page_hold_rejects_invalid_pages_and_overflow(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_page *page;
+	uint64_t hold_count;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x3000, PLANE_MEM_USABLE);
+	failures += test_expect_bool("hold invalid init",
+				     plane_pmm_init(&mem), true);
+	page = plane_vm_page_from_phys(test_paddr(0x1000));
+	failures += test_expect_bool("hold rejects free",
+				     plane_vm_page_hold(page), false);
+	failures += test_expect_bool("hold rejects null",
+				     plane_vm_page_hold(NULL), false);
+	failures += test_expect_bool("unhold rejects null",
+				     plane_vm_page_unhold(NULL), false);
+	failures += test_expect_bool("hold count rejects null page",
+				     plane_vm_page_hold_count(NULL,
+							      &hold_count),
+				     false);
+	failures += test_expect_bool("hold count rejects null out",
+				     plane_vm_page_hold_count(page, NULL),
+				     false);
+	failures += test_expect_bool("hold alloc",
+				     plane_vm_page_grab(0, &page), true);
+	page->hold_count = UINT64_MAX;
+	failures += test_expect_bool("hold overflow rejected",
+				     plane_vm_page_hold(page), false);
+	page->hold_count = 0;
+	failures += test_expect_bool("hold cleanup release",
+				     plane_vm_page_release(page), true);
+
+	return failures;
+}
+
 static int test_vm_page_zero_grab_clears_page(void)
 {
 	struct plane_mem_info mem = {0};
@@ -635,6 +708,12 @@ static int test_vm_page_guard_metadata(void)
 	failures += test_expect_u64("guard wire count", wire_count, 0);
 	failures += test_expect_bool("guard pmm free rejected",
 				     plane_vm_page_release(guard), false);
+	failures += test_expect_bool("guard hold",
+				     plane_vm_page_hold(guard), true);
+	failures += test_expect_bool("held guard release rejected",
+				     plane_vm_page_release_guard(guard), false);
+	failures += test_expect_bool("guard unhold",
+				     plane_vm_page_unhold(guard), true);
 	failures += test_expect_bool("guard attach",
 				     plane_vm_page_attach_object(guard,
 								 &object, 0),
@@ -924,6 +1003,8 @@ int main(void)
 		TEST_CASE(test_vm_page_queue_remove_and_pop_clear_membership),
 		TEST_CASE(test_vm_page_grab_allocates_and_releases_metadata),
 		TEST_CASE(test_vm_page_release_drops_page_lock_before_pmm_free),
+		TEST_CASE(test_vm_page_hold_blocks_release_until_unheld),
+		TEST_CASE(test_vm_page_hold_rejects_invalid_pages_and_overflow),
 		TEST_CASE(test_vm_page_zero_grab_clears_page),
 		TEST_CASE(test_vm_page_wire_count_tracks_allocated_pages),
 		TEST_CASE(test_vm_page_wire_rejects_invalid_pages),

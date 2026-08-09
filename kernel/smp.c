@@ -145,7 +145,7 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 	return true;
 }
 
-static bool cpu_data_is_startable_ap(const struct plane_cpu_data *cpu)
+bool plane_smp_cpu_data_is_startable_ap(const struct plane_cpu_data *cpu)
 {
 	return cpu != NULL && !cpu->is_bsp && cpu->present;
 }
@@ -157,7 +157,7 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
 	plane_vaddr_t stack_top;
 
-	if (!cpu_data_is_startable_ap(cpu) || stack_pages == 0 ||
+	if (!plane_smp_cpu_data_is_startable_ap(cpu) || stack_pages == 0 ||
 	    plane_vaddr_is_null(stack_base) ||
 	    !plane_vaddr_is_page_aligned(stack_base) ||
 	    !plane_vaddr_add_pages(stack_base, stack_pages, &stack_top)) {
@@ -188,7 +188,7 @@ bool plane_smp_mark_ap_starting(uint32_t logical_id)
 	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
 	uint32_t expected = PLANE_CPU_STARTUP_PREPARED;
 
-	if (!cpu_data_is_startable_ap(cpu)) {
+	if (!plane_smp_cpu_data_is_startable_ap(cpu)) {
 		return false;
 	}
 
@@ -200,7 +200,7 @@ bool plane_smp_mark_ap_parked(struct plane_cpu_data *data)
 {
 	uint32_t expected = PLANE_CPU_STARTUP_STARTING;
 
-	if (!cpu_data_is_startable_ap(data) || data->self != data) {
+	if (!plane_smp_cpu_data_is_startable_ap(data) || data->self != data) {
 		return false;
 	}
 
@@ -212,7 +212,7 @@ bool plane_smp_mark_ap_failed(struct plane_cpu_data *data)
 {
 	uint32_t expected = PLANE_CPU_STARTUP_STARTING;
 
-	if (!cpu_data_is_startable_ap(data) || data->self != data) {
+	if (!plane_smp_cpu_data_is_startable_ap(data) || data->self != data) {
 		return false;
 	}
 

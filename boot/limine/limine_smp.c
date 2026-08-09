@@ -34,7 +34,7 @@ static void boot_limine_ap_entry(struct limine_mp_info *cpu)
 	plane_smp_startup_enter_ap(data);
 }
 
-static bool limine_smp_preflight_aps(void)
+static bool boot_limine_smp_preflight_aps(void)
 {
 	for (uint32_t i = 0; i < plane_cpu_count(); i++) {
 		const struct plane_cpu_data *cpu = plane_cpu_get_data(i);
@@ -56,7 +56,7 @@ static bool limine_smp_preflight_aps(void)
 
 bool boot_limine_smp_start_aps(void)
 {
-	if (!plane_smp_is_initialized() || !limine_smp_preflight_aps()) {
+	if (!plane_smp_is_initialized() || !boot_limine_smp_preflight_aps()) {
 		return false;
 	}
 

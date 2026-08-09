@@ -74,7 +74,7 @@ static bool should_extend_display_model(enum x86_64_cpu_vendor vendor_id,
 	return base_family == 0xf;
 }
 
-static void decode_signature(struct x86_64_cpu_features *features,
+static void cpu_features_decode_signature(struct x86_64_cpu_features *features,
 			     const struct x86_64_cpuid_leaf *leaf1) {
 	uint32_t signature = leaf1->eax;
 
@@ -105,7 +105,7 @@ static void decode_signature(struct x86_64_cpu_features *features,
 	}
 }
 
-static void decode_leaf1(struct x86_64_cpu_features *features,
+static void cpu_features_decode_leaf1(struct x86_64_cpu_features *features,
 			 const struct x86_64_cpuid_leaf *leaf1) {
 	/*
 	 * Bit        Intel field                         AMD field
@@ -176,7 +176,7 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 	 * ECX[30]    RDRAND                              RDRAND
 	 * ECX[31]    Not Used, software emulation        Hypervisor guest status
 	 */
-	decode_signature(features, leaf1);
+	cpu_features_decode_signature(features, leaf1);
 
 	features->initial_apic_id =
 		FIELD_GET(X86_64_CPUID_1_EBX_INITIAL_APIC_ID, leaf1->ebx);
@@ -271,7 +271,7 @@ static void decode_leaf1(struct x86_64_cpu_features *features,
 	}
 }
 
-static void decode_leaf7_0(struct x86_64_cpu_features *features,
+static void cpu_features_decode_leaf7_0(struct x86_64_cpu_features *features,
 			   const struct x86_64_cpuid_leaf *leaf7) {
 	/*
 	 * Bit         Intel field                        AMD field
@@ -415,7 +415,7 @@ static void decode_leaf7_0(struct x86_64_cpu_features *features,
 	}
 }
 
-static void decode_xsave(struct x86_64_cpu_features *features,
+static void cpu_features_decode_xsave(struct x86_64_cpu_features *features,
 			 const struct x86_64_cpuid_raw *raw) {
 	features->xcr0_supported_mask =
 		FIELD_PREP(X86_64_CPUID_D_0_XCR0_HIGH, raw->leafd_0.edx) |
@@ -425,7 +425,7 @@ static void decode_xsave(struct x86_64_cpu_features *features,
 	features->xsave_leaf1 = raw->leafd_1;
 }
 
-static void decode_ext_leaf1(struct x86_64_cpu_features *features,
+static void cpu_features_decode_ext_leaf1(struct x86_64_cpu_features *features,
 			     const struct x86_64_cpuid_leaf *leaf_ext1) {
 	/*
 	 * Bit        Intel field                         AMD field
@@ -530,20 +530,20 @@ void x86_64_cpu_features_decode(struct x86_64_cpu_features *features,
 	features->max_extended_leaf = raw->leaf_ext0.eax;
 
 	if (features->max_basic_leaf >= X86_64_CPUID_LEAF_FEATURES) {
-		decode_leaf1(features, &raw->leaf1);
+		cpu_features_decode_leaf1(features, &raw->leaf1);
 	}
 
 	if (features->max_basic_leaf >= X86_64_CPUID_LEAF_STRUCTURED) {
-		decode_leaf7_0(features, &raw->leaf7_0);
+		cpu_features_decode_leaf7_0(features, &raw->leaf7_0);
 	}
 
 	if (features->has[X86_64_CPU_FEATURE_XSAVE] &&
 	    features->max_basic_leaf >= X86_64_CPUID_LEAF_XSAVE) {
-		decode_xsave(features, raw);
+		cpu_features_decode_xsave(features, raw);
 	}
 
 	if (features->max_extended_leaf >= X86_64_CPUID_LEAF_EXT_FEATURES) {
-		decode_ext_leaf1(features, &raw->leaf_ext1);
+		cpu_features_decode_ext_leaf1(features, &raw->leaf_ext1);
 	}
 
 	if (features->max_extended_leaf >= X86_64_CPUID_LEAF_BRAND_LAST) {

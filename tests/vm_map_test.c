@@ -6,6 +6,7 @@
 #include <plane/vm_object.h>
 
 #include "support/test.h"
+#include "../kernel/mm/vm_map_internal.h"
 
 #define TEST_KERNEL_MAP_BASE 0xffff900000000000ull
 #define TEST_KERNEL_MAP_PAGES 256
@@ -395,7 +396,7 @@ static int check_stats(const char *name,
 	failures += test_expect_u64("kernel map user pages",
 				    stats.user_pages, user_pages);
 	failures += test_expect_u64("kernel map free ranges",
-				    stats.free_range_count, free_range_total);
+				    stats.map_free_range_count, free_range_total);
 	failures += test_expect_u64("kernel map allocations",
 				    stats.allocation_count, allocations);
 	return failures;
@@ -470,7 +471,7 @@ static int test_rejects_invalid_init(void)
 				    stats.reserved_pages, 0);
 	failures += test_expect_u64("invalid init user", stats.user_pages, 0);
 	failures += test_expect_u64("invalid init ranges",
-				    stats.free_range_count, 0);
+				    stats.map_free_range_count, 0);
 	failures += test_expect_u64("invalid init allocations",
 				    stats.allocation_count, 0);
 	return failures;
@@ -822,6 +823,85 @@ static int test_lookup_page_uses_user_page_semantics(void)
 				     test_lookup_page(
 					     &test_map, plain, NULL),
 				     true);
+	return failures;
+}
+
+static int test_lookup_page_ref_holds_and_releases_object(void)
+{
+	struct plane_vm_map_page_ref ref = {0};
+	plane_vaddr_t va_only = {0};
+	uint64_t vaddr = 0;
+	int failures = 0;
+
+	failures += test_expect_bool("lookup ref object init",
+				     plane_vm_object_init(&test_object,
+							  8 * PAGE_SIZE),
+				     true);
+	failures += test_expect_bool("lookup ref init",
+				     test_map_init(&test_map, test_entries,
+						       TEST_MAP_ENTRIES,
+						       TEST_KERNEL_MAP_BASE,
+						       TEST_KERNEL_MAP_SIZE),
+				     true);
+	failures += test_expect_bool("lookup ref enter",
+				     test_map_enter_pages_object(
+					     &test_map, 2, 0, &test_object,
+					     PAGE_SIZE, PLANE_VM_PROT_DEFAULT,
+					     PLANE_VM_PROT_ALL, &vaddr),
+				     true);
+	failures += test_expect_u64("lookup ref map ref",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool("lookup ref",
+				     plane_vm_map_lookup_page_ref(
+					     &test_map,
+					     plane_vaddr_make(vaddr + 19),
+					     &ref),
+				     true);
+	failures += test_expect_u64("lookup ref added object ref",
+				    plane_vm_object_ref_count(&test_object), 3);
+	failures += test_expect_ptr("lookup ref object",
+				    ref.info.object, &test_object);
+	failures += test_expect_u64("lookup ref offset",
+				    ref.info.object_offset, PAGE_SIZE);
+	plane_vm_map_release_page_ref(&ref);
+	failures += test_expect_u64("lookup ref released",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool("lookup ref hole",
+				     plane_vm_map_lookup_page_ref(
+					     &test_map, plane_vaddr_make(
+								vaddr + 8 * PAGE_SIZE),
+					     &ref),
+				     false);
+	failures += test_expect_u64("lookup ref hole no leak",
+				    plane_vm_object_ref_count(&test_object), 2);
+	failures += test_expect_bool(
+		"lookup ref va-only enter",
+		plane_vm_map_enter(
+			&test_map,
+			&(struct plane_vm_map_enter_options){
+				.page_count = 1,
+				.prot = PLANE_VM_PROT_READ,
+				.max_prot = PLANE_VM_PROT_READ,
+				.flags = PLANE_VM_MAP_ENTER_ANYWHERE |
+					 PLANE_VM_MAP_ENTER_VA_ONLY,
+			},
+			&va_only),
+		true);
+	failures += test_expect_bool("lookup ref va-only rejected",
+				     plane_vm_map_lookup_page_ref(
+					     &test_map, va_only, &ref),
+				     false);
+	failures += test_expect_bool("lookup ref null map",
+				     plane_vm_map_lookup_page_ref(NULL,
+								  va_only,
+								  &ref),
+				     false);
+	failures += test_expect_bool("lookup ref null out",
+				     plane_vm_map_lookup_page_ref(&test_map,
+								  va_only,
+								  NULL),
+				     false);
+
 	return failures;
 }
 
@@ -1223,7 +1303,7 @@ static int test_rejects_exhausted_vaddr_space(void)
 	failures += test_expect_u64("space free", stats.free_pages, 1);
 	failures += test_expect_u64("space reserved", stats.reserved_pages, 0);
 	failures += test_expect_u64("space user", stats.user_pages, 0);
-	failures += test_expect_u64("space ranges", stats.free_range_count, 1);
+	failures += test_expect_u64("space ranges", stats.map_free_range_count, 1);
 	failures += test_expect_u64("space allocations",
 				    stats.allocation_count, 0);
 	return failures;
@@ -1259,7 +1339,7 @@ static int test_rejects_exhausted_entries(void)
 	failures += test_expect_u64("entry exhausted user unchanged",
 				    after.user_pages, before.user_pages);
 	failures += test_expect_u64("entry exhausted range unchanged",
-				    after.free_range_count, before.free_range_count);
+				    after.map_free_range_count, before.map_free_range_count);
 	failures += test_expect_u64("entry exhausted count unchanged",
 				    after.allocation_count, before.allocation_count);
 	return failures;
@@ -3911,6 +3991,7 @@ int main(void)
 		TEST_CASE(test_fixed_enter_allocates_anonymous_object),
 		TEST_CASE(test_va_only_enter_reserves_without_object_backing),
 		TEST_CASE(test_lookup_page_uses_user_page_semantics),
+		TEST_CASE(test_lookup_page_ref_holds_and_releases_object),
 		TEST_CASE(test_lookup_page_tracks_split_object_offsets),
 		TEST_CASE(test_free_releases_anonymous_object_slot),
 		TEST_CASE(test_delete_releases_anonymous_object_slot),

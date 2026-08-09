@@ -51,7 +51,7 @@ static int test_static_idt_gate_uses_kernel_interrupt_defaults(void)
 		X86_64_INTR_GATE_TYPE_INTERRUPT64);
 
 	reset_idt_test();
-	set_idt_descriptor(33, (uintptr_t)x86_64_isr_default, attributes);
+	idt_set_descriptor(33, (uintptr_t)x86_64_isr_default, attributes);
 
 	failures += test_expect_u64("default gate isr",
 				    idt_entry_isr(&idt[33]),
@@ -76,7 +76,7 @@ static int test_static_exception_gate_uses_exception_stub(void)
 		X86_64_INTR_GATE_TYPE_INTERRUPT64);
 
 	reset_idt_test();
-	set_idt_descriptor(X86_64_INTR_VECTOR_PAGE_FAULT,
+	idt_set_descriptor(X86_64_INTR_VECTOR_PAGE_FAULT,
 			   (uintptr_t)x86_64_isr14, attributes);
 
 	failures += test_expect_u64("exception gate isr",

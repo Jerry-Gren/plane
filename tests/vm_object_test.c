@@ -75,6 +75,43 @@ bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_coun
 	return true;
 }
 
+bool plane_vm_page_hold(struct plane_page *page)
+{
+	if (page == NULL ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == UINT64_MAX) {
+		return false;
+	}
+
+	page->hold_count++;
+	return true;
+}
+
+bool plane_vm_page_unhold(struct plane_page *page)
+{
+	if (page == NULL ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == 0) {
+		return false;
+	}
+
+	page->hold_count--;
+	return true;
+}
+
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count)
+{
+	if (page == NULL || hold_count == NULL) {
+		return false;
+	}
+
+	*hold_count = page->hold_count;
+	return true;
+}
+
 bool plane_vm_page_attach_object(struct plane_page *page,
 				 struct plane_vm_object *object,
 				 uint64_t offset)
@@ -784,6 +821,45 @@ static int test_insert_lookup_and_remove_page(void)
 	return failures;
 }
 
+static int test_lookup_hold_blocks_remove_until_unheld(void)
+{
+	struct plane_page *page;
+	int failures = 0;
+
+	failures += test_expect_bool("lookup hold object init",
+				     plane_vm_object_init(&test_object,
+							  TEST_OBJECT_SIZE),
+				     true);
+	failures += test_expect_bool("lookup hold insert",
+				     plane_vm_object_insert_page(
+					     &test_object, 0, &allocated_page),
+				     true);
+	page = plane_vm_object_lookup_and_hold_page(&test_object, 0);
+	failures += test_expect_ptr("lookup hold page", page,
+				    &allocated_page);
+	failures += test_expect_u64("lookup hold count",
+				    allocated_page.hold_count, 1);
+	failures += test_expect_null("remove held page",
+				     plane_vm_object_remove_page(&test_object,
+								 0));
+	failures += test_expect_u64("held resident count",
+				    plane_vm_object_resident_page_count(
+					    &test_object),
+				    1);
+	failures += test_expect_ptr("held object link",
+				    plane_vm_page_object(&allocated_page),
+				    &test_object);
+	failures += test_expect_bool("lookup hold unhold",
+				     plane_vm_page_unhold(page), true);
+	failures += test_expect_u64("lookup hold count cleared",
+				    allocated_page.hold_count, 0);
+	failures += test_expect_ptr("remove unheld page",
+				    plane_vm_object_remove_page(&test_object, 0),
+				    &allocated_page);
+
+	return failures;
+}
+
 static int test_lookup_small_object_scans_resident_list(void)
 {
 	int failures = 0;
@@ -1275,6 +1351,7 @@ int main(void)
 		TEST_CASE(test_can_deallocate_reports_lifetime_preflight),
 		TEST_CASE(test_lookup_empty_object_returns_null),
 		TEST_CASE(test_insert_lookup_and_remove_page),
+		TEST_CASE(test_lookup_hold_blocks_remove_until_unheld),
 		TEST_CASE(test_lookup_small_object_scans_resident_list),
 		TEST_CASE(test_lookup_large_object_uses_hash),
 		TEST_CASE(test_resident_hash_rehome_preserves_existing_pages),

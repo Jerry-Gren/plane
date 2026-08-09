@@ -28,7 +28,7 @@ static struct hal_mmu_map_options io_map_options(uint32_t prot,
 	};
 }
 
-static bool io_page_range(plane_paddr_t phys_addr,
+static bool io_map_page_range_from_phys(plane_paddr_t phys_addr,
 			  uint64_t size,
 			  plane_paddr_t *phys_base,
 			  uint64_t *page_offset,
@@ -58,7 +58,7 @@ static bool io_page_range(plane_paddr_t phys_addr,
 	return true;
 }
 
-static bool io_unmap_pages(plane_vaddr_t base, uint64_t page_count)
+static bool io_map_unmap_pages(plane_vaddr_t base, uint64_t page_count)
 {
 	for (uint64_t i = page_count; i > 0; i--) {
 		plane_vaddr_t page_vaddr;
@@ -98,7 +98,7 @@ bool plane_io_map(plane_paddr_t phys_addr,
 	    vaddr == NULL ||
 	    !io_map_cache_is_valid(cache) ||
 	    !plane_vm_prot_is_valid(prot) ||
-	    !io_page_range(phys_addr, size, &phys_base, &page_offset,
+	    !io_map_page_range_from_phys(phys_addr, size, &phys_base, &page_offset,
 			   &page_count) ||
 	    !plane_kmem_reserve_va_pages(page_count, prot, &va_base)) {
 		return false;
@@ -124,7 +124,7 @@ bool plane_io_map(plane_paddr_t phys_addr,
 	}
 
 	if (mapped_pages != page_count) {
-		BUG_ON_MSG(!io_unmap_pages(va_base, mapped_pages),
+		BUG_ON_MSG(!io_map_unmap_pages(va_base, mapped_pages),
 			   "failed to rollback IO map pages");
 		BUG_ON_MSG(!plane_kmem_release_va_pages(va_base, page_count),
 			   "failed to release IO map VA reservation");
@@ -158,7 +158,7 @@ bool plane_io_unmap(plane_vaddr_t vaddr, uint64_t size)
 	if (!plane_kmem_va_pages_reserved(va_base, page_count)) {
 		return false;
 	}
-	if (!io_unmap_pages(va_base, page_count)) {
+	if (!io_map_unmap_pages(va_base, page_count)) {
 		return false;
 	}
 

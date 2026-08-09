@@ -8,21 +8,26 @@
 #include <plane/printk.h>
 #include <plane/vm_page.h>
 
+#include "vm_map_internal.h"
+#include "vm_object_internal.h"
+#include "vm_page_internal.h"
+
 struct plane_vm_fault_state {
-	struct plane_vm_map_page_info info;
+	struct plane_vm_map_page_ref ref;
 	struct plane_page *page;
 	uint64_t wired_done;
 	bool new_zero_page;
+	bool page_held;
 	bool wired_resident_hit;
 };
 
-static bool page_phys_is_valid(plane_paddr_t phys_addr)
+static bool fault_page_phys_is_valid(plane_paddr_t phys_addr)
 {
 	return !plane_paddr_equal(phys_addr, PLANE_VM_PAGE_NO_PHYS) &&
 	       !plane_paddr_equal(phys_addr, PLANE_VM_PAGE_GUARD_PHYS);
 }
 
-static bool wire_page_times(struct plane_page *page,
+static bool fault_wire_page_times(struct plane_page *page,
 			    uint64_t wired_count,
 			    uint64_t *wired_done)
 {
@@ -36,7 +41,7 @@ static bool wire_page_times(struct plane_page *page,
 	return true;
 }
 
-static bool unwire_page_times(struct plane_page *page, uint64_t wired_count)
+static bool fault_unwire_page_times(struct plane_page *page, uint64_t wired_count)
 {
 	for (uint64_t i = 0; i < wired_count; i++) {
 		if (!plane_vm_page_unwire(page)) {
@@ -48,6 +53,11 @@ static bool unwire_page_times(struct plane_page *page, uint64_t wired_count)
 
 static void fault_release_uninserted_page(struct plane_vm_fault_state *state)
 {
+	if (state->page_held) {
+		BUG_ON_MSG(!plane_vm_page_unhold(state->page),
+			   "failed to unhold fault page");
+		state->page_held = false;
+	}
 	BUG_ON_MSG(!plane_vm_page_release(state->page),
 		   "failed to release fault page");
 	state->page = NULL;
@@ -56,7 +66,7 @@ static void fault_release_uninserted_page(struct plane_vm_fault_state *state)
 
 static void fault_unwire_uninserted_page(struct plane_vm_fault_state *state)
 {
-	BUG_ON_MSG(!unwire_page_times(state->page, state->wired_done),
+	BUG_ON_MSG(!fault_unwire_page_times(state->page, state->wired_done),
 		   "failed to rollback fault page wiring");
 	fault_release_uninserted_page(state);
 }
@@ -66,16 +76,23 @@ static bool fault_lookup(struct plane_vm_map *map,
 			 uint32_t fault_type,
 			 struct plane_vm_fault_state *state)
 {
-	if (state == NULL ||
-	    !plane_vm_prot_is_valid(fault_type) ||
-	    !plane_vm_map_lookup_page(map, vaddr, &state->info) ||
-	    (fault_type & ~state->info.prot) != 0) {
+	if (state != NULL) {
+		*state = (struct plane_vm_fault_state){0};
+	}
+	if (state == NULL) {
+		return false;
+	}
+	if (!plane_vm_prot_is_valid(fault_type) ||
+	    !plane_vm_map_lookup_page_ref(map, vaddr, &state->ref) ||
+	    (fault_type & ~state->ref.info.prot) != 0) {
+		plane_vm_map_release_page_ref(&state->ref);
 		return false;
 	}
 
 	state->page = NULL;
 	state->wired_done = 0;
 	state->new_zero_page = false;
+	state->page_held = false;
 	state->wired_resident_hit = false;
 	return true;
 }
@@ -85,11 +102,16 @@ static bool fault_resolve_page(struct plane_vm_fault_state *state,
 {
 	plane_paddr_t mapped_phys;
 
-	state->page = plane_vm_object_lookup_page(state->info.object,
-						  state->info.object_offset);
+	state->page = plane_vm_object_lookup_and_hold_page(
+		state->ref.info.object,
+		state->ref.info.object_offset);
 	if (state->page != NULL) {
+		state->page_held = true;
 		if (wire_resident_hit) {
 			if (!plane_vm_page_wire(state->page)) {
+				BUG_ON_MSG(!plane_vm_page_unhold(state->page),
+					   "failed to unhold resident fault page");
+				state->page_held = false;
 				return false;
 			}
 			state->wired_resident_hit = true;
@@ -97,7 +119,7 @@ static bool fault_resolve_page(struct plane_vm_fault_state *state,
 		return true;
 	}
 
-	if (hal_mmu_translate_kernel_page(state->info.page_vaddr,
+	if (hal_mmu_translate_kernel_page(state->ref.info.page_vaddr,
 					  &mapped_phys)) {
 		return false;
 	}
@@ -106,19 +128,24 @@ static bool fault_resolve_page(struct plane_vm_fault_state *state,
 	    state->page == NULL) {
 		return false;
 	}
-	if (!page_phys_is_valid(plane_vm_page_phys(state->page))) {
+	if (!fault_page_phys_is_valid(plane_vm_page_phys(state->page))) {
 		fault_release_uninserted_page(state);
 		return false;
 	}
+	if (!plane_vm_page_hold(state->page)) {
+		fault_release_uninserted_page(state);
+		return false;
+	}
+	state->page_held = true;
 
-	if (!wire_page_times(state->page, state->info.wired_count,
+	if (!fault_wire_page_times(state->page, state->ref.info.wired_count,
 			     &state->wired_done)) {
 		fault_unwire_uninserted_page(state);
 		return false;
 	}
 
-	if (!plane_vm_object_insert_page(state->info.object,
-					 state->info.object_offset,
+	if (!plane_vm_object_insert_page(state->ref.info.object,
+					 state->ref.info.object_offset,
 					 state->page)) {
 		fault_unwire_uninserted_page(state);
 		return false;
@@ -133,21 +160,32 @@ static bool fault_enter_pmap(const struct plane_vm_fault_state *state)
 	plane_paddr_t page_phys = plane_vm_page_phys(state->page);
 	plane_paddr_t mapped_phys;
 	struct hal_mmu_map_options options =
-		hal_mmu_default_map_options(state->info.prot);
+		hal_mmu_default_map_options(state->ref.info.prot);
 
-	if (!page_phys_is_valid(page_phys)) {
+	if (!fault_page_phys_is_valid(page_phys)) {
 		return false;
 	}
 
-	if (hal_mmu_translate_kernel_page(state->info.page_vaddr,
+	if (hal_mmu_translate_kernel_page(state->ref.info.page_vaddr,
 					  &mapped_phys)) {
 		return plane_paddr_equal(mapped_phys, page_phys) &&
-		       hal_mmu_protect_kernel_page(state->info.page_vaddr,
-						   state->info.prot);
+		       hal_mmu_protect_kernel_page(state->ref.info.page_vaddr,
+						   state->ref.info.prot);
 	}
 
-	return hal_mmu_map_kernel_page(state->info.page_vaddr, page_phys,
+	return hal_mmu_map_kernel_page(state->ref.info.page_vaddr, page_phys,
 				       options);
+}
+
+static void fault_unhold_page(struct plane_vm_fault_state *state)
+{
+	if (!state->page_held || state->page == NULL) {
+		return;
+	}
+
+	BUG_ON_MSG(!plane_vm_page_unhold(state->page),
+		   "failed to unhold fault page");
+	state->page_held = false;
 }
 
 static void fault_cleanup_new_page(struct plane_vm_fault_state *state)
@@ -156,12 +194,15 @@ static void fault_cleanup_new_page(struct plane_vm_fault_state *state)
 		return;
 	}
 
-	BUG_ON_MSG(plane_vm_object_remove_page(state->info.object,
-					       state->info.object_offset) !=
+	BUG_ON_MSG(plane_vm_object_remove_held_page(
+			   state->ref.info.object,
+			   state->ref.info.object_offset,
+			   state->page) !=
 		   state->page,
 		   "failed to remove fault page from object");
-	BUG_ON_MSG(!unwire_page_times(state->page, state->wired_done),
+	BUG_ON_MSG(!fault_unwire_page_times(state->page, state->wired_done),
 		   "failed to rollback fault page wiring");
+	fault_unhold_page(state);
 	BUG_ON_MSG(!plane_vm_page_release(state->page),
 		   "failed to release fault page");
 	state->page = NULL;
@@ -180,6 +221,12 @@ static void fault_cleanup_resident_hit_wire(struct plane_vm_fault_state *state)
 	state->wired_resident_hit = false;
 }
 
+static void fault_cleanup(struct plane_vm_fault_state *state)
+{
+	fault_unhold_page(state);
+	plane_vm_map_release_page_ref(&state->ref);
+}
+
 static bool fault_page_internal(struct plane_vm_map *map,
 				plane_vaddr_t vaddr,
 				uint32_t fault_type,
@@ -187,16 +234,21 @@ static bool fault_page_internal(struct plane_vm_map *map,
 {
 	struct plane_vm_fault_state state;
 
-	if (!fault_lookup(map, vaddr, fault_type, &state) ||
-	    !fault_resolve_page(&state, wire_resident_hit)) {
+	if (!fault_lookup(map, vaddr, fault_type, &state)) {
+		return false;
+	}
+	if (!fault_resolve_page(&state, wire_resident_hit)) {
+		fault_cleanup(&state);
 		return false;
 	}
 	if (!fault_enter_pmap(&state)) {
 		fault_cleanup_new_page(&state);
 		fault_cleanup_resident_hit_wire(&state);
+		fault_cleanup(&state);
 		return false;
 	}
 
+	fault_cleanup(&state);
 	return true;
 }
 
@@ -257,25 +309,37 @@ static bool fault_wire_range_preflight(struct plane_vm_map *map,
 				       uint32_t fault_type)
 {
 	for (uint64_t i = 0; i < page_count; i++) {
-		struct plane_vm_map_page_info info;
+		struct plane_vm_map_page_ref ref;
 		struct plane_page *page;
 		uint64_t wire_count;
 		plane_vaddr_t page_vaddr;
+		bool valid = true;
 
 		BUG_ON_MSG(!plane_vaddr_add_pages(vaddr, i, &page_vaddr),
 			   "failed to advance fault wire range");
-		if (!plane_vm_map_lookup_page(map, page_vaddr, &info) ||
-		    (fault_type & ~info.prot) != 0) {
+		if (!plane_vm_map_lookup_page_ref(map, page_vaddr, &ref)) {
 			return false;
 		}
 
-		page = plane_vm_object_lookup_page(info.object,
-						   info.object_offset);
+		if ((fault_type & ~ref.info.prot) != 0) {
+			plane_vm_map_release_page_ref(&ref);
+			return false;
+		}
+
+		page = plane_vm_object_lookup_and_hold_page(ref.info.object,
+							ref.info.object_offset);
 		if (page == NULL) {
+			plane_vm_map_release_page_ref(&ref);
 			continue;
 		}
 		if (!plane_vm_page_wire_count(page, &wire_count) ||
 		    wire_count == UINT64_MAX) {
+			valid = false;
+		}
+		BUG_ON_MSG(!plane_vm_page_unhold(page),
+			   "failed to unhold fault preflight page");
+		plane_vm_map_release_page_ref(&ref);
+		if (!valid) {
 			return false;
 		}
 	}
@@ -288,25 +352,37 @@ static bool fault_unwire_range_preflight(struct plane_vm_map *map,
 					 uint64_t page_count)
 {
 	for (uint64_t i = 0; i < page_count; i++) {
-		struct plane_vm_map_page_info info;
+		struct plane_vm_map_page_ref ref;
 		struct plane_page *page;
 		uint64_t wire_count;
 		plane_vaddr_t page_vaddr;
+		bool valid = true;
 
 		BUG_ON_MSG(!plane_vaddr_add_pages(vaddr, i, &page_vaddr),
 			   "failed to advance fault unwire range");
-		if (!plane_vm_map_lookup_page(map, page_vaddr, &info) ||
-		    info.wired_count == 0) {
+		if (!plane_vm_map_lookup_page_ref(map, page_vaddr, &ref)) {
 			return false;
 		}
 
-		page = plane_vm_object_lookup_page(info.object,
-						   info.object_offset);
+		if (ref.info.wired_count == 0) {
+			plane_vm_map_release_page_ref(&ref);
+			return false;
+		}
+
+		page = plane_vm_object_lookup_and_hold_page(ref.info.object,
+							ref.info.object_offset);
 		if (page == NULL) {
+			plane_vm_map_release_page_ref(&ref);
 			continue;
 		}
 		if (!plane_vm_page_wire_count(page, &wire_count) ||
 		    wire_count == 0) {
+			valid = false;
+		}
+		BUG_ON_MSG(!plane_vm_page_unhold(page),
+			   "failed to unhold fault preflight page");
+		plane_vm_map_release_page_ref(&ref);
+		if (!valid) {
 			return false;
 		}
 	}
@@ -319,19 +395,28 @@ static bool fault_unwire_resident_pages(struct plane_vm_map *map,
 					uint64_t page_count)
 {
 	for (uint64_t i = 0; i < page_count; i++) {
-		struct plane_vm_map_page_info info;
+		struct plane_vm_map_page_ref ref;
 		struct plane_page *page;
 		plane_vaddr_t page_vaddr;
+		bool unwired = true;
 
 		BUG_ON_MSG(!plane_vaddr_add_pages(vaddr, i, &page_vaddr),
 			   "failed to advance fault unwire range");
-		if (!plane_vm_map_lookup_page(map, page_vaddr, &info)) {
+		if (!plane_vm_map_lookup_page_ref(map, page_vaddr, &ref)) {
 			return false;
 		}
 
-		page = plane_vm_object_lookup_page(info.object,
-						   info.object_offset);
+		page = plane_vm_object_lookup_and_hold_page(ref.info.object,
+							ref.info.object_offset);
 		if (page != NULL && !plane_vm_page_unwire(page)) {
+			unwired = false;
+		}
+		if (page != NULL) {
+			BUG_ON_MSG(!plane_vm_page_unhold(page),
+				   "failed to unhold fault unwire page");
+		}
+		plane_vm_map_release_page_ref(&ref);
+		if (!unwired) {
 			return false;
 		}
 	}

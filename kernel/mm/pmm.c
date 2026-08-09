@@ -24,16 +24,16 @@ static struct plane_vm_page_queue free_queue;
 static struct plane_pmm_stats pmm_stats;
 static uint64_t metadata_phys_base;
 static uint64_t metadata_page_count;
-static struct plane_spinlock pmm_lock = PLANE_SPINLOCK_INIT;
+static struct plane_spinlock pmm_spinlock = PLANE_SPINLOCK_INIT;
 
-static plane_irq_state_t lock_pmm(void)
+static plane_irq_state_t pmm_lock(void)
 {
-	return plane_spin_lock_irqsave(&pmm_lock);
+	return plane_spin_lock_irqsave(&pmm_spinlock);
 }
 
-static void unlock_pmm(plane_irq_state_t state)
+static void pmm_unlock(plane_irq_state_t state)
 {
-	plane_spin_unlock_irqrestore(&pmm_lock, state);
+	plane_spin_unlock_irqrestore(&pmm_spinlock, state);
 }
 
 static uint64_t page_count_for_region(uint64_t start, uint64_t end)
@@ -41,7 +41,7 @@ static uint64_t page_count_for_region(uint64_t start, uint64_t end)
 	return (end - start) / PAGE_SIZE;
 }
 
-static bool append_managed_range(uint64_t base, uint64_t page_count)
+static bool pmm_append_managed_range(uint64_t base, uint64_t page_count)
 {
 	uint64_t new_tracked_count;
 
@@ -73,13 +73,13 @@ static bool add_pages_to_stat(uint64_t *stat, uint64_t pages)
 	return plane_checked_add_u64(*stat, pages, stat);
 }
 
-static bool append_usable_region(uint64_t base, uint64_t page_count)
+static bool pmm_append_usable_region(uint64_t base, uint64_t page_count)
 {
 	uint64_t managed_pages;
 
 	if (!plane_checked_add_u64(pmm_stats.allocator.managed_pages, page_count,
 			     &managed_pages) ||
-	    !append_managed_range(base, page_count) ||
+	    !pmm_append_managed_range(base, page_count) ||
 	    !add_pages_to_stat(&pmm_stats.memtype.usable_pages, page_count)) {
 		return false;
 	}
@@ -88,7 +88,7 @@ static bool append_usable_region(uint64_t base, uint64_t page_count)
 	return true;
 }
 
-static bool account_unusable_region(uint32_t type, uint64_t pages)
+static bool pmm_account_unusable_region(uint32_t type, uint64_t pages)
 {
 	switch (type) {
 	case PLANE_MEM_ACPI_RECLAIMABLE:
@@ -118,7 +118,7 @@ static bool account_unusable_region(uint32_t type, uint64_t pages)
 	}
 }
 
-static bool reserve_low_usable_pages(uint64_t *start, uint64_t aligned_end)
+static bool pmm_reserve_low_usable_pages(uint64_t *start, uint64_t aligned_end)
 {
 	uint64_t reserve_end;
 	uint64_t pages;
@@ -132,7 +132,7 @@ static bool reserve_low_usable_pages(uint64_t *start, uint64_t aligned_end)
 		      aligned_end : PLANE_PMM_NULL_PHYS_GUARD_SIZE;
 	pages = page_count_for_region(*start, reserve_end);
 	if (pages != 0 &&
-	    !account_unusable_region(PLANE_MEM_RESERVED, pages)) {
+	    !pmm_account_unusable_region(PLANE_MEM_RESERVED, pages)) {
 		return false;
 	}
 
@@ -165,20 +165,20 @@ static bool managed_range_contains(uint64_t base, uint64_t page_count)
 	return false;
 }
 
-static bool page_is_free_queued(const struct plane_page *page)
+static bool pmm_page_is_free_queued(const struct plane_page *page)
 {
 	return page != NULL &&
 	       page->state == PLANE_VM_PAGE_FREE &&
 	       plane_vm_page_queue_state(page) == PLANE_VM_PAGE_QUEUE_FREE;
 }
 
-static bool page_is_releasable(const struct plane_page *page)
+static bool pmm_page_is_releasable(const struct plane_page *page)
 {
 	return plane_vm_page_is_releasable_to_pmm(page) &&
 	       plane_vm_page_queue_state(page) == PLANE_VM_PAGE_QUEUE_NONE;
 }
 
-static bool page_range_state_matches(plane_paddr_t phys_addr,
+static bool pmm_page_range_state_matches(plane_paddr_t phys_addr,
 				     uint64_t page_count,
 				     enum plane_vm_page_state expected)
 {
@@ -199,12 +199,12 @@ static bool page_range_state_matches(plane_paddr_t phys_addr,
 	return true;
 }
 
-static bool set_page_range_state(plane_paddr_t phys_addr,
+static bool pmm_set_page_range_state(plane_paddr_t phys_addr,
 				 uint64_t page_count,
 				 enum plane_vm_page_state expected,
 				 enum plane_vm_page_state next)
 {
-	if (!page_range_state_matches(phys_addr, page_count, expected)) {
+	if (!pmm_page_range_state_matches(phys_addr, page_count, expected)) {
 		return false;
 	}
 
@@ -225,7 +225,7 @@ static bool set_page_range_state(plane_paddr_t phys_addr,
 	return true;
 }
 
-static bool init_page_metadata(void)
+static bool pmm_init_page_metadata(void)
 {
 	uint64_t metadata_bytes;
 	uint64_t metadata_pages;
@@ -289,7 +289,7 @@ static bool init_page_metadata(void)
 		return false;
 	}
 
-	if (!set_page_range_state(plane_paddr_make(metadata_phys_base),
+	if (!pmm_set_page_range_state(plane_paddr_make(metadata_phys_base),
 				  metadata_pages,
 				  PLANE_VM_PAGE_FREE, PLANE_VM_PAGE_METADATA)) {
 		return false;
@@ -306,7 +306,7 @@ static bool init_page_metadata(void)
 	return true;
 }
 
-static bool init_allocator_locked(const struct plane_mem_info *mem)
+static bool pmm_init_allocator_locked(const struct plane_mem_info *mem)
 {
 	managed_range_count = 0;
 	tracked_page_count = 0;
@@ -354,7 +354,7 @@ static bool init_allocator_locked(const struct plane_mem_info *mem)
 			 * null physical addresses never become page tables,
 			 * metadata storage, or VM backing pages.
 			 */
-			if (!reserve_low_usable_pages(&start, aligned_end)) {
+			if (!pmm_reserve_low_usable_pages(&start, aligned_end)) {
 				return false;
 			}
 			if (start >= aligned_end) {
@@ -362,7 +362,7 @@ static bool init_allocator_locked(const struct plane_mem_info *mem)
 			}
 
 			pages = page_count_for_region(start, aligned_end);
-			if (!append_usable_region(start, pages)) {
+			if (!pmm_append_usable_region(start, pages)) {
 				return false;
 			}
 			continue;
@@ -377,12 +377,12 @@ static bool init_allocator_locked(const struct plane_mem_info *mem)
 		}
 
 		pages = page_count_for_region(start, aligned_end);
-		if (!account_unusable_region(region->type, pages)) {
+		if (!pmm_account_unusable_region(region->type, pages)) {
 			return false;
 		}
 	}
 
-	return init_page_metadata();
+	return pmm_init_page_metadata();
 }
 
 bool plane_pmm_init(const struct plane_mem_info *mem)
@@ -390,14 +390,14 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 	plane_irq_state_t state;
 	bool initialized;
 
-	plane_spin_init(&pmm_lock);
-	state = lock_pmm();
-	initialized = init_allocator_locked(mem);
-	unlock_pmm(state);
+	plane_spin_init(&pmm_spinlock);
+	state = pmm_lock();
+	initialized = pmm_init_allocator_locked(mem);
+	pmm_unlock(state);
 	return initialized;
 }
 
-static bool page_range_is_free(plane_paddr_t phys_addr, uint64_t page_count)
+static bool pmm_page_range_is_free(plane_paddr_t phys_addr, uint64_t page_count)
 {
 	if (!managed_range_contains(plane_paddr_raw(phys_addr), page_count)) {
 		return false;
@@ -412,7 +412,7 @@ static bool page_range_is_free(plane_paddr_t phys_addr, uint64_t page_count)
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-		if (!page_is_free_queued(page)) {
+		if (!pmm_page_is_free_queued(page)) {
 			return false;
 		}
 	}
@@ -425,7 +425,7 @@ static bool alloc_flags_are_valid(uint32_t flags)
 	return (flags & ~PLANE_PMM_ALLOC_ZERO) == 0;
 }
 
-static bool page_range_is_releasable(plane_paddr_t phys_addr,
+static bool pmm_page_range_is_releasable(plane_paddr_t phys_addr,
 				     uint64_t page_count)
 {
 	for (uint64_t i = 0; i < page_count; i++) {
@@ -445,7 +445,7 @@ static bool page_range_is_releasable(plane_paddr_t phys_addr,
 	return true;
 }
 
-static bool zero_phys_pages(plane_paddr_t phys_addr, uint64_t page_count)
+static bool pmm_zero_phys_pages(plane_paddr_t phys_addr, uint64_t page_count)
 {
 	plane_vaddr_t mapped_vaddr;
 	uint64_t size;
@@ -465,7 +465,7 @@ static bool zero_phys_pages(plane_paddr_t phys_addr, uint64_t page_count)
 	return true;
 }
 
-static bool rollback_phys_page_run(plane_paddr_t phys_addr,
+static bool pmm_rollback_phys_page_run(plane_paddr_t phys_addr,
 				   uint64_t page_count)
 {
 	for (uint64_t i = 0; i < page_count; i++) {
@@ -477,7 +477,7 @@ static bool rollback_phys_page_run(plane_paddr_t phys_addr,
 		}
 
 		page = plane_vm_page_from_phys(page_phys);
-		if (!page_is_releasable(page)) {
+		if (!pmm_page_is_releasable(page)) {
 			return false;
 		}
 	}
@@ -503,7 +503,7 @@ static bool rollback_phys_page_run(plane_paddr_t phys_addr,
 	return true;
 }
 
-static bool find_free_page_run(uint64_t page_count,
+static bool pmm_find_free_page_run(uint64_t page_count,
 			       uint64_t alignment_pages,
 			       plane_paddr_t *phys_addr)
 {
@@ -536,7 +536,7 @@ static bool find_free_page_run(uint64_t page_count,
 				return false;
 			}
 
-			if (page_range_is_free(plane_paddr_make(candidate_phys),
+			if (pmm_page_range_is_free(plane_paddr_make(candidate_phys),
 					       page_count)) {
 				*phys_addr = plane_paddr_make(candidate_phys);
 				return true;
@@ -552,7 +552,7 @@ static bool find_free_page_run(uint64_t page_count,
 	return false;
 }
 
-static bool alloc_phys_page_locked(plane_paddr_t *phys_addr)
+static bool pmm_alloc_phys_page_locked(plane_paddr_t *phys_addr)
 {
 	struct plane_page *page;
 
@@ -573,7 +573,7 @@ static bool alloc_phys_page_locked(plane_paddr_t *phys_addr)
 	return true;
 }
 
-static bool alloc_phys_pages_locked(uint64_t page_count,
+static bool pmm_alloc_phys_pages_locked(uint64_t page_count,
 				    uint64_t alignment_pages,
 				    plane_paddr_t *phys_addr)
 {
@@ -585,10 +585,10 @@ static bool alloc_phys_pages_locked(uint64_t page_count,
 	}
 
 	if (page_count == 1 && alignment_pages == 1) {
-		return alloc_phys_page_locked(phys_addr);
+		return pmm_alloc_phys_page_locked(phys_addr);
 	}
 
-	if (!find_free_page_run(page_count, alignment_pages, &alloc_base)) {
+	if (!pmm_find_free_page_run(page_count, alignment_pages, &alloc_base)) {
 		return false;
 	}
 
@@ -614,7 +614,7 @@ static bool alloc_phys_pages_locked(uint64_t page_count,
 	return true;
 }
 
-static bool alloc_phys_pages_flags_locked(uint64_t page_count,
+static bool pmm_alloc_phys_pages_flags_locked(uint64_t page_count,
 					  uint64_t alignment_pages,
 					  uint32_t flags,
 					  plane_paddr_t *phys_addr)
@@ -623,13 +623,13 @@ static bool alloc_phys_pages_flags_locked(uint64_t page_count,
 
 	if (phys_addr == NULL ||
 	    !alloc_flags_are_valid(flags) ||
-	    !alloc_phys_pages_locked(page_count, alignment_pages, &alloc_base)) {
+	    !pmm_alloc_phys_pages_locked(page_count, alignment_pages, &alloc_base)) {
 		return false;
 	}
 
 	if ((flags & PLANE_PMM_ALLOC_ZERO) != 0 &&
-	    !zero_phys_pages(alloc_base, page_count)) {
-		if (!rollback_phys_page_run(alloc_base, page_count)) {
+	    !pmm_zero_phys_pages(alloc_base, page_count)) {
+		if (!pmm_rollback_phys_page_run(alloc_base, page_count)) {
 			return false;
 		}
 		return false;
@@ -647,10 +647,10 @@ bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
 	plane_irq_state_t state;
 	bool allocated;
 
-	state = lock_pmm();
-	allocated = alloc_phys_pages_flags_locked(page_count, alignment_pages,
+	state = pmm_lock();
+	allocated = pmm_alloc_phys_pages_flags_locked(page_count, alignment_pages,
 						  flags, phys_addr);
-	unlock_pmm(state);
+	pmm_unlock(state);
 	return allocated;
 }
 
@@ -667,7 +667,7 @@ bool plane_pmm_alloc_page_phys(plane_paddr_t *phys_addr)
 	return plane_pmm_alloc_pages_phys_flags(1, 1, 0, phys_addr);
 }
 
-static bool free_phys_pages_locked(plane_paddr_t phys_addr,
+static bool pmm_free_phys_pages_locked(plane_paddr_t phys_addr,
 				   uint64_t page_count)
 {
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
@@ -675,11 +675,11 @@ static bool free_phys_pages_locked(plane_paddr_t phys_addr,
 	if (page_count == 0 || !plane_paddr_is_page_aligned(phys_addr) ||
 	    page_count > pmm_allocated_page_count() ||
 	    !managed_range_contains(raw_phys, page_count) ||
-	    !page_range_is_releasable(phys_addr, page_count)) {
+	    !pmm_page_range_is_releasable(phys_addr, page_count)) {
 		return false;
 	}
 
-	BUG_ON_MSG(!set_page_range_state(phys_addr, page_count,
+	BUG_ON_MSG(!pmm_set_page_range_state(phys_addr, page_count,
 					 PLANE_VM_PAGE_ALLOCATED,
 					 PLANE_VM_PAGE_FREE),
 		   "failed to mark PMM pages free");
@@ -707,9 +707,9 @@ bool plane_pmm_free_pages_phys(plane_paddr_t phys_addr, uint64_t page_count)
 	plane_irq_state_t state;
 	bool freed;
 
-	state = lock_pmm();
-	freed = free_phys_pages_locked(phys_addr, page_count);
-	unlock_pmm(state);
+	state = pmm_lock();
+	freed = pmm_free_phys_pages_locked(phys_addr, page_count);
+	pmm_unlock(state);
 	return freed;
 }
 
@@ -730,7 +730,7 @@ static struct plane_pmm_stats pmm_stats_locked(void)
 			struct plane_page *page =
 				&page_pool[managed_ranges[i].page_index + j];
 
-			if (page_is_free_queued(page)) {
+			if (pmm_page_is_free_queued(page)) {
 				if (!in_free_run) {
 					free_run_count++;
 					in_free_run = true;
@@ -757,8 +757,8 @@ struct plane_pmm_stats plane_pmm_get_stats(void)
 	plane_irq_state_t state;
 	struct plane_pmm_stats stats;
 
-	state = lock_pmm();
+	state = pmm_lock();
 	stats = pmm_stats_locked();
-	unlock_pmm(state);
+	pmm_unlock(state);
 	return stats;
 }

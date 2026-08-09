@@ -27,17 +27,17 @@ static bool page_pool_index(const struct plane_page *page, uint64_t *index);
 static enum plane_vm_page_queue_state queue_state_locked(
 	const struct plane_page *page);
 
-static plane_irq_state_t lock_page_metadata(void)
+static plane_irq_state_t page_metadata_lock(void)
 {
 	return plane_spin_lock_irqsave(&vm_page_lock);
 }
 
-static void unlock_page_metadata(plane_irq_state_t state)
+static void page_metadata_unlock(plane_irq_state_t state)
 {
 	plane_spin_unlock_irqrestore(&vm_page_lock, state);
 }
 
-static bool ensure_guard_page_zone(void)
+static bool guard_page_zone_ensure(void)
 {
 	if (guard_page_zone.initialized) {
 		return true;
@@ -67,7 +67,7 @@ static bool page_metadata_is_known(const struct plane_page *page)
 	       guard_page_is_active(page);
 }
 
-static void reset_page_queue_links(struct plane_page *page)
+static void page_reset_queue_links(struct plane_page *page)
 {
 	page->queue_prev = NULL;
 	page->queue_next = NULL;
@@ -96,7 +96,7 @@ static uint32_t grab_to_pmm_flags(uint32_t flags)
 	return pmm_flags;
 }
 
-static void reset_page_resident_links_locked(struct plane_page *page)
+static void page_reset_resident_links_locked(struct plane_page *page)
 {
 	page->vm_object = NULL;
 	page->vm_object_offset = 0;
@@ -111,12 +111,12 @@ void plane_vm_page_reset_resident_links(struct plane_page *page)
 {
 	plane_irq_state_t state;
 
-	state = lock_page_metadata();
-	reset_page_resident_links_locked(page);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	page_reset_resident_links_locked(page);
+	page_metadata_unlock(state);
 }
 
-static void reset_runtime_locked(void)
+static void page_reset_runtime_locked(void)
 {
 	page_pool = NULL;
 	tracked_page_count = 0;
@@ -124,7 +124,7 @@ static void reset_runtime_locked(void)
 	managed_range_count = 0;
 	guard_page_zone = (struct plane_vm_zone){0};
 	bootstrap_guard_page_segment = (struct plane_vm_zone_segment){0};
-	BUG_ON_MSG(!ensure_guard_page_zone(),
+	BUG_ON_MSG(!guard_page_zone_ensure(),
 		   "failed to reset guard page zone");
 }
 
@@ -133,12 +133,12 @@ void plane_vm_page_reset_runtime(void)
 	plane_irq_state_t state;
 
 	plane_spin_init(&vm_page_lock);
-	state = lock_page_metadata();
-	reset_runtime_locked();
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	page_reset_runtime_locked();
+	page_metadata_unlock(state);
 }
 
-static bool install_pool_locked(
+static bool page_install_pool_locked(
 	struct plane_page *pool,
 	uint64_t page_count,
 	const struct plane_vm_page_managed_range *ranges,
@@ -165,9 +165,9 @@ bool plane_vm_page_install_pool(
 	plane_irq_state_t state;
 	bool installed;
 
-	state = lock_page_metadata();
-	installed = install_pool_locked(pool, page_count, ranges, range_count);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	installed = page_install_pool_locked(pool, page_count, ranges, range_count);
+	page_metadata_unlock(state);
 	return installed;
 }
 
@@ -204,15 +204,16 @@ static bool page_pool_index(const struct plane_page *page,
 	return true;
 }
 
-static void init_page_locked(struct plane_page *page,
+static void page_init_locked(struct plane_page *page,
 			     plane_paddr_t phys_addr,
 			     enum plane_vm_page_state state)
 {
 	page->phys_addr = plane_paddr_raw(phys_addr);
 	page->wire_count = 0;
-	reset_page_resident_links_locked(page);
+	page->hold_count = 0;
+	page_reset_resident_links_locked(page);
 	page->state = state;
-	reset_page_queue_links(page);
+	page_reset_queue_links(page);
 }
 
 void plane_vm_page_init(struct plane_page *page,
@@ -221,12 +222,12 @@ void plane_vm_page_init(struct plane_page *page,
 {
 	plane_irq_state_t lock_state;
 
-	lock_state = lock_page_metadata();
-	init_page_locked(page, phys_addr, state);
-	unlock_page_metadata(lock_state);
+	lock_state = page_metadata_lock();
+	page_init_locked(page, phys_addr, state);
+	page_metadata_unlock(lock_state);
 }
 
-static bool set_state_locked(struct plane_page *page,
+static bool page_set_state_locked(struct plane_page *page,
 			     enum plane_vm_page_state state)
 {
 	if (!page_pool_index(page, NULL)) {
@@ -243,9 +244,9 @@ bool plane_vm_page_set_state(struct plane_page *page,
 	plane_irq_state_t lock_state;
 	bool set;
 
-	lock_state = lock_page_metadata();
-	set = set_state_locked(page, state);
-	unlock_page_metadata(lock_state);
+	lock_state = page_metadata_lock();
+	set = page_set_state_locked(page, state);
+	page_metadata_unlock(lock_state);
 	return set;
 }
 
@@ -254,6 +255,7 @@ static bool page_is_allocated_unwired_no_object_locked(const struct plane_page *
 	return page_pool_index(page, NULL) &&
 	       page->state == PLANE_VM_PAGE_ALLOCATED &&
 	       page->wire_count == 0 &&
+	       page->hold_count == 0 &&
 	       page->vm_object == NULL;
 }
 
@@ -262,17 +264,18 @@ bool plane_vm_page_is_releasable_to_pmm(const struct plane_page *page)
 	plane_irq_state_t state;
 	bool allocated;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	allocated = page_is_allocated_unwired_no_object_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return allocated;
 }
 
-static bool page_is_releasable_locked(const struct plane_page *page)
+static bool page_is_releasable_to_pmm_locked(const struct plane_page *page)
 {
 	return page_pool_index(page, NULL) &&
 	       page->state == PLANE_VM_PAGE_ALLOCATED &&
 	       page->wire_count == 0 &&
+	       page->hold_count == 0 &&
 	       page->vm_object == NULL &&
 	       page->object_prev == NULL &&
 	       page->object_next == NULL &&
@@ -376,9 +379,9 @@ bool plane_vm_page_queue_insert_ordered(struct plane_vm_page_queue *queue,
 	plane_irq_state_t state;
 	bool inserted;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	inserted = queue_insert_ordered_locked(queue, page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return inserted;
 }
 
@@ -404,7 +407,7 @@ static bool queue_remove_locked(struct plane_vm_page_queue *queue,
 		queue->tail = page->queue_prev;
 	}
 
-	reset_page_queue_links(page);
+	page_reset_queue_links(page);
 	queue->count--;
 	return true;
 }
@@ -415,9 +418,9 @@ bool plane_vm_page_queue_remove(struct plane_vm_page_queue *queue,
 	plane_irq_state_t state;
 	bool removed;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	removed = queue_remove_locked(queue, page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return removed;
 }
 
@@ -444,9 +447,9 @@ struct plane_page *plane_vm_page_queue_pop_head(
 	plane_irq_state_t state;
 	struct plane_page *page;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	page = queue_pop_head_locked(queue);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return page;
 }
 
@@ -460,9 +463,9 @@ uint64_t plane_vm_page_queue_count(const struct plane_vm_page_queue *queue)
 	plane_irq_state_t state;
 	uint64_t count;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	count = queue_count_locked(queue);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return count;
 }
 
@@ -487,17 +490,17 @@ enum plane_vm_page_queue_state plane_vm_page_queue_state(
 	plane_irq_state_t state;
 	enum plane_vm_page_queue_state queue_state;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	queue_state = queue_state_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return queue_state;
 }
 
-static struct plane_page *create_guard_page_locked(void)
+static struct plane_page *guard_page_create_locked(void)
 {
 	struct plane_page *page;
 
-	if (!ensure_guard_page_zone()) {
+	if (!guard_page_zone_ensure()) {
 		return NULL;
 	}
 
@@ -508,9 +511,10 @@ static struct plane_page *create_guard_page_locked(void)
 
 	page->phys_addr = PLANE_VM_PAGE_GUARD_PHYS_RAW;
 	page->wire_count = 0;
-	reset_page_resident_links_locked(page);
+	page->hold_count = 0;
+	page_reset_resident_links_locked(page);
 	page->state = PLANE_VM_PAGE_GUARD;
-	reset_page_queue_links(page);
+	page_reset_queue_links(page);
 	return page;
 }
 
@@ -519,16 +523,17 @@ struct plane_page *plane_vm_page_create_guard(void)
 	plane_irq_state_t state;
 	struct plane_page *page;
 
-	state = lock_page_metadata();
-	page = create_guard_page_locked();
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	page = guard_page_create_locked();
+	page_metadata_unlock(state);
 	return page;
 }
 
-static bool release_guard_page_locked(struct plane_page *page)
+static bool guard_page_release_locked(struct plane_page *page)
 {
 	if (!guard_page_is_active(page) ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL ||
 	    page->object_prev != NULL ||
 	    page->object_next != NULL ||
@@ -538,9 +543,10 @@ static bool release_guard_page_locked(struct plane_page *page)
 		return false;
 	}
 
-	reset_page_resident_links_locked(page);
+	page_reset_resident_links_locked(page);
 	page->phys_addr = PLANE_VM_PAGE_NO_PHYS_RAW;
-	reset_page_queue_links(page);
+	page->hold_count = 0;
+	page_reset_queue_links(page);
 	page->state = PLANE_VM_PAGE_INVALID;
 	return plane_vm_zone_free(&guard_page_zone, page);
 }
@@ -550,9 +556,9 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	plane_irq_state_t state;
 	bool released;
 
-	state = lock_page_metadata();
-	released = release_guard_page_locked(page);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	released = guard_page_release_locked(page);
+	page_metadata_unlock(state);
 	return released;
 }
 
@@ -572,11 +578,11 @@ bool plane_vm_page_add_guard_storage(void *storage,
 	plane_irq_state_t state;
 	bool added;
 
-	state = lock_page_metadata();
-	added = ensure_guard_page_zone() &&
+	state = page_metadata_lock();
+	added = guard_page_zone_ensure() &&
 		plane_vm_zone_add_storage(&guard_page_zone, storage, count,
 					  segment);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return added;
 }
 
@@ -615,9 +621,9 @@ struct plane_page *plane_vm_page_from_phys(plane_paddr_t phys_addr)
 	plane_irq_state_t state;
 	struct plane_page *page;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	page = page_from_phys_locked(phys_addr);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return page;
 }
 
@@ -643,9 +649,9 @@ plane_paddr_t plane_vm_page_phys(const struct plane_page *page)
 	plane_irq_state_t state;
 	plane_paddr_t phys_addr;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	phys_addr = page_phys_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return phys_addr;
 }
 
@@ -668,9 +674,9 @@ enum plane_vm_page_state plane_vm_page_state(const struct plane_page *page)
 	plane_irq_state_t lock_state;
 	enum plane_vm_page_state page_state;
 
-	lock_state = lock_page_metadata();
+	lock_state = page_metadata_lock();
 	page_state = page_state_locked(page);
-	unlock_page_metadata(lock_state);
+	page_metadata_unlock(lock_state);
 	return page_state;
 }
 
@@ -700,10 +706,107 @@ bool plane_vm_page_wire_count(const struct plane_page *page,
 	plane_irq_state_t state;
 	bool queried;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	queried = page_wire_count_locked(page, wire_count);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return queried;
+}
+
+static bool page_hold_count_locked(const struct plane_page *page,
+				   uint64_t *hold_count)
+{
+	uint64_t index;
+
+	if (hold_count == NULL) {
+		return false;
+	}
+	if (guard_page_is_active(page)) {
+		*hold_count = page->hold_count;
+		return true;
+	}
+	if (!page_pool_index(page, &index) ||
+	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED) {
+		return false;
+	}
+
+	*hold_count = page_pool[index].hold_count;
+	return true;
+}
+
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count)
+{
+	plane_irq_state_t state;
+	bool queried;
+
+	state = page_metadata_lock();
+	queried = page_hold_count_locked(page, hold_count);
+	page_metadata_unlock(state);
+	return queried;
+}
+
+static bool page_hold_locked(struct plane_page *page)
+{
+	uint64_t index;
+
+	if (guard_page_is_active(page)) {
+		if (page->hold_count == UINT64_MAX) {
+			return false;
+		}
+		page->hold_count++;
+		return true;
+	}
+	if (!page_pool_index(page, &index) ||
+	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED ||
+	    page_pool[index].hold_count == UINT64_MAX) {
+		return false;
+	}
+
+	page_pool[index].hold_count++;
+	return true;
+}
+
+bool plane_vm_page_hold(struct plane_page *page)
+{
+	plane_irq_state_t state;
+	bool held;
+
+	state = page_metadata_lock();
+	held = page_hold_locked(page);
+	page_metadata_unlock(state);
+	return held;
+}
+
+static bool page_unhold_locked(struct plane_page *page)
+{
+	uint64_t index;
+
+	if (guard_page_is_active(page)) {
+		if (page->hold_count == 0) {
+			return false;
+		}
+		page->hold_count--;
+		return true;
+	}
+	if (!page_pool_index(page, &index) ||
+	    page_pool[index].state != PLANE_VM_PAGE_ALLOCATED ||
+	    page_pool[index].hold_count == 0) {
+		return false;
+	}
+
+	page_pool[index].hold_count--;
+	return true;
+}
+
+bool plane_vm_page_unhold(struct plane_page *page)
+{
+	plane_irq_state_t state;
+	bool unheld;
+
+	state = page_metadata_lock();
+	unheld = page_unhold_locked(page);
+	page_metadata_unlock(state);
+	return unheld;
 }
 
 bool plane_vm_page_is_guard(const struct plane_page *page)
@@ -711,9 +814,9 @@ bool plane_vm_page_is_guard(const struct plane_page *page)
 	plane_irq_state_t state;
 	bool is_guard;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	is_guard = page_state_locked(page) == PLANE_VM_PAGE_GUARD;
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return is_guard;
 }
 
@@ -736,9 +839,9 @@ struct plane_vm_object *plane_vm_page_object(const struct plane_page *page)
 	plane_irq_state_t state;
 	struct plane_vm_object *object;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	object = page_object_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return object;
 }
 
@@ -772,13 +875,13 @@ bool plane_vm_page_object_offset(const struct plane_page *page,
 	plane_irq_state_t state;
 	bool queried;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	queried = page_object_offset_locked(page, offset);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return queried;
 }
 
-static bool attach_page_object_locked(struct plane_page *page,
+static bool page_attach_object_locked(struct plane_page *page,
 				      struct plane_vm_object *object,
 				      uint64_t offset)
 {
@@ -824,13 +927,13 @@ bool plane_vm_page_attach_object(struct plane_page *page,
 	plane_irq_state_t state;
 	bool attached;
 
-	state = lock_page_metadata();
-	attached = attach_page_object_locked(page, object, offset);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	attached = page_attach_object_locked(page, object, offset);
+	page_metadata_unlock(state);
 	return attached;
 }
 
-static bool detach_page_object_locked(struct plane_page *page,
+static bool page_detach_object_locked(struct plane_page *page,
 				      struct plane_vm_object *object,
 				      uint64_t offset)
 {
@@ -845,7 +948,7 @@ static bool detach_page_object_locked(struct plane_page *page,
 			return false;
 		}
 
-		reset_page_resident_links_locked(page);
+		page_reset_resident_links_locked(page);
 		return true;
 	}
 	if (!page_pool_index(page, &index) ||
@@ -855,7 +958,7 @@ static bool detach_page_object_locked(struct plane_page *page,
 		return false;
 	}
 
-	reset_page_resident_links_locked(&page_pool[index]);
+	page_reset_resident_links_locked(&page_pool[index]);
 	return true;
 }
 
@@ -866,9 +969,9 @@ bool plane_vm_page_detach_object(struct plane_page *page,
 	plane_irq_state_t state;
 	bool detached;
 
-	state = lock_page_metadata();
-	detached = detach_page_object_locked(page, object, offset);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	detached = page_detach_object_locked(page, object, offset);
+	page_metadata_unlock(state);
 	return detached;
 }
 
@@ -891,9 +994,9 @@ struct plane_page *plane_vm_page_object_prev(const struct plane_page *page)
 	plane_irq_state_t state;
 	struct plane_page *prev;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	prev = page_object_prev_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return prev;
 }
 
@@ -916,9 +1019,9 @@ struct plane_page *plane_vm_page_object_next(const struct plane_page *page)
 	plane_irq_state_t state;
 	struct plane_page *next;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	next = page_object_next_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return next;
 }
 
@@ -942,9 +1045,9 @@ struct plane_page *plane_vm_page_object_hash_next(const struct plane_page *page)
 	plane_irq_state_t state;
 	struct plane_page *next;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	next = page_object_hash_next_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return next;
 }
 
@@ -967,9 +1070,9 @@ bool plane_vm_page_object_is_tabled(const struct plane_page *page)
 	plane_irq_state_t state;
 	bool tabled;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	tabled = page_object_tabled_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return tabled;
 }
 
@@ -992,13 +1095,13 @@ bool plane_vm_page_object_is_hashed(const struct plane_page *page)
 	plane_irq_state_t state;
 	bool hashed;
 
-	state = lock_page_metadata();
+	state = page_metadata_lock();
 	hashed = page_object_hashed_locked(page);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 	return hashed;
 }
 
-static bool set_page_object_prev_locked(struct plane_page *page,
+static bool page_set_object_prev_locked(struct plane_page *page,
 					struct plane_page *prev)
 {
 	uint64_t index;
@@ -1024,13 +1127,13 @@ bool plane_vm_page_set_object_prev(struct plane_page *page,
 	plane_irq_state_t state;
 	bool set;
 
-	state = lock_page_metadata();
-	set = set_page_object_prev_locked(page, prev);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	set = page_set_object_prev_locked(page, prev);
+	page_metadata_unlock(state);
 	return set;
 }
 
-static bool set_page_object_next_locked(struct plane_page *page,
+static bool page_set_object_next_locked(struct plane_page *page,
 					struct plane_page *next)
 {
 	uint64_t index;
@@ -1056,13 +1159,13 @@ bool plane_vm_page_set_object_next(struct plane_page *page,
 	plane_irq_state_t state;
 	bool set;
 
-	state = lock_page_metadata();
-	set = set_page_object_next_locked(page, next);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	set = page_set_object_next_locked(page, next);
+	page_metadata_unlock(state);
 	return set;
 }
 
-static bool set_page_object_hash_next_locked(struct plane_page *page,
+static bool page_set_object_hash_next_locked(struct plane_page *page,
 					     struct plane_page *next)
 {
 	uint64_t index;
@@ -1088,13 +1191,13 @@ bool plane_vm_page_set_object_hash_next(struct plane_page *page,
 	plane_irq_state_t state;
 	bool set;
 
-	state = lock_page_metadata();
-	set = set_page_object_hash_next_locked(page, next);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	set = page_set_object_hash_next_locked(page, next);
+	page_metadata_unlock(state);
 	return set;
 }
 
-static bool set_page_object_tabled_locked(struct plane_page *page, bool tabled)
+static bool page_set_object_tabled_locked(struct plane_page *page, bool tabled)
 {
 	uint64_t index;
 
@@ -1115,13 +1218,13 @@ bool plane_vm_page_set_object_tabled(struct plane_page *page, bool tabled)
 	plane_irq_state_t state;
 	bool set;
 
-	state = lock_page_metadata();
-	set = set_page_object_tabled_locked(page, tabled);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	set = page_set_object_tabled_locked(page, tabled);
+	page_metadata_unlock(state);
 	return set;
 }
 
-static bool set_page_object_hashed_locked(struct plane_page *page, bool hashed)
+static bool page_set_object_hashed_locked(struct plane_page *page, bool hashed)
 {
 	uint64_t index;
 
@@ -1142,9 +1245,9 @@ bool plane_vm_page_set_object_hashed(struct plane_page *page, bool hashed)
 	plane_irq_state_t state;
 	bool set;
 
-	state = lock_page_metadata();
-	set = set_page_object_hashed_locked(page, hashed);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	set = page_set_object_hashed_locked(page, hashed);
+	page_metadata_unlock(state);
 	return set;
 }
 
@@ -1174,14 +1277,14 @@ bool plane_vm_page_release(struct plane_page *page)
 	plane_irq_state_t state;
 	plane_paddr_t phys_addr;
 
-	state = lock_page_metadata();
-	if (!page_is_releasable_locked(page)) {
-		unlock_page_metadata(state);
+	state = page_metadata_lock();
+	if (!page_is_releasable_to_pmm_locked(page)) {
+		page_metadata_unlock(state);
 		return false;
 	}
 
 	phys_addr = plane_paddr_make(page->phys_addr);
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 
 	BUG_ON_MSG(!plane_pmm_free_page_phys(phys_addr),
 		   "failed to release VM page: phys=%llx",
@@ -1195,7 +1298,7 @@ struct wire_snapshot {
 	bool account_object;
 };
 
-static bool take_page_wire_snapshot_locked(struct plane_page *page,
+static bool page_take_wire_snapshot_locked(struct plane_page *page,
 					   bool wire,
 					   struct wire_snapshot *snapshot)
 {
@@ -1228,7 +1331,7 @@ static bool take_page_wire_snapshot_locked(struct plane_page *page,
 	return true;
 }
 
-static bool commit_page_wire_snapshot_locked(struct plane_page *page,
+static bool page_commit_wire_snapshot_locked(struct plane_page *page,
 					     const struct wire_snapshot *snapshot,
 					     bool wire)
 {
@@ -1262,21 +1365,21 @@ bool plane_vm_page_wire(struct plane_page *page)
 	struct wire_snapshot snapshot;
 	bool committed;
 
-	state = lock_page_metadata();
-	if (!take_page_wire_snapshot_locked(page, true, &snapshot)) {
-		unlock_page_metadata(state);
+	state = page_metadata_lock();
+	if (!page_take_wire_snapshot_locked(page, true, &snapshot)) {
+		page_metadata_unlock(state);
 		return false;
 	}
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 
 	if (snapshot.account_object &&
 	    !plane_vm_object_account_page_wired(snapshot.object)) {
 		return false;
 	}
 
-	state = lock_page_metadata();
-	committed = commit_page_wire_snapshot_locked(page, &snapshot, true);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	committed = page_commit_wire_snapshot_locked(page, &snapshot, true);
+	page_metadata_unlock(state);
 	if (!committed && snapshot.account_object) {
 		BUG_ON_MSG(!plane_vm_object_account_page_unwired(
 				   snapshot.object),
@@ -1291,21 +1394,21 @@ bool plane_vm_page_unwire(struct plane_page *page)
 	struct wire_snapshot snapshot;
 	bool committed;
 
-	state = lock_page_metadata();
-	if (!take_page_wire_snapshot_locked(page, false, &snapshot)) {
-		unlock_page_metadata(state);
+	state = page_metadata_lock();
+	if (!page_take_wire_snapshot_locked(page, false, &snapshot)) {
+		page_metadata_unlock(state);
 		return false;
 	}
-	unlock_page_metadata(state);
+	page_metadata_unlock(state);
 
 	if (snapshot.account_object &&
 	    !plane_vm_object_account_page_unwired(snapshot.object)) {
 		return false;
 	}
 
-	state = lock_page_metadata();
-	committed = commit_page_wire_snapshot_locked(page, &snapshot, false);
-	unlock_page_metadata(state);
+	state = page_metadata_lock();
+	committed = page_commit_wire_snapshot_locked(page, &snapshot, false);
+	page_metadata_unlock(state);
 	if (!committed && snapshot.account_object) {
 		BUG_ON_MSG(!plane_vm_object_account_page_wired(
 				   snapshot.object),

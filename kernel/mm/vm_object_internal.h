@@ -21,6 +21,13 @@ struct plane_vm_zone_segment;
  */
 bool plane_vm_object_account_page_wired(struct plane_vm_object *object);
 bool plane_vm_object_account_page_unwired(struct plane_vm_object *object);
+struct plane_page *plane_vm_object_lookup_and_hold_page(
+	struct plane_vm_object *object,
+	uint64_t offset);
+struct plane_page *plane_vm_object_remove_held_page(
+	struct plane_vm_object *object,
+	uint64_t offset,
+	struct plane_page *held_page);
 bool plane_vm_object_add_zone_storage(struct plane_vm_object *storage,
 				      uint64_t count,
 				      struct plane_vm_zone_segment *segment);

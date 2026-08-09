@@ -56,8 +56,7 @@ Prefer small, manual patches that preserve surrounding style.
   code.
 - Keep file-local helpers `static`. Static helpers usually should not carry the
   full public owner prefix; the file already supplies that ownership context.
-  Use a short local name such as `reset_free_queue()` unless a longer prefix is
-  needed to distinguish multiple local subdomains.
+  Use the naming rules below to decide when a local sub-owner prefix is useful.
 - Cross-file symbols must belong to a clear owner cluster and have that
   cluster's prefix.
 
@@ -98,39 +97,59 @@ Use these words consistently:
 - `local_interrupt`: generic HAL name for a local interrupt controller. Do not
   expose x86-specific LAPIC terms through generic HAL names.
 
-Preferred owner/verb/object order:
+Preferred symbol order:
 
-- For operation-style C symbols, prefer `plane_<owner>_<verb>_<object>()`.
-  Keep the verb immediately after the owner cluster so related actions line up,
-  such as `plane_vm_page_reset_runtime()` and
-  `plane_vm_page_reset_resident_links()`.
-- Predicate helpers follow the same owner-first shape. Public or cross-file
-  predicates should read as `owner_is_property()`, such as
-  `plane_vm_page_is_guard()`. File-local predicates may omit the public module
-  prefix, but should still keep the entity before `is`, such as
-  `guard_page_is_active()`, when that reads clearly.
+- Public and cross-file operation APIs should use
+  `plane_<owner>_<verb>_<object>()`, or the equivalent owner prefix for HAL and
+  arch-private APIs. Keep the verb immediately after the owner cluster so
+  related actions line up: `plane_vm_page_reset_runtime()`,
+  `plane_vm_page_reset_resident_links()`,
+  `x86_64_physmap_set_bootstrap_window()`, and
+  `x86_64_pmap_build_physmap_in_owned_root()`.
+- File-local helpers do not need the full public owner prefix, but they should
+  still name the first semantic object being operated on when one is clear.
+  Prefer `<local_owner>_<verb>_<object>()` over
+  `<verb>_<local_owner>_<object>()`: `page_reset_runtime()`,
+  `page_set_object_prev_locked()`, `resident_hash_lookup_page()`,
+  `map_enter_locked()`, `pmm_alloc_phys_pages_locked()`, and
+  `kmem_release_resident_page()`.
+- If the first semantic object is a sub-owner, name that sub-owner rather than
+  the broader file owner. A single map entry should use `map_entry_*`, such as
+  `map_entry_set_range()`. A map entry array/storage should use
+  `map_entries_*`, such as `map_entries_reset()`. A helper that operates on the
+  map object itself should keep `map_*`, such as `map_alloc_entry_index()`.
+- Do not force an owner prefix onto tiny pure arithmetic or generic local
+  predicates with no durable owner. Natural helpers such as `hole_can_fit()`,
+  `range_contains()`, or `ranges_overlap()` are acceptable when adding a module
+  owner would make the code less clear.
+- Do not mechanically reverse clear English action phrases. Keep natural small
+  helpers such as `write_pixel()`, `write_u32_string()`,
+  `set_vendor_string()`, `set_brand_string()`, `collect_cpuid_raw()`,
+  `sort_boundaries()`, and `choose_interval_type()` when the reversed form is
+  less readable. Processor-register operations such as `read_cr2()` and
+  `write_cr3_phys()` may also keep the natural action-first form until a
+  dedicated processor-register helper family exists.
+- Predicate helpers should put the entity before the predicate word when that
+  reads clearly. Public or cross-file predicates should read as
+  `owner_is_property()`, such as `plane_vm_page_is_guard()`. File-local examples
+  include `guard_page_is_active()`, `object_is_range_valid()`, and
+  `map_entry_is_guarded()`. Boolean locals and parameters should use `is_*`,
+  `has_*`, or `can_*`, such as `is_writable`.
 - Relation and capability predicates may keep natural verb forms when `is`
   would make the name worse: `owner_can_action()`, `range_contains()`,
   `range_overlaps()`, `entry_contains_addr()`, or `elem_belongs_to_zone()`.
   Do not mechanically force every boolean helper into an `is_*` shape.
-- Apply the same rule to arch-private helpers:
-  `x86_64_physmap_set_bootstrap_window()`,
-  `x86_64_physmap_install_bootstrap_window()`, and
-  `x86_64_pmap_build_physmap_in_owned_root()`.
 - Query/property helpers may use noun-like names when they read naturally, such
-  as `plane_cpu_current_id()`, `plane_vm_page_wire_count()`, or
-  `x86_64_pmap_current_root_phys()`.
+  as `plane_cpu_current_id()`, `plane_vm_page_wire_count()`,
+  `x86_64_pmap_current_root_phys()`, or `map_stats_locked()`.
+- Avoid abbreviations in new helper names when the full word is short and
+  clearer. Prefer `reference` over `ref` in newly introduced operation names
+  unless the surrounding public type or API already uses `ref`.
 - Getter-style APIs are tolerated when they already exist, but do not mix
   `owner_object_get()` and `owner_get_object()` inside one owner cluster. Rename
-  them only in a dedicated cleanup.
-- Existing `plane_pmm_get_stats()` and `plane_vm_map_get_stats()` are older
-  public API names. Do not churn them opportunistically in unrelated patches.
-- Do not force static file-local helpers to carry public owner prefixes just to
-  match exported symbols. Prefer concise local names when the containing file
-  already makes the owner obvious, but keep the function's action or predicate
-  role explicit. For example, `reset_runtime_locked()` is acceptable in a file
-  that only owns one runtime, while boolean locals and parameters should use
-  `is_*`, `has_*`, or `can_*`, such as `is_writable`.
+  them only in a dedicated cleanup. Existing `plane_pmm_get_stats()` and
+  `plane_vm_map_get_stats()` are older public API names; do not churn them
+  opportunistically in unrelated patches.
 
 Avoid these stale names in new code:
 
@@ -303,6 +322,10 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - `plane_vm_fault_page()` is split conceptually into lookup/precheck,
   page-resolve/zero-fill, and pmap-enter/repair. Preserve rollback rules for
   zero-fill pages and resident-hit failures.
+- Fault paths that carry a resident object or page pointer outside VM map,
+  object, resident-hash, or VM page locks must use kernel/MM internal reference
+  and hold helpers. `hold_count` is a transient fault/pmap-enter stabilization
+  mechanism, not a public VM page API and not XNU-style busy/wanted state.
 - `plane_vm_fault_pages()` is a side-effectful range prefault wrapper. It is not
   all-or-nothing.
 - `plane_vm_fault_wire_pages()` rolls back wiring added by the failed operation,

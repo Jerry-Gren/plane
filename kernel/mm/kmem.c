@@ -62,7 +62,7 @@ static uint32_t kmem_to_vm_page_grab_flags(uint32_t flags)
 	return grab_flags;
 }
 
-static bool reserve_kmem_vaddr(struct plane_vm_map *map,
+static bool kmem_reserve_vaddr(struct plane_vm_map *map,
 			       struct plane_vm_object *object,
 			       uint64_t page_count,
 			       uint32_t flags,
@@ -147,7 +147,7 @@ bool plane_kmem_va_pages_reserved(plane_vaddr_t vaddr, uint64_t page_count)
 	return info.object == NULL;
 }
 
-static bool expand_kmem_metadata(void)
+static bool kmem_expand_metadata(void)
 {
 	struct plane_vm_map_entry *runtime_entries;
 	struct plane_vm_object *runtime_objects;
@@ -215,42 +215,52 @@ static bool expand_kmem_metadata(void)
 		&kernel_guard_runtime_segment);
 }
 
-static bool release_kmem_resident_page(struct plane_vm_object *object,
+static bool kmem_release_resident_page(struct plane_vm_object *object,
 				       uint64_t object_offset,
 				       plane_vaddr_t vaddr)
 {
 	struct plane_page *page;
 	plane_paddr_t phys_addr;
 	uint64_t wire_count;
+	uint64_t hold_count;
 
-	page = plane_vm_object_lookup_page(object, object_offset);
+	page = plane_vm_object_lookup_and_hold_page(object, object_offset);
 	if (page == NULL) {
 		return true;
 	}
 
+	if (!plane_vm_page_hold_count(page, &hold_count) ||
+	    hold_count != 1) {
+		goto out;
+	}
+	if (!plane_vm_page_wire_count(page, &wire_count) ||
+	    wire_count == 0) {
+		goto out;
+	}
 	if (hal_mmu_translate_kernel_page(vaddr, &phys_addr)) {
 		if (plane_vm_page_from_phys(phys_addr) != page ||
 		    !hal_mmu_unmap_kernel_page(vaddr)) {
-			return false;
+			goto out;
 		}
 	}
-	if (!plane_vm_page_wire_count(page, &wire_count)) {
-		return false;
-	}
-	if (wire_count == 0) {
-		return false;
-	}
-	if (plane_vm_object_remove_page(object, object_offset) != page) {
-		return false;
-	}
-	if (!plane_vm_page_unwire(page)) {
-		return false;
-	}
+	BUG_ON_MSG(plane_vm_object_remove_held_page(object, object_offset,
+						    page) != page,
+		   "failed to remove kmem resident page from object");
+	BUG_ON_MSG(!plane_vm_page_unwire(page),
+		   "failed to unwire kmem resident page");
+	BUG_ON_MSG(!plane_vm_page_unhold(page),
+		   "failed to unhold kmem resident page");
+	BUG_ON_MSG(!plane_vm_page_release(page),
+		   "failed to release kmem resident page");
+	return true;
 
-	return plane_vm_page_release(page);
+out:
+	BUG_ON_MSG(!plane_vm_page_unhold(page),
+		   "failed to unhold kmem resident page");
+	return false;
 }
 
-static bool release_kmem_resident_pages(plane_vaddr_t vaddr,
+static bool kmem_release_resident_pages(plane_vaddr_t vaddr,
 					struct plane_vm_object *object,
 					uint64_t object_offset,
 					uint64_t page_count)
@@ -264,7 +274,7 @@ static bool release_kmem_resident_pages(plane_vaddr_t vaddr,
 		    !plane_checked_page_offset(i - 1, &offset) ||
 		    !plane_checked_add_u64(object_offset, offset,
 					   &page_object_offset) ||
-		    !release_kmem_resident_page(object, page_object_offset,
+		    !kmem_release_resident_page(object, page_object_offset,
 						page_vaddr)) {
 			return false;
 		}
@@ -273,7 +283,7 @@ static bool release_kmem_resident_pages(plane_vaddr_t vaddr,
 	return true;
 }
 
-static bool rollback_kmem_object_page(struct plane_vm_object *object,
+static bool kmem_rollback_object_page(struct plane_vm_object *object,
 				      uint64_t object_offset,
 				      struct plane_page *page)
 {
@@ -289,7 +299,7 @@ static bool rollback_kmem_object_page(struct plane_vm_object *object,
 	return plane_vm_page_release(page);
 }
 
-static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
+static bool kmem_map_allocated_pages(plane_vaddr_t vaddr,
 				     struct plane_vm_object *object,
 				     uint64_t object_offset,
 				     uint64_t page_count,
@@ -311,7 +321,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 		    !plane_checked_page_offset(i, &offset) ||
 		    !plane_checked_add_u64(object_offset, offset,
 					   &page_object_offset)) {
-			BUG_ON_MSG(!release_kmem_resident_pages(
+			BUG_ON_MSG(!kmem_release_resident_pages(
 					   vaddr, object, object_offset,
 					   mapped_pages),
 				   "failed to rollback kmem mappings");
@@ -319,7 +329,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 		}
 
 		if (!plane_vm_page_grab(grab_flags, &page)) {
-			BUG_ON_MSG(!release_kmem_resident_pages(
+			BUG_ON_MSG(!kmem_release_resident_pages(
 					   vaddr, object, object_offset,
 					   mapped_pages),
 				   "failed to rollback kmem mappings");
@@ -329,7 +339,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 		phys_addr = plane_vm_page_phys(page);
 		if (plane_paddr_equal(phys_addr, PLANE_VM_PAGE_NO_PHYS)) {
 			bool page_ok = plane_vm_page_release(page);
-			bool mappings_ok = release_kmem_resident_pages(
+			bool mappings_ok = kmem_release_resident_pages(
 				vaddr, object, object_offset, mapped_pages);
 
 			BUG_ON_MSG(!page_ok, "failed to rollback kmem physical page");
@@ -339,7 +349,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 
 		if (!plane_vm_page_wire(page)) {
 			bool page_ok = plane_vm_page_release(page);
-			bool mappings_ok = release_kmem_resident_pages(
+			bool mappings_ok = kmem_release_resident_pages(
 				vaddr, object, object_offset, mapped_pages);
 
 			BUG_ON_MSG(!page_ok, "failed to rollback kmem physical page");
@@ -350,7 +360,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 		if (!plane_vm_object_insert_page(object, page_object_offset, page)) {
 			bool page_ok = plane_vm_page_unwire(page) &&
 				       plane_vm_page_release(page);
-			bool mappings_ok = release_kmem_resident_pages(
+			bool mappings_ok = kmem_release_resident_pages(
 				vaddr, object, object_offset, mapped_pages);
 
 			BUG_ON_MSG(!page_ok, "failed to rollback kmem object page");
@@ -359,9 +369,9 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 		}
 
 		if (!hal_mmu_map_kernel_page(page_vaddr, phys_addr, options)) {
-			bool page_ok = rollback_kmem_object_page(
+			bool page_ok = kmem_rollback_object_page(
 				object, page_object_offset, page);
-			bool mappings_ok = release_kmem_resident_pages(
+			bool mappings_ok = kmem_release_resident_pages(
 				vaddr, object, object_offset, mapped_pages);
 
 			BUG_ON_MSG(!page_ok, "failed to rollback kmem object page");
@@ -375,7 +385,7 @@ static bool map_kmem_allocated_pages(plane_vaddr_t vaddr,
 	return true;
 }
 
-static bool protect_kmem_mapped_pages(plane_vaddr_t vaddr,
+static bool kmem_protect_mapped_pages(plane_vaddr_t vaddr,
 				      struct plane_vm_object *object,
 				      uint64_t object_offset,
 				      uint64_t page_count,
@@ -387,6 +397,7 @@ static bool protect_kmem_mapped_pages(plane_vaddr_t vaddr,
 		uint64_t offset;
 		struct plane_page *page;
 		plane_paddr_t phys_addr;
+		bool ok = true;
 
 		if (!plane_vaddr_add_pages(vaddr, i, &page_vaddr) ||
 		    !plane_checked_page_offset(i, &offset) ||
@@ -395,15 +406,21 @@ static bool protect_kmem_mapped_pages(plane_vaddr_t vaddr,
 			return false;
 		}
 
-		page = plane_vm_object_lookup_page(object, page_object_offset);
+		page = plane_vm_object_lookup_and_hold_page(object,
+							page_object_offset);
 		if (page == NULL ||
 		    !hal_mmu_translate_kernel_page(page_vaddr, &phys_addr)) {
-			continue;
+			goto next_page;
 		}
-		if (plane_vm_page_from_phys(phys_addr) != page) {
-			return false;
+		ok = plane_vm_page_from_phys(phys_addr) == page &&
+		     hal_mmu_protect_kernel_page(page_vaddr, prot);
+
+next_page:
+		if (page != NULL) {
+			BUG_ON_MSG(!plane_vm_page_unhold(page),
+				   "failed to unhold kmem protect page");
 		}
-		if (!hal_mmu_protect_kernel_page(page_vaddr, prot)) {
+		if (!ok) {
 			return false;
 		}
 	}
@@ -439,7 +456,7 @@ bool plane_kmem_init(void)
 		   "failed to initialize kernel object");
 
 	kmem_initialized = true;
-	if (!expand_kmem_metadata()) {
+	if (!kmem_expand_metadata()) {
 		kmem_initialized = false;
 		return false;
 	}
@@ -548,7 +565,7 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 		return false;
 	}
 
-	if (!reserve_kmem_vaddr(map, object, page_count, flags, &base)) {
+	if (!kmem_reserve_vaddr(map, object, page_count, flags, &base)) {
 		return false;
 	}
 
@@ -562,7 +579,7 @@ bool plane_kmem_alloc_pages_in_map(struct plane_vm_map *map,
 		   "failed to wire kmem virtual reservation");
 
 	if ((flags & PLANE_KMEM_ALLOC_LAZY) == 0 &&
-	    !map_kmem_allocated_pages(base, object, info.object_offset,
+	    !kmem_map_allocated_pages(base, object, info.object_offset,
 				      page_count, flags, info.prot)) {
 		BUG_ON_MSG(!plane_vm_map_unwire_pages(map, base, page_count),
 			   "failed to unwire kmem virtual reservation");
@@ -631,7 +648,7 @@ bool plane_kmem_protect_pages_in_map(struct plane_vm_map *map,
 
 	BUG_ON_MSG(!plane_vm_map_protect_pages(map, vaddr, page_count, prot),
 		   "failed to update kmem virtual protection");
-	BUG_ON_MSG(!protect_kmem_mapped_pages(vaddr, info.object,
+	BUG_ON_MSG(!kmem_protect_mapped_pages(vaddr, info.object,
 					      info.object_offset, page_count,
 					      prot),
 		   "failed to protect kmem backing pages");
@@ -668,9 +685,10 @@ bool plane_kmem_free_pages_in_map(struct plane_vm_map *map,
 		return false;
 	}
 
-	BUG_ON_MSG(!release_kmem_resident_pages(vaddr, object, info.object_offset,
-					   page_count),
-		   "failed to release kmem backing pages");
+	if (!kmem_release_resident_pages(vaddr, object, info.object_offset,
+					 page_count)) {
+		return false;
+	}
 	BUG_ON_MSG(!plane_vm_map_unwire_pages(map, vaddr, page_count),
 		   "failed to unwire kmem virtual reservation");
 	BUG_ON_MSG(!plane_vm_map_free_pages(map, vaddr, page_count),

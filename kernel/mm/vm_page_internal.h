@@ -25,6 +25,7 @@ struct plane_vm_page_queue {
 struct plane_page {
 	uint64_t phys_addr;
 	uint64_t wire_count;
+	uint64_t hold_count;
 	struct plane_vm_object *vm_object;
 	uint64_t vm_object_offset;
 	struct plane_page *object_prev;
@@ -81,6 +82,10 @@ enum plane_vm_page_queue_state plane_vm_page_queue_state(
 	const struct plane_page *page);
 struct plane_page *plane_vm_page_create_guard(void);
 bool plane_vm_page_release_guard(struct plane_page *page);
+bool plane_vm_page_hold(struct plane_page *page);
+bool plane_vm_page_unhold(struct plane_page *page);
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count);
 bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size);
 bool plane_vm_page_add_guard_storage(void *storage,
 				     uint64_t count,

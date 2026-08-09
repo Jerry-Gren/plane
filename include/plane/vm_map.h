@@ -36,7 +36,7 @@ struct plane_vm_map_stats {
 	uint64_t free_pages;
 	uint64_t reserved_pages;
 	uint64_t user_pages;
-	uint64_t free_range_count;
+	uint64_t map_free_range_count;
 	uint64_t allocation_count;
 };
 

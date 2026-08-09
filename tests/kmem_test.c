@@ -10,6 +10,7 @@
 #include <plane/vm_object.h>
 
 #include "support/test.h"
+#include "../kernel/mm/vm_object_internal.h"
 #include "../kernel/mm/vm_page_internal.h"
 #include "../kernel/mm/vm_zone_internal.h"
 
@@ -101,6 +102,7 @@ static void reset_kmem_test(void)
 	for (uint64_t i = 0; i < TEST_PAGE_COUNT; i++) {
 		test_pages[i].phys_addr = i * PAGE_SIZE;
 		test_pages[i].wire_count = 0;
+		test_pages[i].hold_count = 0;
 		test_pages[i].vm_object = NULL;
 		test_pages[i].vm_object_offset = 0;
 		test_pages[i].object_prev = NULL;
@@ -447,6 +449,7 @@ bool plane_vm_page_release(struct plane_page *page)
 	if (!test_page_is_managed(page) ||
 	    page->state != PLANE_VM_PAGE_ALLOCATED ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL) {
 		return false;
 	}
@@ -696,6 +699,46 @@ bool plane_vm_page_wire_count(const struct plane_page *page, uint64_t *wire_coun
 	return true;
 }
 
+bool plane_vm_page_hold(struct plane_page *page)
+{
+	if (!test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == UINT64_MAX) {
+		return false;
+	}
+
+	page->hold_count++;
+	return true;
+}
+
+bool plane_vm_page_unhold(struct plane_page *page)
+{
+	if (!test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD) ||
+	    page->hold_count == 0) {
+		return false;
+	}
+
+	page->hold_count--;
+	return true;
+}
+
+bool plane_vm_page_hold_count(const struct plane_page *page,
+			      uint64_t *hold_count)
+{
+	if (hold_count == NULL ||
+	    !test_page_is_known(page) ||
+	    (page->state != PLANE_VM_PAGE_ALLOCATED &&
+	     page->state != PLANE_VM_PAGE_GUARD)) {
+		return false;
+	}
+
+	*hold_count = page->hold_count;
+	return true;
+}
+
 bool plane_vm_page_guard_storage_size(uint64_t count, uint64_t *size)
 {
 	if (size == NULL ||
@@ -743,6 +786,7 @@ bool plane_vm_page_release_guard(struct plane_page *page)
 	if (!test_guard_page_is_storage(page) ||
 	    page->state != PLANE_VM_PAGE_GUARD ||
 	    page->wire_count != 0 ||
+	    page->hold_count != 0 ||
 	    page->vm_object != NULL ||
 	    page->object_prev != NULL ||
 	    page->object_next != NULL ||
@@ -1262,6 +1306,63 @@ static int test_lazy_alloc_faults_in_zero_page(void)
 	failures += test_expect_u64("lazy free mappings", mapping_count(), 0);
 	failures += test_expect_u64("lazy free object ref count",
 				    plane_vm_object_ref_count(&test_object), 1);
+	return failures;
+}
+
+static int test_free_rejects_held_resident_page(void)
+{
+	void *addr = NULL;
+	struct plane_page *page;
+	uint64_t hold_count = UINT64_MAX;
+	int failures = 0;
+
+	failures += test_expect_bool("held free alloc",
+				     test_kmem_alloc_pages_in_map(
+					     &test_map, &test_object, 1,
+					     PLANE_KMEM_ALLOC_LAZY, &addr),
+				     true);
+	failures += test_expect_bool("held free fault",
+				     fault_test_map(TEST_KMEM_BASE,
+						    PLANE_VM_PROT_READ),
+				     true);
+	page = plane_vm_object_lookup_and_hold_page(&test_object,
+						TEST_KMEM_BASE);
+	failures += test_expect_not_null("held free lookup hold", page);
+	failures += test_expect_bool("held free count",
+				     plane_vm_page_hold_count(page,
+							      &hold_count),
+				     true);
+	failures += test_expect_u64("held free external hold",
+				    hold_count, 1);
+	failures += test_expect_bool("held free rejected",
+				     test_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 1),
+				     false);
+	failures += test_expect_u64("held free backing kept",
+				    pmm_allocated_page_count(), 1);
+	failures += test_expect_u64("held free wired kept",
+				    wired_page_count(), 1);
+	failures += test_expect_u64("held free object kept",
+				    object_page_count(), 1);
+	failures += test_expect_u64("held free mapping kept",
+				    mapping_count(), 1);
+	hold_count = UINT64_MAX;
+	failures += test_expect_bool("held free count stable",
+				     plane_vm_page_hold_count(page,
+							      &hold_count),
+				     true);
+	failures += test_expect_u64("held free no hold leak",
+				    hold_count, 1);
+	failures += test_expect_bool("held free unhold",
+				     plane_vm_page_unhold(page), true);
+	failures += test_expect_bool("held free after unhold",
+				     test_kmem_free_pages_in_map(
+					     &test_map, &test_object, addr, 1),
+				     true);
+	failures += test_expect_u64("held free backing released",
+				    pmm_allocated_page_count(), 0);
+	failures += test_expect_u64("held free mapping released",
+				    mapping_count(), 0);
 	return failures;
 }
 
@@ -2207,6 +2308,7 @@ int main(void)
 		TEST_CASE(test_protect_rejects_invalid_inputs),
 		TEST_CASE(test_guard_alloc_and_free_pages),
 		TEST_CASE(test_lazy_alloc_faults_in_zero_page),
+		TEST_CASE(test_free_rejects_held_resident_page),
 		TEST_CASE(test_lazy_readonly_fault_protection),
 		TEST_CASE(test_lazy_guard_faults_only_user_pages),
 		TEST_CASE(test_lazy_protect_before_and_after_fault),

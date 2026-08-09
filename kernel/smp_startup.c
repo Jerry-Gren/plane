@@ -7,11 +7,6 @@
 
 #define AP_STACK_PAGES 4
 
-static bool cpu_data_is_startable_ap(const struct plane_cpu_data *cpu)
-{
-	return cpu != NULL && !cpu->is_bsp && cpu->present;
-}
-
 bool plane_smp_startup_prepare_ap_stacks(void)
 {
 	for (uint32_t i = 0; i < plane_cpu_count(); i++) {
@@ -41,7 +36,7 @@ bool plane_smp_startup_ap_is_launchable(uint32_t logical_id)
 {
 	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
 
-	return cpu_data_is_startable_ap(cpu) &&
+	return plane_smp_cpu_data_is_startable_ap(cpu) &&
 	       plane_cpu_startup_state(logical_id) == PLANE_CPU_STARTUP_PREPARED;
 }
 
