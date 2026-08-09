@@ -23,9 +23,9 @@ struct plane_vm_map;
  * allocations. Architecture page-fault dispatch can use this through kmem's
  * kernel map wrapper, but this does not implement pager, COW, pageout,
  * busy/wanted, submaps, clustering, pmap pageable wiring, or user-map faults.
- * VM object locking exists as the first MM lock boundary; map, page, pmap, and
- * kmem lock boundaries still need to land before this can become a concurrent
- * SMP fault path.
+ * VM map and object locking exist as the first MM lock boundaries; page, PMM,
+ * pmap, and kmem lock boundaries still need to land before this can become a
+ * concurrent SMP fault path.
  */
 bool plane_vm_fault_page(struct plane_vm_map *map,
 			 plane_vaddr_t vaddr,

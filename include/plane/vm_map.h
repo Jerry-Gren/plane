@@ -6,6 +6,7 @@
 
 #include <plane/address.h>
 #include <plane/bits.h>
+#include <plane/spinlock.h>
 #include <plane/vm_prot.h>
 
 /* Use the returned user virtual address as the object offset. */
@@ -45,6 +46,8 @@ struct plane_vm_map_stats {
  *
  * A plane_vm_map object must be zero-initialized before its first init call.
  * Entry storage does not need to be zeroed by callers; init resets it.
+ * VM map locking is internal to the VM map owner. Callers must not take or
+ * inspect the embedded lock directly.
  */
 struct plane_vm_map_entry {
 	plane_vaddr_t start;
@@ -62,6 +65,7 @@ struct plane_vm_map_entry {
 };
 
 struct plane_vm_map {
+	struct plane_spinlock lock;
 	plane_vaddr_t base;
 	plane_vaddr_t end;
 	uint64_t head;

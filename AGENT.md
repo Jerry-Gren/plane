@@ -255,7 +255,8 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   and wait queues exist.
 - Add locks at owner-cluster boundaries and document what each lock protects.
   Prefer a small explicit lock order over broad lock nesting. Current VM object
-  internal order is object lock before resident hash lock.
+  internal order is object lock before resident hash lock. Current cross-owner
+  MM order is VM map lock before VM object lock.
 - Physical page 0 is reserved as a null physical guard. PMM must never allocate
   or manage it.
 - `struct plane_page` is the XNU-like page metadata foundation. Do not expand

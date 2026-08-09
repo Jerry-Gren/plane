@@ -232,6 +232,11 @@ uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object)
 	return object->offset_limit;
 }
 
+bool plane_vm_object_is_alive(const struct plane_vm_object *object)
+{
+	return object != NULL && object->initialized && object->alive;
+}
+
 static void reset_vm_map_test(void)
 {
 	test_map = (struct plane_vm_map){0};
