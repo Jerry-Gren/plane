@@ -271,6 +271,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - If a public generic or machine-facing API would expose x86-only terms such as
   LAPIC, fixed IPI, xAPIC, x2APIC, PAT, or PTE, keep that detail in x86_64
   internals and map it to the appropriate owner concept.
+- PAT readiness and initialization are x86_64 arch-private pmap/cache-attribute
+  implementation details. Generic code should express cache intent through
+  `plane_io_map` and `pmap_map_options`, not by depending on PAT service
+  headers. Do not place one- or two-function service-private headers in
+  public `include/x86_64`.
 
 ## Boot, Handoff, And Startup
 
