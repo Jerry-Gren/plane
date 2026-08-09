@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <hal/x86_64/descriptor_defs.h>
-#include <hal/x86_64/interrupt_defs.h>
+#include <x86_64/descriptor_defs.h>
+#include <x86_64/interrupt_defs.h>
 
 #include "support/test.h"
 
@@ -38,7 +38,7 @@ static void external_stub_240(void)
 void (*x86_64_isr_external_stub_table[
 	X86_64_INTR_EXTERNAL_VECTOR_COUNT])(void);
 
-#include "../hal/x86_64/idt.c"
+#include <x86_64/idt.c>
 
 static uintptr_t idt_entry_isr(const struct x86_64_intr_idt_entry *entry)
 {

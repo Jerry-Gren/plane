@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 
 #include <klib/string.h>
 #include <plane/mm.h>
@@ -257,7 +257,7 @@ static bool pmm_init_page_metadata(void)
 		return false;
 	}
 
-	plane_vaddr_t metadata_vaddr = hal_mmu_physmap_phys_range_to_virt(
+	plane_vaddr_t metadata_vaddr = physmap_phys_range_to_virt(
 		metadata_phys_base, metadata_size);
 	if (plane_vaddr_is_null(metadata_vaddr)) {
 		return false;
@@ -460,7 +460,7 @@ static bool pmm_zero_phys_pages(plane_paddr_t phys_addr, uint64_t page_count)
 		return false;
 	}
 
-	mapped_vaddr = hal_mmu_physmap_phys_range_to_virt(phys_addr, size);
+	mapped_vaddr = physmap_phys_range_to_virt(phys_addr, size);
 	if (plane_vaddr_is_null(mapped_vaddr)) {
 		return false;
 	}

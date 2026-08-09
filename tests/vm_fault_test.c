@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 #include <plane/mm.h>
 #include <plane/vm_fault.h>
 #include <plane/vm_map.h>
@@ -279,16 +279,16 @@ static int expect_page_wire_count(const char *name,
 	return failures;
 }
 
-bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     struct hal_mmu_map_options options)
+			     struct pmap_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 	uint64_t raw_phys = plane_paddr_raw(phys_addr);
 
 	if (map_force_fail ||
 	    !plane_vm_prot_is_valid(options.prot) ||
-	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
+	    options.attr != PMAP_MAPPING_ATTR_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
@@ -309,7 +309,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 	return false;
 }
 
-bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
+bool pmap_translate_kernel_page(plane_vaddr_t vaddr,
 				   plane_paddr_t *phys_addr)
 {
 	struct test_mapping *mapping;
@@ -327,7 +327,7 @@ bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
+bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
@@ -810,10 +810,10 @@ static int test_fault_resident_hit_protects_existing_pmap(void)
 					     &test_object, 0, page),
 				     true);
 	failures += test_expect_bool("fault protect premap",
-				     hal_mmu_map_kernel_page(
+				     pmap_map_kernel_page(
 					     test_vaddr(vaddr),
 					     plane_vm_page_phys(page),
-					     hal_mmu_default_map_options(
+					     pmap_default_map_options(
 						     PLANE_VM_PROT_READ |
 						     PLANE_VM_PROT_WRITE)),
 				     true);
@@ -856,10 +856,10 @@ static int test_fault_resident_hit_rolls_back_protect_failure(void)
 					     &test_object, 0, page),
 				     true);
 	failures += test_expect_bool("fault protect fail premap",
-				     hal_mmu_map_kernel_page(
+				     pmap_map_kernel_page(
 					     test_vaddr(vaddr),
 					     plane_vm_page_phys(page),
-					     hal_mmu_default_map_options(
+					     pmap_default_map_options(
 						     PLANE_VM_PROT_READ |
 						     PLANE_VM_PROT_WRITE)),
 				     true);
@@ -1441,10 +1441,10 @@ static int test_fault_pages_repairs_and_protects_resident_pages(void)
 					     second_page),
 				     true);
 	failures += test_expect_bool("range repair second premap",
-				     hal_mmu_map_kernel_page(
+				     pmap_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     hal_mmu_default_map_options(
+					     pmap_default_map_options(
 						     PLANE_VM_PROT_READ |
 						     PLANE_VM_PROT_WRITE)),
 				     true);
@@ -1593,10 +1593,10 @@ static int test_fault_wire_pages_wires_resident_hits_and_repairs_pmap(void)
 					     second_page),
 				     true);
 	failures += test_expect_bool("fault wire hit premap",
-				     hal_mmu_map_kernel_page(
+				     pmap_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     hal_mmu_default_map_options(
+					     pmap_default_map_options(
 						     PLANE_VM_PROT_READ |
 						     PLANE_VM_PROT_WRITE)),
 				     true);
@@ -1658,10 +1658,10 @@ static int test_fault_wire_pages_rolls_back_wiring_on_failure(void)
 					     second_page),
 				     true);
 	failures += test_expect_bool("fault wire fail premap",
-				     hal_mmu_map_kernel_page(
+				     pmap_map_kernel_page(
 					     test_vaddr(vaddr + PAGE_SIZE),
 					     plane_vm_page_phys(second_page),
-					     hal_mmu_default_map_options(
+					     pmap_default_map_options(
 						     PLANE_VM_PROT_READ |
 						     PLANE_VM_PROT_WRITE)),
 				     true);

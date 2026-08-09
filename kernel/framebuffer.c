@@ -27,7 +27,7 @@ static void write_pixel(uint8_t *dst, uint8_t bytes_per_pixel, uint32_t pixel)
 	/*
 	 * current targets are little-endian.
 	 * if big-endian support is added,
-	 * make byte order explicit behind a hal helper.
+	 * make byte order explicit behind an architecture helper.
 	 */
 	for (uint8_t i = 0; i < bytes_per_pixel; i++) {
 		dst[i] = (uint8_t)(pixel >> (i * 8));

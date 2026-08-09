@@ -11,7 +11,7 @@ BUILD_MODE_FILE := build/.build_mode
 
 override CFLAGS += \
 	-I$(ROOT_DIR)/include \
-	-I$(ROOT_DIR)/hal \
+	-I$(ROOT_DIR)/arch \
 	-std=gnu11 \
 	-Wall -Wextra -Werror \
 	-ffreestanding \
@@ -31,7 +31,7 @@ override CFLAGS += \
 
 override HOSTCFLAGS += \
 	-I$(ROOT_DIR)/include \
-	-I$(ROOT_DIR)/hal \
+	-I$(ROOT_DIR)/arch \
 	-std=gnu11 \
 	-Wall -Wextra -Werror
 
@@ -47,23 +47,23 @@ endif
 SRC_DIRS := kernel kernel/mm klib
 
 ifeq ($(CONFIG_X86_64),y)
-    SRC_DIRS += hal/x86_64
+    SRC_DIRS += arch/x86_64
 endif
 
 ifeq ($(CONFIG_BOOT_LIMINE),y)
     SRC_DIRS += boot/limine
 	ifeq ($(CONFIG_X86_64),y)
-        SRC_DIRS += hal/x86_64/boot/limine
+        SRC_DIRS += arch/x86_64/boot/limine
     endif
-    LINKER_SCRIPT := hal/x86_64/linker_limine.lds
+    LINKER_SCRIPT := arch/x86_64/linker_limine.lds
 endif
 
 ifeq ($(CONFIG_BOOT_GRUB),y)
     SRC_DIRS += boot/multiboot2
 	ifeq ($(CONFIG_X86_64),y)
-        SRC_DIRS += hal/x86_64/boot/multiboot2
+        SRC_DIRS += arch/x86_64/boot/multiboot2
     endif
-    LINKER_SCRIPT := hal/x86_64/linker_grub.lds
+    LINKER_SCRIPT := arch/x86_64/linker_grub.lds
 endif
 
 C_FILES := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
@@ -75,8 +75,9 @@ KERNEL := plane.elf
 TEST_SRCS := $(wildcard tests/*_test.c)
 TEST_MKS := $(wildcard tests/*_test.mk)
 TEST_BINS := $(patsubst tests/%.c,build/tests/%,$(TEST_SRCS))
-PUBLIC_HEADERS := include/plane/*.h include/hal/*.h
-ARCH_TEST_HEADERS := include/hal/x86_64/*.h
+CLEAN_DIRS := kernel klib arch boot drivers
+PUBLIC_HEADERS := include/plane/*.h include/machine/*.h
+X86_64_PUBLIC_HEADERS := include/x86_64/*.h include/x86_64/boot/multiboot2/*.h
 TEST_SUPPORT_HEADERS := tests/support/*.h
 INTERNAL_TEST_HEADERS := \
 	kernel/mm/kmem_internal.h \
@@ -98,9 +99,9 @@ $(BUILD_MODE_FILE): FORCE
 	@mkdir -p $(dir $@)
 	@if [ ! -f $@ ] || [ "$$(cat $@)" != "$(BUILD_MODE)" ]; then \
 		echo "  CLEAN   $(BUILD_MODE) objects"; \
-		find kernel klib hal boot drivers -type f -name "*.o" -delete; \
-		find kernel klib hal boot drivers -type f -name "*.d" -delete; \
-		find hal -type f -name "*.lds" -delete; \
+		find $(CLEAN_DIRS) -type f -name "*.o" -delete; \
+		find $(CLEAN_DIRS) -type f -name "*.d" -delete; \
+		find arch -type f -name "*.lds" -delete; \
 		rm -f $(KERNEL); \
 		echo "$(BUILD_MODE)" > $@; \
 	fi
@@ -141,9 +142,9 @@ debug-iso:
 
 debug-clean:
 	@echo "  CLEAN   debug objects"
-	@find kernel klib hal boot drivers -type f -name "*.o" -delete
-	@find kernel klib hal boot drivers -type f -name "*.d" -delete
-	@find hal -type f -name "*.lds" -delete
+	@find $(CLEAN_DIRS) -type f -name "*.o" -delete
+	@find $(CLEAN_DIRS) -type f -name "*.d" -delete
+	@find arch -type f -name "*.lds" -delete
 	@rm -f $(KERNEL)
 
 unit-check: $(TEST_BINS)
@@ -152,7 +153,7 @@ unit-check: $(TEST_BINS)
 		$$test || exit $$?; \
 	done
 
-build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(ARCH_TEST_HEADERS) $(TEST_SUPPORT_HEADERS) $(INTERNAL_TEST_HEADERS) $$($$*_test_DEPS) $$($$*_test_PREREQS)
+build/tests/%_test: tests/%_test.c $(PUBLIC_HEADERS) $(X86_64_PUBLIC_HEADERS) $(TEST_SUPPORT_HEADERS) $(INTERNAL_TEST_HEADERS) $$($$*_test_DEPS) $$($$*_test_PREREQS)
 	@echo "  HOSTCC  $@"
 	@mkdir -p $(dir $@)
 	@$(HOSTCC) $(HOSTCFLAGS) $< $($*_test_DEPS) -o $@
@@ -217,9 +218,9 @@ qemu-gdb: debug-iso
 
 clean:
 	@echo "  CLEAN"
-	@find kernel klib hal boot drivers -type f -name "*.o" -delete
-	@find kernel klib hal boot drivers -type f -name "*.d" -delete
-	@find hal -type f -name "*.lds" -delete
+	@find $(CLEAN_DIRS) -type f -name "*.o" -delete
+	@find $(CLEAN_DIRS) -type f -name "*.d" -delete
+	@find arch -type f -name "*.lds" -delete
 	@rm -f $(KERNEL) $(ISO_NAME)
 	@rm -rf $(ISO_DIR) build/tests
 

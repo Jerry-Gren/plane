@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/page.h>
+#include <machine/page.h>
 #include <plane/overflow.h>
 
 typedef struct {

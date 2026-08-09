@@ -6,17 +6,17 @@
 #include <plane/printk.h>
 #include <plane/pmm.h>
 #include <plane/smp.h>
-#include <hal/local_interrupt.h>
-#include <hal/mmu.h>
-#include <hal/serial.h>
-#include <hal/hal.h>
+#include <machine/local_interrupt.h>
+#include <machine/pmap.h>
+#include <machine/serial.h>
+#include <machine/machine_routines.h>
 
 #include "smp_internal.h"
 
 void kmain(struct plane_boot_info *info)
 {
-	hal_serial_init();
-	BUG_ON_MSG(!hal_arch_startup_init(),
+	serial_init();
+	BUG_ON_MSG(!ml_startup_init(),
 		   "failed to initialize architecture startup runtime");
 	BUG_ON_MSG(!plane_smp_init_bsp(&info->smp),
 		   "failed to initialize BSP SMP topology");
@@ -25,7 +25,7 @@ void kmain(struct plane_boot_info *info)
 
 	BUG_ON_MSG(!plane_memmap_sanitize(&info->mem),
 		   "failed to sanitize memory map handoff");
-	BUG_ON_MSG(!hal_mmu_enable_physmap(&info->mem),
+	BUG_ON_MSG(!physmap_enable(&info->mem),
 		   "failed to enable kernel physmap");
 	BUG_ON_MSG(!plane_pmm_init(&info->mem),
 		   "failed to initialize physical memory manager");
@@ -35,7 +35,7 @@ void kmain(struct plane_boot_info *info)
 				   info->framebuffer.framebuffer_size),
 			   "failed to release framebuffer bootstrap mapping");
 	}
-	BUG_ON_MSG(!hal_mmu_take_kernel_page_table_ownership(),
+	BUG_ON_MSG(!pmap_take_kernel_page_table_ownership(),
 		   "failed to initialize kernel page tables");
 	BUG_ON_MSG(!plane_kmem_init(),
 		   "failed to initialize kernel memory allocator");
@@ -43,7 +43,7 @@ void kmain(struct plane_boot_info *info)
 		   "failed to initialize kernel IO mapper");
 	BUG_ON_MSG(!plane_framebuffer_remap(&info->framebuffer),
 		   "failed to remap framebuffer through IO map");
-	BUG_ON_MSG(!hal_local_interrupt_init_bsp(&info->smp),
+	BUG_ON_MSG(!ml_local_interrupt_init_bsp(&info->smp),
 		   "failed to initialize BSP local interrupts");
 	plane_pmm_log_stats();
 

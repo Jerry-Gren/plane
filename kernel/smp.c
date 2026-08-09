@@ -1,9 +1,8 @@
 #include <stddef.h>
 
-#include <hal/cpu.h>
-#include <hal/irq.h>
-#include <hal/local_interrupt.h>
-#include <hal/pmap.h>
+#include <machine/machine_routines.h>
+#include <machine/local_interrupt.h>
+#include <machine/pmap.h>
 
 #include <plane/atomic.h>
 #include <plane/smp.h>
@@ -143,7 +142,7 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 
 	runtime_cpu_count = info->cpu_count;
 	current_cpu_data = &cpu_data[info->bsp_logical_id];
-	if (!hal_cpu_set_current_data(current_cpu_data)) {
+	if (!ml_cpu_set_current_data(current_cpu_data)) {
 		current_cpu_data = NULL;
 		runtime_cpu_count = 0;
 		return false;
@@ -183,7 +182,7 @@ bool plane_smp_prepare_ap_stack(uint32_t logical_id,
 	cpu->ap_stack_base = stack_base;
 	cpu->ap_stack_top = stack_top;
 	cpu->ap_stack_pages = stack_pages;
-	if (!hal_cpu_prepare_ap_startup_context(cpu)) {
+	if (!ml_cpu_prepare_ap_startup_context(cpu)) {
 		cpu->ap_stack_base = plane_vaddr_make(0);
 		cpu->ap_stack_top = plane_vaddr_make(0);
 		cpu->ap_stack_pages = 0;
@@ -407,7 +406,7 @@ static bool smp_cpu_handle_signal(struct plane_cpu_data *cpu,
 		ast_event_count++;
 		return true;
 	case PLANE_SMP_EVENT_TLB_FLUSH:
-		hal_pmap_update_interrupt();
+		pmap_update_interrupt();
 		tlb_flush_event_count++;
 		return true;
 	default:
@@ -455,7 +454,7 @@ bool plane_smp_signal_cpu(uint32_t logical_id, enum plane_smp_event event)
 	}
 
 	smp_cpu_set_signal(cpu, event);
-	if (hal_local_interrupt_send_ipi(logical_id, vector)) {
+	if (ml_local_interrupt_send_ipi(logical_id, vector)) {
 		return true;
 	}
 
@@ -477,17 +476,17 @@ uint64_t plane_smp_event_count(enum plane_smp_event event)
 
 void plane_smp_ap_park_entry(struct plane_cpu_data *data)
 {
-	hal_irq_disable();
+	ml_interrupts_disable();
 
 	if (data == NULL || data->self != data ||
-	    !hal_cpu_install_ap_startup_context(data) ||
-	    !hal_cpu_set_current_data(data) ||
-	    !hal_local_interrupt_init_ap(data) ||
+	    !ml_cpu_install_ap_startup_context(data) ||
+	    !ml_cpu_set_current_data(data) ||
+	    !ml_local_interrupt_init_ap(data) ||
 	    !plane_smp_mark_ap_parked(data)) {
 		if (data != NULL) {
 			plane_smp_mark_ap_failed(data);
 		}
 	}
 
-	hal_cpu_hang();
+	ml_cpu_halt();
 }

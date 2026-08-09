@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/irq.h>
+#include <machine/machine_routines.h>
 
 struct plane_spinlock {
 	uint32_t locked;

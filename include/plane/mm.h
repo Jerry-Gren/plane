@@ -1,7 +1,7 @@
 #ifndef PLANE_MM_H
 #define PLANE_MM_H
 
-#include <hal/page.h>
+#include <machine/page.h>
 
 #ifndef __ASSEMBLER__
 #include <stdbool.h>

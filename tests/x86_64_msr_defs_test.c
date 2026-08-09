@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include <hal/x86_64/msr_defs.h>
+#include <x86_64/msr_defs.h>
 
 #include "support/test.h"
 

@@ -1,8 +1,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/mmu.h>
-#include <hal/x86_64/address_space.h>
+#include <machine/pmap.h>
+#include <x86_64/address_space.h>
 #include <plane/memmap.h>
 
 #include "support/test.h"
@@ -58,31 +58,31 @@ static int test_physmap_roundtrip(void)
 	mem.entry_count = 2;
 
 	failures += test_expect_bool("physmap enable",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 
-	vaddr = hal_mmu_physmap_phys_to_virt(test_paddr(0x2000));
+	vaddr = physmap_phys_to_virt(test_paddr(0x2000));
 	failures += test_expect_u64("physmap phys to virt",
 				    plane_vaddr_raw(vaddr),
 				    X86_64_PHYSMAP_BASE + 0x2000);
 	failures += test_expect_u64(
 		"physmap phys range to virt",
-		plane_vaddr_raw(hal_mmu_physmap_phys_range_to_virt(
+		plane_vaddr_raw(physmap_phys_range_to_virt(
 			test_paddr(0x2000), 0x1000)),
 		X86_64_PHYSMAP_BASE + 0x2000);
 	failures += test_expect_u64("physmap virt to phys",
 				    test_paddr_raw(
-					    hal_mmu_physmap_virt_to_phys(vaddr)),
+					    physmap_virt_to_phys(vaddr)),
 				    0x2000);
 
 	failures += test_expect_bool(
 		"physmap reject outside runtime coverage",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_to_virt(
+		plane_vaddr_is_null(physmap_phys_to_virt(
 			test_paddr(ARCH_LARGE_PAGE_SIZE))),
 		true);
 	failures += test_expect_u64("physmap reject kernel vma",
-				    test_paddr_raw(hal_mmu_physmap_virt_to_phys(
+				    test_paddr_raw(physmap_virt_to_phys(
 					    test_vaddr(KERNEL_VMA_BASE))),
-				    HAL_MMU_INVALID_PHYS);
+				    PHYSMAP_INVALID_PHYS);
 
 	return failures;
 }
@@ -100,25 +100,25 @@ static int test_physmap_rejects_invalid_ranges(void)
 	mem.entry_count = 1;
 
 	failures += test_expect_bool("range reject init",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 	failures += test_expect_bool("range reject zero size",
 				     plane_vaddr_is_null(
-					     hal_mmu_physmap_phys_range_to_virt(
+					     physmap_phys_range_to_virt(
 						     test_paddr(0), 0)),
 				     true);
 	failures += test_expect_bool(
 		"range reject start out of range",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_range_to_virt(
+		plane_vaddr_is_null(physmap_phys_range_to_virt(
 			test_paddr(ARCH_LARGE_PAGE_SIZE), 1)),
 		true);
 	failures += test_expect_bool(
 		"range reject end past physmap",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_range_to_virt(
+		plane_vaddr_is_null(physmap_phys_range_to_virt(
 			test_paddr(ARCH_LARGE_PAGE_SIZE - 1), 2)),
 		true);
 	failures += test_expect_bool(
 		"range reject phys overflow",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_range_to_virt(
+		plane_vaddr_is_null(physmap_phys_range_to_virt(
 			test_paddr(UINT64_MAX), 2)),
 		true);
 
@@ -142,14 +142,14 @@ static int test_bootstrap_physmap_window_base(void)
 		test_vaddr(bootstrap_base),
 		X86_64_PHYSMAP_BOOTSTRAP_SIZE);
 	failures += test_expect_bool("bootstrap physmap window enable",
-				     hal_mmu_enable_physmap(&mem), true);
-	vaddr = hal_mmu_physmap_phys_to_virt(test_paddr(0x1000));
+				     physmap_enable(&mem), true);
+	vaddr = physmap_phys_to_virt(test_paddr(0x1000));
 	failures += test_expect_u64("bootstrap physmap window phys to virt",
 				    plane_vaddr_raw(vaddr),
 				    bootstrap_base + 0x1000);
 	failures += test_expect_u64("bootstrap physmap window virt to phys",
 				    test_paddr_raw(
-					    hal_mmu_physmap_virt_to_phys(vaddr)),
+					    physmap_virt_to_phys(vaddr)),
 				    0x1000);
 
 	return failures;
@@ -174,7 +174,7 @@ static int test_physmap_runtime_counts_owned_pml4_slots(void)
 	mem.entry_count = 2;
 
 	failures += test_expect_bool("physmap multi-slot enable",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 	failures += test_expect_bool(
 		"physmap multi-slot runtime",
 		x86_64_physmap_get_runtime(&runtime), true);
@@ -212,14 +212,14 @@ static int test_physmap_supports_runtime_coverage_above_64g(void)
 	mem.entry_count = 2;
 
 	failures += test_expect_bool("physmap high enable",
-				     hal_mmu_enable_physmap(&mem), true);
-	vaddr = hal_mmu_physmap_phys_to_virt(test_paddr(high_phys + 0x2000));
+				     physmap_enable(&mem), true);
+	vaddr = physmap_phys_to_virt(test_paddr(high_phys + 0x2000));
 	failures += test_expect_u64("physmap high phys to virt",
 				    plane_vaddr_raw(vaddr),
 				    X86_64_PHYSMAP_BASE + high_phys + 0x2000);
 	failures += test_expect_bool(
 		"physmap high rejects beyond runtime coverage",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_to_virt(
+		plane_vaddr_is_null(physmap_phys_to_virt(
 			test_paddr(high_phys + ARCH_LARGE_PAGE_SIZE))),
 		true);
 
@@ -243,10 +243,10 @@ static int test_physmap_reserved_high_memory_does_not_extend_coverage(void)
 	mem.entry_count = 2;
 
 	failures += test_expect_bool("physmap reserved high enable",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 	failures += test_expect_bool(
 		"physmap reserved high not covered",
-		plane_vaddr_is_null(hal_mmu_physmap_phys_to_virt(
+		plane_vaddr_is_null(physmap_phys_to_virt(
 			test_paddr(high_phys))),
 		true);
 
@@ -274,15 +274,15 @@ static int test_physmap_covers_ram_like_boot_regions(void)
 	mem.entry_count = 3;
 
 	failures += test_expect_bool("physmap ram-like enable",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 	failures += test_expect_u64(
 		"physmap bootloader covered",
-		plane_vaddr_raw(hal_mmu_physmap_phys_to_virt(
+		plane_vaddr_raw(physmap_phys_to_virt(
 			test_paddr(high_bootloader))),
 		X86_64_PHYSMAP_BASE + high_bootloader);
 	failures += test_expect_u64(
 		"physmap kernel/modules covered",
-		plane_vaddr_raw(hal_mmu_physmap_phys_to_virt(
+		plane_vaddr_raw(physmap_phys_to_virt(
 			test_paddr(high_kernel))),
 		X86_64_PHYSMAP_BASE + high_kernel);
 
@@ -306,17 +306,17 @@ static int test_physmap_commit_converges_to_plane_base(void)
 	mem.entry_count = 1;
 
 	failures += test_expect_bool("physmap commit enable",
-				     hal_mmu_enable_physmap(&mem), true);
+				     physmap_enable(&mem), true);
 	failures += test_expect_u64(
 		"physmap commit bootstrap base before ownership",
-		plane_vaddr_raw(hal_mmu_physmap_phys_to_virt(test_paddr(0x1000))),
+		plane_vaddr_raw(physmap_phys_to_virt(test_paddr(0x1000))),
 		bootstrap_base + 0x1000);
 
 	x86_64_physmap_commit_owned();
 
 	failures += test_expect_u64(
 		"physmap commit plane base after ownership",
-		plane_vaddr_raw(hal_mmu_physmap_phys_to_virt(test_paddr(0x1000))),
+		plane_vaddr_raw(physmap_phys_to_virt(test_paddr(0x1000))),
 		X86_64_PHYSMAP_BASE + 0x1000);
 
 	return failures;
@@ -336,10 +336,10 @@ static int test_physmap_rejects_mb2_bootstrap_shortfall(void)
 	mem.entry_count = 1;
 
 	failures += test_expect_bool("physmap bootstrap shortfall",
-				     hal_mmu_enable_physmap(&mem), false);
+				     physmap_enable(&mem), false);
 	failures += test_expect_bool("physmap bootstrap shortfall disables",
 				     plane_vaddr_is_null(
-					     hal_mmu_physmap_phys_to_virt(
+					     physmap_phys_to_virt(
 						     test_paddr(0))),
 				     true);
 
@@ -361,7 +361,7 @@ static int test_physmap_rejects_bootstrap_kernel_map_overlap(void)
 	mem.entry_count = 1;
 
 	failures += test_expect_bool("physmap bootstrap kernel overlap",
-				     hal_mmu_enable_physmap(&mem), false);
+				     physmap_enable(&mem), false);
 
 	return failures;
 }
@@ -380,16 +380,16 @@ static int test_physmap_rejects_ram_like_memory_above_window(void)
 	mem.entry_count = 1;
 
 	failures += test_expect_bool("physmap window reject",
-				     hal_mmu_enable_physmap(&mem), false);
+				     physmap_enable(&mem), false);
 	failures += test_expect_bool("physmap window reject disables phys",
 				     plane_vaddr_is_null(
-					     hal_mmu_physmap_phys_to_virt(
+					     physmap_phys_to_virt(
 						     test_paddr(0))),
 				     true);
 	failures += test_expect_u64("physmap window reject disables virt",
-				    test_paddr_raw(hal_mmu_physmap_virt_to_phys(
+				    test_paddr_raw(physmap_virt_to_phys(
 					    test_vaddr(hhdm_base))),
-				    HAL_MMU_INVALID_PHYS);
+				    PHYSMAP_INVALID_PHYS);
 
 	return failures;
 }

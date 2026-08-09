@@ -12,7 +12,7 @@ static uint32_t tss_flush_count;
 static uint32_t idt_load_count;
 static enum plane_cpu_startup_state test_startup_states[PLANE_MAX_CPUS];
 
-#include "../hal/x86_64/gdt.c"
+#include <x86_64/gdt.c>
 
 void x86_64_gdt_flush(uint64_t gdtr_addr)
 {
@@ -140,7 +140,7 @@ static int test_prepare_ap_context_builds_per_cpu_tss(void)
 
 	reset_gdt_test();
 	failures += test_expect_bool("prepare ap context",
-				     hal_cpu_prepare_ap_startup_context(&data),
+				     ml_cpu_prepare_ap_startup_context(&data),
 				     true);
 	failures += test_expect_bool("ap ctx prepared", ctx->prepared, true);
 	failures += test_expect_u64("ap rsp0",
@@ -175,17 +175,17 @@ static int test_install_ap_context_validates_state_and_loads_context(void)
 
 	reset_gdt_test();
 	failures += test_expect_bool("install before prepare rejected",
-				     hal_cpu_install_ap_startup_context(&data),
+				     ml_cpu_install_ap_startup_context(&data),
 				     false);
 	failures += test_expect_bool("prepare ap",
-				     hal_cpu_prepare_ap_startup_context(&data),
+				     ml_cpu_prepare_ap_startup_context(&data),
 				     true);
 	failures += test_expect_bool("install before starting rejected",
-				     hal_cpu_install_ap_startup_context(&data),
+				     ml_cpu_install_ap_startup_context(&data),
 				     false);
 	test_startup_states[2] = PLANE_CPU_STARTUP_STARTING;
 	failures += test_expect_bool("install starting ap",
-				     hal_cpu_install_ap_startup_context(&data),
+				     ml_cpu_install_ap_startup_context(&data),
 				     true);
 	failures += test_expect_u32("gdt loaded", gdt_flush_count, 1);
 	failures += test_expect_u64("loaded ap gdtr", last_gdtr,
@@ -234,22 +234,22 @@ static int test_rejects_invalid_ap_context_inputs(void)
 
 	reset_gdt_test();
 	failures += test_expect_bool("prepare null rejected",
-				     hal_cpu_prepare_ap_startup_context(NULL),
+				     ml_cpu_prepare_ap_startup_context(NULL),
 				     false);
 	failures += test_expect_bool("prepare bsp rejected",
-				     hal_cpu_prepare_ap_startup_context(&bsp),
+				     ml_cpu_prepare_ap_startup_context(&bsp),
 				     false);
 	failures += test_expect_bool("prepare absent rejected",
-				     hal_cpu_prepare_ap_startup_context(&absent),
+				     ml_cpu_prepare_ap_startup_context(&absent),
 				     false);
 	failures += test_expect_bool("prepare no stack rejected",
-				     hal_cpu_prepare_ap_startup_context(&no_stack),
+				     ml_cpu_prepare_ap_startup_context(&no_stack),
 				     false);
 	failures += test_expect_bool("prepare bad self rejected",
-				     hal_cpu_prepare_ap_startup_context(&bad_self),
+				     ml_cpu_prepare_ap_startup_context(&bad_self),
 				     false);
 	failures += test_expect_bool("prepare out of range rejected",
-				     hal_cpu_prepare_ap_startup_context(&out_of_range),
+				     ml_cpu_prepare_ap_startup_context(&out_of_range),
 				     false);
 	return failures;
 }

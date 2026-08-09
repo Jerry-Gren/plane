@@ -3,9 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <hal/cpu.h>
-#include <hal/irq.h>
-#include <hal/serial.h>
+#include <machine/machine_routines.h>
+#include <machine/serial.h>
 #include <plane/printk.h>
 
 #include "support/test.h"
@@ -28,11 +27,11 @@ static void reset_output(void)
 	panic_reentered = false;
 }
 
-void hal_serial_init(void)
+void serial_init(void)
 {
 }
 
-void hal_serial_putchar(char c)
+void serial_putchar(char c)
 {
 	if (panic_on_next_serial_putchar && !panic_reentered) {
 		panic_reentered = true;
@@ -46,41 +45,41 @@ void hal_serial_putchar(char c)
 	}
 }
 
-void hal_irq_disable(void)
+void ml_interrupts_disable(void)
 {
 	test_irq_enabled = false;
 }
 
-void hal_irq_enable(void)
+void ml_interrupts_enable(void)
 {
 	test_irq_enabled = true;
 }
 
-bool hal_irq_is_enabled(void)
+bool ml_get_interrupts_enabled(void)
 {
 	return test_irq_enabled;
 }
 
-plane_irq_state_t hal_irq_save(void)
+plane_irq_state_t ml_irq_save(void)
 {
 	plane_irq_state_t state = {
 		.enabled = test_irq_enabled
 	};
 
-	hal_irq_disable();
+	ml_interrupts_disable();
 	return state;
 }
 
-void hal_irq_restore(plane_irq_state_t state)
+void ml_irq_restore(plane_irq_state_t state)
 {
 	test_irq_enabled = state.enabled;
 }
 
-void hal_cpu_relax(void)
+void cpu_pause(void)
 {
 }
 
-void hal_cpu_hang(void)
+void ml_cpu_halt(void)
 {
 	longjmp(panic_env, 1);
 	__builtin_unreachable();

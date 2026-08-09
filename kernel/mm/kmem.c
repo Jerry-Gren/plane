@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 
 #include <plane/kmem.h>
 #include <plane/mm.h>
@@ -317,9 +317,9 @@ static bool kmem_release_resident_page(struct plane_vm_object *object,
 	    wire_count == 0) {
 		goto out;
 	}
-	if (hal_mmu_translate_kernel_page(vaddr, &phys_addr)) {
+	if (pmap_translate_kernel_page(vaddr, &phys_addr)) {
 		if (plane_vm_page_from_phys(phys_addr) != page ||
-		    !hal_mmu_unmap_kernel_page(vaddr)) {
+		    !pmap_unmap_kernel_page(vaddr)) {
 			goto out;
 		}
 	}
@@ -387,7 +387,7 @@ static bool kmem_map_allocated_pages(plane_vaddr_t vaddr,
 				     uint32_t prot)
 {
 	uint32_t grab_flags = kmem_to_vm_page_grab_flags(flags);
-	struct hal_mmu_map_options options = hal_mmu_default_map_options(prot);
+	struct pmap_map_options options = pmap_default_map_options(prot);
 	uint64_t mapped_pages = 0;
 
 	for (uint64_t i = 0; i < page_count; i++) {
@@ -448,7 +448,7 @@ static bool kmem_map_allocated_pages(plane_vaddr_t vaddr,
 			return false;
 		}
 
-		if (!hal_mmu_map_kernel_page(page_vaddr, phys_addr, options)) {
+		if (!pmap_map_kernel_page(page_vaddr, phys_addr, options)) {
 			bool page_ok = kmem_rollback_object_page(
 				object, page_object_offset, page);
 			bool mappings_ok = kmem_release_resident_pages(
@@ -489,11 +489,11 @@ static bool kmem_protect_mapped_pages(plane_vaddr_t vaddr,
 		page = plane_vm_object_lookup_and_hold_page(object,
 							page_object_offset);
 		if (page == NULL ||
-		    !hal_mmu_translate_kernel_page(page_vaddr, &phys_addr)) {
+		    !pmap_translate_kernel_page(page_vaddr, &phys_addr)) {
 			goto next_page;
 		}
 		ok = plane_vm_page_from_phys(phys_addr) == page &&
-		     hal_mmu_protect_kernel_page(page_vaddr, prot);
+		     pmap_protect_kernel_page(page_vaddr, prot);
 
 next_page:
 		if (page != NULL) {
@@ -518,7 +518,7 @@ bool plane_kmem_init(void)
 		return false;
 	}
 
-	if (!hal_mmu_kernel_vma_range(&base, &size) ||
+	if (!pmap_kernel_vma_range(&base, &size) ||
 	    size == 0 ||
 	    !plane_vaddr_is_page_aligned(base) ||
 	    !plane_addr_is_page_aligned(size) ||

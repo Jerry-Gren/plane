@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 #include <plane/io_map.h>
 #include <plane/mm.h>
 
@@ -13,7 +13,7 @@
 struct test_mapping {
 	plane_vaddr_t vaddr;
 	plane_paddr_t phys_addr;
-	struct hal_mmu_map_options options;
+	struct pmap_map_options options;
 	bool mapped;
 };
 
@@ -87,9 +87,9 @@ bool plane_kmem_release_va_pages(plane_vaddr_t vaddr, uint64_t page_count)
 	return true;
 }
 
-bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     struct hal_mmu_map_options options)
+			     struct pmap_map_options options)
 {
 	if (map_count >= map_fail_after || map_count >= TEST_MAX_MAPPINGS) {
 		return false;
@@ -105,7 +105,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 	return true;
 }
 
-bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
+bool pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 {
 	for (uint64_t i = 0; i < map_count; i++) {
 		if (mappings[i].mapped &&
@@ -193,7 +193,7 @@ static int test_unaligned_device_map_and_unmap(void)
 				    PLANE_VM_PROT_READ | PLANE_VM_PROT_WRITE);
 	failures += test_expect_u32("first map attr",
 				    mappings[0].options.attr,
-				    HAL_MMU_MAPPING_DEVICE);
+				    PMAP_MAPPING_ATTR_DEVICE);
 	failures += test_expect_u64("second map phys",
 				    plane_paddr_raw(mappings[1].phys_addr),
 				    0x13000);
@@ -227,7 +227,7 @@ static int test_write_combine_map_uses_cache_flag(void)
 	failures += test_expect_u32("wc map prot", mappings[0].options.prot,
 				    PLANE_VM_PROT_READ);
 	failures += test_expect_u32("wc map attr", mappings[0].options.attr,
-				    HAL_MMU_MAPPING_WRITE_COMBINE);
+				    PMAP_MAPPING_ATTR_WRITE_COMBINE);
 
 	return failures;
 }

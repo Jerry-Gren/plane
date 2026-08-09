@@ -5,8 +5,8 @@
 
 #include <boot/limine/limine_arch.h>
 
-#include <hal/cpu.h>
-#include <hal/serial.h>
+#include <machine/machine_routines.h>
+#include <machine/serial.h>
 
 #include <plane/boot_info.h>
 #include <plane/compiler.h>
@@ -277,7 +277,7 @@ static void boot_limine_collect_smp(struct plane_smp_info *smp)
 
 void _start(void)
 {
-	hal_serial_init();
+	serial_init();
 
 	/* Ensure the bootloader actually understands our base revision */
 	BUG_ON_MSG(LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false,
@@ -296,5 +296,5 @@ void _start(void)
 
 	kmain(&b_info);
 
-	hal_cpu_hang();
+	ml_cpu_halt();
 }

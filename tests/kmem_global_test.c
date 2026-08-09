@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 #include <plane/kmem.h>
 #include <plane/compiler.h>
 #include <plane/mm.h>
@@ -36,14 +36,14 @@ static uint64_t runtime_guard_page_count;
 static struct test_mapping test_mappings[TEST_MAP_COUNT];
 static uint8_t test_kmem_storage[TEST_KMEM_SIZE] __aligned(PAGE_SIZE);
 static bool test_kernel_vma_range_available = true;
-static uint64_t hal_entry_max_spinlock_depth;
+static uint64_t kmem_entry_max_spinlock_depth;
 
-static void test_record_hal_entry_spinlock_depth(void)
+static void test_record_kmem_entry_spinlock_depth(void)
 {
 	uint64_t depth = test_spinlock_stub_irqsave_depth();
 
-	if (depth > hal_entry_max_spinlock_depth) {
-		hal_entry_max_spinlock_depth = depth;
+	if (depth > kmem_entry_max_spinlock_depth) {
+		kmem_entry_max_spinlock_depth = depth;
 	}
 }
 
@@ -179,7 +179,7 @@ static bool test_kmem_free_pages(void *addr, uint64_t page_count)
 	return plane_kmem_free_pages(test_vaddr_from_ptr(addr), page_count);
 }
 
-bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
+bool pmap_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 {
 	if (base == NULL || size == NULL) {
 		return false;
@@ -193,15 +193,15 @@ bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 	return true;
 }
 
-bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     struct hal_mmu_map_options options)
+			     struct pmap_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
-	test_record_hal_entry_spinlock_depth();
+	test_record_kmem_entry_spinlock_depth();
 	if (!plane_vm_prot_is_valid(options.prot) ||
-	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
+	    options.attr != PMAP_MAPPING_ATTR_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL) {
 		return false;
 	}
@@ -219,11 +219,11 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 	return false;
 }
 
-bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
+bool pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 {
 	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
-	test_record_hal_entry_spinlock_depth();
+	test_record_kmem_entry_spinlock_depth();
 	if (mapping == NULL) {
 		return false;
 	}
@@ -232,11 +232,11 @@ bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
+bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
-	test_record_hal_entry_spinlock_depth();
+	test_record_kmem_entry_spinlock_depth();
 	if (!plane_vm_prot_is_valid(prot) || mapping == NULL) {
 		return false;
 	}
@@ -245,12 +245,12 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 	return true;
 }
 
-bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
+bool pmap_translate_kernel_page(plane_vaddr_t vaddr,
 				   plane_paddr_t *phys_addr)
 {
 	struct test_mapping *mapping;
 
-	test_record_hal_entry_spinlock_depth();
+	test_record_kmem_entry_spinlock_depth();
 	if (phys_addr == NULL) {
 		return false;
 	}
@@ -730,8 +730,8 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_bool("global init", plane_kmem_init(), true);
 	failures += test_expect_u64("global init state lock depth",
 				    test_spinlock_stub_irqsave_depth(), 0);
-	failures += test_expect_u64("global init hal entry unlocked",
-				    hal_entry_max_spinlock_depth, 0);
+	failures += test_expect_u64("global init kmem entry unlocked",
+				    kmem_entry_max_spinlock_depth, 0);
 	init_allocated = pmm_allocated_page_count();
 	init_mappings = mapping_count();
 	init_wired = wired_page_count();
@@ -764,8 +764,8 @@ static int test_global_kmem_init_is_one_shot(void)
 	failures += test_expect_bool("global alloc",
 				     test_kmem_alloc_pages(2, 0, &addr),
 				     true);
-	failures += test_expect_u64("global alloc hal entry unlocked",
-				    hal_entry_max_spinlock_depth, 0);
+	failures += test_expect_u64("global alloc kmem entry unlocked",
+				    kmem_entry_max_spinlock_depth, 0);
 	failures += test_expect_u64("global wired pages",
 				    wired_page_count(), init_wired + 2);
 	mapping = find_mapping((uint64_t)(uintptr_t)addr);
@@ -777,7 +777,7 @@ static int test_global_kmem_init_is_one_shot(void)
 					    PLANE_VM_PROT_READ |
 						    PLANE_VM_PROT_WRITE);
 		failures += test_expect_bool("global fault unmap",
-					     hal_mmu_unmap_kernel_page(
+					     pmap_unmap_kernel_page(
 						     plane_vaddr_make(
 							     (uint64_t)(uintptr_t)addr)),
 					     true);

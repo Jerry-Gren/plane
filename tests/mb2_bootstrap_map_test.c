@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <hal/mmu.h>
-#include <hal/x86_64/boot/multiboot2/mb2_bootstrap_map.h>
+#include <machine/pmap.h>
+#include <x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 
 #include <plane/util.h>
 
@@ -17,7 +17,7 @@ static uint64_t invalidate_count;
 static uint64_t flush_count;
 static bool physmap_available;
 
-plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						uint64_t size)
 {
 	if (!physmap_available || size != ARCH_PAGE_SIZE) {
@@ -27,7 +27,7 @@ plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 	return plane_vaddr_make(plane_paddr_raw(phys_addr));
 }
 
-void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
+void pmap_invalidate_tlb(plane_vaddr_t vaddr)
 {
 	if (invalidate_count < X86_64_PAGING_TABLE_ENTRIES) {
 		invalidated_vaddrs[invalidate_count] = plane_vaddr_raw(vaddr);
@@ -35,7 +35,7 @@ void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 	invalidate_count++;
 }
 
-void hal_mmu_flush_tlb_all(void)
+void pmap_flush_tlb_all(void)
 {
 	flush_count++;
 }

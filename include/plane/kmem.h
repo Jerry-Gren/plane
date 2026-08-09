@@ -64,7 +64,7 @@ bool plane_kmem_fault_pages(plane_vaddr_t vaddr,
 
 /*
  * The in-map APIs are still kernel virtual allocation APIs. The supplied map
- * must describe a HAL kernel mapping window, or an equivalent host-test map.
+ * must describe a machine kernel mapping window, or an equivalent host-test map.
  * They are not generic VM object or pageable map backing APIs.
  */
 bool plane_kmem_alloc_in_map(struct plane_vm_map *map,

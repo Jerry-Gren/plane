@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 #include <plane/kmem.h>
 #include <plane/mm.h>
 #include <plane/vm_fault.h>
@@ -337,7 +337,7 @@ static bool test_kmem_protect_pages_in_map(struct plane_vm_map *map,
 					       page_count, prot);
 }
 
-bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
+bool pmap_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 {
 	if (base == NULL || size == NULL) {
 		return false;
@@ -348,14 +348,14 @@ bool hal_mmu_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 	return true;
 }
 
-bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
+bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 			     plane_paddr_t phys_addr,
-			     struct hal_mmu_map_options options)
+			     struct pmap_map_options options)
 {
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 
 	if (!plane_vm_prot_is_valid(options.prot) ||
-	    options.attr != HAL_MMU_MAPPING_DEFAULT ||
+	    options.attr != PMAP_MAPPING_ATTR_DEFAULT ||
 	    find_mapping(raw_vaddr) != NULL ||
 	    map_attempts++ >= map_fail_after) {
 		return false;
@@ -374,7 +374,7 @@ bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
 	return false;
 }
 
-bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
+bool pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 {
 	struct test_mapping *mapping = find_mapping(plane_vaddr_raw(vaddr));
 
@@ -386,7 +386,7 @@ bool hal_mmu_unmap_kernel_page(plane_vaddr_t vaddr)
 	return true;
 }
 
-bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
+bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
 	struct test_mapping *mapping;
 
@@ -403,7 +403,7 @@ bool hal_mmu_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 	return true;
 }
 
-bool hal_mmu_translate_kernel_page(plane_vaddr_t vaddr,
+bool pmap_translate_kernel_page(plane_vaddr_t vaddr,
 				   plane_paddr_t *phys_addr)
 {
 	struct test_mapping *mapping;

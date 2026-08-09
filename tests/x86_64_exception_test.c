@@ -1,8 +1,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/x86_64/exception.h>
-#include <hal/local_interrupt.h>
+#include <x86_64/exception.h>
+#include <machine/local_interrupt.h>
 #include <plane/kmem.h>
 #include <plane/vm_prot.h>
 
@@ -38,7 +38,7 @@ bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type)
 	return kmem_fault_result;
 }
 
-bool hal_local_interrupt_dispatch(uint32_t vector)
+bool ml_local_interrupt_dispatch(uint32_t vector)
 {
 	local_interrupt_dispatch_calls++;
 	last_local_interrupt_vector = vector;

@@ -1,113 +1,112 @@
 #include <stdint.h>
 #include <setjmp.h>
 
-#include <hal/cpu.h>
-#include <hal/irq.h>
-#include <hal/local_interrupt.h>
-#include <hal/pmap.h>
+#include <machine/machine_routines.h>
+#include <machine/local_interrupt.h>
+#include <machine/pmap.h>
 #include <plane/smp.h>
 
 #include "../kernel/smp_internal.h"
 #include "support/test.h"
 
-static bool hal_install_should_fail;
-static bool hal_prepare_context_should_fail;
-static bool hal_install_context_should_fail;
-static bool hal_local_interrupts_should_fail;
-static bool hal_send_ipi_should_fail;
-static uint32_t hal_install_count;
-static uint32_t hal_prepare_context_count;
-static uint32_t hal_install_context_count;
-static uint32_t hal_local_interrupts_count;
-static uint32_t hal_send_ipi_count;
-static uint32_t hal_last_send_ipi_logical_id;
-static uint8_t hal_last_send_ipi_vector;
-static uint32_t hal_hang_count;
+static bool machine_current_data_should_fail;
+static bool machine_prepare_context_should_fail;
+static bool machine_install_context_should_fail;
+static bool local_interrupts_should_fail;
+static bool local_interrupt_send_ipi_should_fail;
+static uint32_t machine_current_data_count;
+static uint32_t machine_prepare_context_count;
+static uint32_t machine_install_context_count;
+static uint32_t local_interrupts_count;
+static uint32_t local_interrupt_send_ipi_count;
+static uint32_t local_interrupt_last_send_ipi_logical_id;
+static uint8_t local_interrupt_last_send_ipi_vector;
+static uint32_t machine_halt_count;
 static uint32_t pmap_update_interrupt_count;
-static struct plane_cpu_data *hal_last_current_data;
-static struct plane_cpu_data *hal_last_prepare_context_data;
-static struct plane_cpu_data *hal_last_install_context_data;
-static struct plane_cpu_data *hal_last_local_interrupts_data;
-static jmp_buf hal_hang_env;
-static bool hal_hang_trap_enabled;
+static struct plane_cpu_data *machine_last_current_data;
+static struct plane_cpu_data *machine_last_prepare_context_data;
+static struct plane_cpu_data *machine_last_install_context_data;
+static struct plane_cpu_data *local_interrupts_last_data;
+static jmp_buf machine_halt_env;
+static bool machine_halt_trap_enabled;
 
-bool hal_cpu_set_current_data(struct plane_cpu_data *data)
+bool ml_cpu_set_current_data(struct plane_cpu_data *data)
 {
-	hal_install_count++;
-	hal_last_current_data = data;
-	return !hal_install_should_fail;
+	machine_current_data_count++;
+	machine_last_current_data = data;
+	return !machine_current_data_should_fail;
 }
 
-bool hal_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
+bool ml_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
 {
-	hal_prepare_context_count++;
-	hal_last_prepare_context_data = data;
-	return !hal_prepare_context_should_fail;
+	machine_prepare_context_count++;
+	machine_last_prepare_context_data = data;
+	return !machine_prepare_context_should_fail;
 }
 
-bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
+bool ml_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 {
-	hal_install_context_count++;
-	hal_last_install_context_data = data;
-	return !hal_install_context_should_fail;
+	machine_install_context_count++;
+	machine_last_install_context_data = data;
+	return !machine_install_context_should_fail;
 }
 
-bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
+bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
-	hal_local_interrupts_count++;
-	hal_last_local_interrupts_data = data;
-	return !hal_local_interrupts_should_fail;
+	local_interrupts_count++;
+	local_interrupts_last_data = data;
+	return !local_interrupts_should_fail;
 }
 
-bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 {
-	hal_send_ipi_count++;
-	hal_last_send_ipi_logical_id = logical_id;
-	hal_last_send_ipi_vector = vector;
-	return !hal_send_ipi_should_fail;
+	local_interrupt_send_ipi_count++;
+	local_interrupt_last_send_ipi_logical_id = logical_id;
+	local_interrupt_last_send_ipi_vector = vector;
+	return !local_interrupt_send_ipi_should_fail;
 }
 
-void hal_pmap_update_interrupt(void)
+void pmap_update_interrupt(void)
 {
 	pmap_update_interrupt_count++;
 }
 
-void hal_irq_disable(void)
+void ml_interrupts_disable(void)
 {
 }
 
-void hal_cpu_hang(void)
+void ml_cpu_halt(void)
 {
-	hal_hang_count++;
-	if (hal_hang_trap_enabled) {
-		longjmp(hal_hang_env, 1);
+	machine_halt_count++;
+	if (machine_halt_trap_enabled) {
+		longjmp(machine_halt_env, 1);
 	}
 
 	for (;;) {
 	}
 }
 
-void hal_cpu_enter_on_stack(plane_vaddr_t stack_top,
+void ml_cpu_enter_on_stack(plane_vaddr_t stack_top,
 			    void (*entry)(struct plane_cpu_data *data),
 			    struct plane_cpu_data *data)
 {
 	(void)stack_top;
 	entry(data);
-	hal_cpu_hang();
+	ml_cpu_halt();
 }
 
 static void call_ap_park_entry(struct plane_cpu_data *data)
 {
-	hal_hang_trap_enabled = true;
-	if (setjmp(hal_hang_env) == 0) {
+	machine_halt_trap_enabled = true;
+	if (setjmp(machine_halt_env) == 0) {
 		plane_smp_ap_park_entry(data);
 	}
-	hal_hang_trap_enabled = false;
+	machine_halt_trap_enabled = false;
 }
 
 static int test_builder_bsp_only(void)
@@ -161,7 +160,7 @@ static int test_runtime_rejects_invalid_before_init(void)
 	failures += test_expect_bool("invalid init rejected",
 				     plane_smp_init_bsp(&invalid), false);
 	failures += test_expect_u32("invalid init does not install cpu data",
-				    hal_install_count, 0);
+				    machine_current_data_count, 0);
 	failures += test_expect_bool("duplicate init bsp",
 				     plane_smp_info_init_bsp(&duplicate, 1),
 				     true);
@@ -173,21 +172,21 @@ static int test_runtime_rejects_invalid_before_init(void)
 	failures += test_expect_bool("duplicate physical id init rejected",
 				     plane_smp_init_bsp(&duplicate), false);
 	failures += test_expect_u32("duplicate init does not install cpu data",
-				    hal_install_count, 0);
+				    machine_current_data_count, 0);
 
 	struct plane_smp_info valid;
 
 	failures += test_expect_bool("valid init bsp",
 				     plane_smp_info_init_bsp(&valid, 5),
 				     true);
-	hal_install_should_fail = true;
-	failures += test_expect_bool("hal install failure rejects init",
+	machine_current_data_should_fail = true;
+	failures += test_expect_bool("machine install failure rejects init",
 				     plane_smp_init_bsp(&valid), false);
-	hal_install_should_fail = false;
-	failures += test_expect_u32("hal install failure called once",
-				    hal_install_count, 1);
-	failures += test_expect_not_null("hal failure saw candidate data",
-					 hal_last_current_data);
+	machine_current_data_should_fail = false;
+	failures += test_expect_u32("machine install failure called once",
+				    machine_current_data_count, 1);
+	failures += test_expect_not_null("machine failure saw candidate data",
+					 machine_last_current_data);
 	failures += test_expect_bool("still uninitialized",
 				     plane_smp_is_initialized(), false);
 	failures += test_expect_u32("uninitialized cpu count",
@@ -234,7 +233,7 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	failures += test_expect_bool("init succeeds",
 				     plane_smp_init_bsp(&info), true);
 	failures += test_expect_u32("successful init installs cpu data",
-				    hal_install_count, 2);
+				    machine_current_data_count, 2);
 	failures += test_expect_bool("initialized",
 				     plane_smp_is_initialized(), true);
 	failures += test_expect_u32("runtime cpu count",
@@ -249,8 +248,8 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	const struct plane_cpu_data *ap = plane_cpu_get_data(1);
 
 	failures += test_expect_ptr("current is bsp data", current, bsp);
-	failures += test_expect_ptr("hal saw current data",
-				    hal_last_current_data, (void *)current);
+	failures += test_expect_ptr("machine saw current data",
+				    machine_last_current_data, (void *)current);
 	failures += test_expect_not_null("bsp info", bsp);
 	failures += test_expect_not_null("ap info", ap);
 	if (bsp != NULL) {
@@ -322,17 +321,17 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 	struct plane_cpu_data *bsp = plane_cpu_get_startup_data(0);
 	uint64_t ast_count = plane_smp_event_count(PLANE_SMP_EVENT_AST);
 
-	hal_send_ipi_should_fail = false;
+	local_interrupt_send_ipi_should_fail = false;
 	failures += test_expect_bool("signal cpu sends AST",
 				     plane_smp_signal_cpu(
 					     0, PLANE_SMP_EVENT_AST),
 				     true);
 	failures += test_expect_u32("signal cpu sends once",
-				    hal_send_ipi_count, 1);
+				    local_interrupt_send_ipi_count, 1);
 	failures += test_expect_u32("signal cpu target",
-				    hal_last_send_ipi_logical_id, 0);
+				    local_interrupt_last_send_ipi_logical_id, 0);
 	failures += test_expect_u32("signal cpu vector",
-				    hal_last_send_ipi_vector,
+				    local_interrupt_last_send_ipi_vector,
 				    PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST);
 	if (bsp != NULL) {
 		failures += test_expect_u32("signal cpu sets pending bit",
@@ -384,17 +383,17 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 					    bsp->cpu_signals, 0);
 	}
 
-	hal_send_ipi_should_fail = true;
+	local_interrupt_send_ipi_should_fail = true;
 	failures += test_expect_bool("send failure rejects signal",
 				     plane_smp_signal_cpu(
 					     0, PLANE_SMP_EVENT_TLB_FLUSH),
 				     false);
-	hal_send_ipi_should_fail = false;
+	local_interrupt_send_ipi_should_fail = false;
 	if (bsp != NULL) {
 		failures += test_expect_u32("send failure rolls back signal",
 					    bsp->cpu_signals, 0);
 	}
-	uint32_t send_count = hal_send_ipi_count;
+	uint32_t send_count = local_interrupt_send_ipi_count;
 
 	failures += test_expect_bool("offline ap signal rejected",
 				     plane_smp_signal_cpu(
@@ -410,7 +409,7 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 					     PLANE_SMP_EVENT_AST),
 				     false);
 	failures += test_expect_u32("invalid signal does not send",
-				    hal_send_ipi_count, send_count);
+				    local_interrupt_send_ipi_count, send_count);
 	return failures;
 }
 
@@ -448,9 +447,9 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 					     1, plane_vaddr_make(0x800000), 2),
 				     true);
 	failures += test_expect_u32("prepare context once",
-				    hal_prepare_context_count, 1);
+				    machine_prepare_context_count, 1);
 	failures += test_expect_ptr("prepare context sees ap1",
-				    hal_last_prepare_context_data, ap1);
+				    machine_last_prepare_context_data, ap1);
 	failures += test_expect_bool("prepare ap1 again rejected",
 				     plane_smp_prepare_ap_stack(
 					     1, plane_vaddr_make(0x900000), 1),
@@ -478,17 +477,17 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				    PLANE_CPU_STARTUP_STARTING);
 	call_ap_park_entry(ap1);
 	failures += test_expect_u32("park entry installs context",
-				    hal_install_context_count, 1);
+				    machine_install_context_count, 1);
 	failures += test_expect_ptr("install context sees ap1",
-				    hal_last_install_context_data, ap1);
+				    machine_last_install_context_data, ap1);
 	failures += test_expect_u32("park entry installs current data",
-				    hal_install_count, 3);
+				    machine_current_data_count, 3);
 	failures += test_expect_ptr("current data sees ap1",
-				    hal_last_current_data, ap1);
+				    machine_last_current_data, ap1);
 	failures += test_expect_u32("park entry initializes local interrupts",
-				    hal_local_interrupts_count, 1);
+				    local_interrupts_count, 1);
 	failures += test_expect_ptr("local interrupts sees ap1",
-				    hal_last_local_interrupts_data, ap1);
+				    local_interrupts_last_data, ap1);
 	failures += test_expect_u32("ap1 state parked",
 				    plane_cpu_startup_state(1),
 				    PLANE_CPU_STARTUP_PARKED);
@@ -503,9 +502,9 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				     true);
 	failures += test_expect_bool("start ap2",
 				     plane_smp_mark_ap_starting(2), true);
-	hal_install_context_should_fail = true;
+	machine_install_context_should_fail = true;
 	call_ap_park_entry(ap2);
-	hal_install_context_should_fail = false;
+	machine_install_context_should_fail = false;
 	failures += test_expect_u32("ap2 state failed",
 				    plane_cpu_startup_state(2),
 				    PLANE_CPU_STARTUP_FAILED);
@@ -520,16 +519,16 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				     true);
 	failures += test_expect_bool("start ap3",
 				     plane_smp_mark_ap_starting(3), true);
-	hal_local_interrupts_should_fail = true;
+	local_interrupts_should_fail = true;
 	call_ap_park_entry(ap3);
-	hal_local_interrupts_should_fail = false;
+	local_interrupts_should_fail = false;
 	failures += test_expect_u32("ap3 state failed after local interrupts",
 				    plane_cpu_startup_state(3),
 				    PLANE_CPU_STARTUP_FAILED);
 	failures += test_expect_u32("local interrupts called for ap3",
-				    hal_local_interrupts_count, 2);
+				    local_interrupts_count, 2);
 	failures += test_expect_ptr("local interrupts sees ap3",
-				    hal_last_local_interrupts_data, ap3);
+				    local_interrupts_last_data, ap3);
 	failures += test_expect_u32("parked count still unchanged",
 				    plane_cpu_parked_count(), 1);
 	return failures;
@@ -540,12 +539,12 @@ static int test_ap_stack_prepare_rejects_after_context_failure_path(void)
 	int failures = 0;
 	struct plane_cpu_data *ap4 = plane_cpu_get_startup_data(4);
 
-	hal_prepare_context_should_fail = true;
+	machine_prepare_context_should_fail = true;
 	failures += test_expect_bool("prepare ap4 context failure rejected",
 				     plane_smp_prepare_ap_stack(
 					     4, plane_vaddr_make(0xc00000), 1),
 				     false);
-	hal_prepare_context_should_fail = false;
+	machine_prepare_context_should_fail = false;
 	failures += test_expect_u32("ap4 still offline",
 				    plane_cpu_startup_state(4),
 				    PLANE_CPU_STARTUP_OFFLINE);
@@ -572,7 +571,7 @@ static int test_runtime_rejects_reinit_without_state_change(void)
 	failures += test_expect_bool("reinit rejected",
 				     plane_smp_init_bsp(&info), false);
 	failures += test_expect_u32("reinit does not reinstall cpu data",
-				    hal_install_count, 4);
+				    machine_current_data_count, 4);
 	failures += test_expect_u32("old cpu count kept",
 				    plane_cpu_count(), 5);
 

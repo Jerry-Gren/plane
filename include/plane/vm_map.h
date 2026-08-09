@@ -23,7 +23,7 @@ struct plane_vm_object;
  *
  * This is the small kernel_map foundation used by kmem. It only manages
  * virtual address ranges; physical backing and page-table mappings belong to
- * PMM and HAL/pmap.
+ * PMM and machine/pmap.
  *
  * Protection and max_protection are entry attribute foundations. Plane
  * supports XNU-like current protection updates and the shrinking subset of

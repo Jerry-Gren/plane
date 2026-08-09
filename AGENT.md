@@ -23,7 +23,7 @@ Prefer small, manual patches that preserve surrounding style.
   inspect the result afterward.
 - Keep behavior changes, structural cleanup, and pure naming changes separate
   unless the accepted plan explicitly combines them.
-- For MM, HAL, boot, or SMP changes, assume the user expects implementation,
+- For MM, machine, boot, or SMP changes, assume the user expects implementation,
   verification, and a concise summary, not just a proposal.
 
 ## Source Of Truth
@@ -35,8 +35,36 @@ Prefer small, manual patches that preserve surrounding style.
 - External protocol headers such as `include/limine.h` and
   `include/multiboot2.h` are imported protocol mirrors. Avoid style churn there
   unless a protocol integration change requires it.
-- Public Plane APIs keep the `plane_` or `hal_` prefix. Do not introduce XNU
-  aliases such as `vm_map_*`, `vm_object_*`, or `pmap_*` as public generic APIs.
+- Public generic Plane APIs keep the `plane_` prefix. Machine-facing APIs use
+  their real machine owner prefix, such as `pmap_*` or `physmap_*`.
+  Do not introduce XNU aliases such as `vm_map_*` or `vm_object_*` as public
+  generic APIs.
+- Machine selector headers under `include/machine/` are the public way for
+  generic code to reach current-architecture routines. Do not keep alternate
+  wrappers after a machine-facing owner exists.
+- Use `ml_*` for machine routines: current-machine services that generic kernel
+  code calls through `include/machine/`, such as startup, interrupt state, CPU
+  data installation, local interrupt controller entry points, IO/physical
+  access, and later machine-level hooks.
+- Use `cpu_*` for CPU-local primitives and CPU data operations that name the
+  processor action itself, such as `cpu_pause()`. Do not force these into
+  `ml_cpu_*` merely because they are architecture-backed.
+- Use `serial_*` for the machine-selected serial primitive. Do not route
+  serial calls through alternate machine serial wrappers.
+- Treat XNU prefixes as owner vocabulary, not aliases to import wholesale:
+  - `pmap_*` owns page-table mappings, active roots, TLB invalidation, and
+    pmap-owned physmap construction.
+  - `physmap_*` owns the RAM-only physical map subfacility under pmap.
+  - `ml_*` owns machine routines exposed through `include/machine/`.
+  - `cpu_*` owns CPU-local primitives and CPU data operations.
+  - `lapic_*` is allowed only inside x86_64 LAPIC implementation/tests.
+  - `x86_64_*` owns arch-private hardware facts, helpers, and implementation
+    details that are not machine-facing generic APIs.
+  - `vm_*` owner prefixes are for MM owner-cluster internal helpers; do not
+    expose XNU-style `vm_map_*` or `vm_object_*` as public generic Plane APIs.
+- Do not introduce XNU-specific layer prefixes such as `i386_*`, `PE_*`,
+  `pal_*`, `thread_*`, or `processor_*` until Plane has the corresponding
+  owner layer and a dedicated plan.
 
 ## Code Style
 
@@ -91,18 +119,22 @@ Use these words consistently:
   later remapped through IO-map. Do not call this "video" or "boot video".
 - `memmap`: Plane memory-map ownership and sanitization. Prefer
   `plane_memmap_*`.
+- `page`: architecture page geometry selected through `<machine/page.h>`.
+  Do not add alternate page geometry wrappers.
 - `physmap`: Plane's RAM physical map. Do not use `direct_map` in new names.
 - `pmap`: page-table construction, active kernel mappings, root ownership, and
   TLB invalidation.
-- `local_interrupt`: generic HAL name for a local interrupt controller. Do not
-  expose x86-specific LAPIC terms through generic HAL names.
+- `local_interrupt`: machine-selected local interrupt controller boundary.
+  Do not expose x86-specific LAPIC terms through machine-facing names unless
+  the interface is explicitly x86_64-only.
 
 Preferred symbol order:
 
 - Public and cross-file operation APIs should use
-  `plane_<owner>_<verb>_<object>()`, or the equivalent owner prefix for HAL and
-  arch-private APIs. Keep the verb immediately after the owner cluster so
-  related actions line up: `plane_vm_page_reset_runtime()`,
+  `plane_<owner>_<verb>_<object>()`, or the equivalent owner prefix for
+  machine-facing and arch-private APIs. Keep the verb immediately after the
+  owner cluster so related actions line up:
+  `plane_vm_page_reset_runtime()`,
   `plane_vm_page_reset_resident_links()`,
   `x86_64_physmap_set_bootstrap_window()`, and
   `x86_64_pmap_build_physmap_in_owned_root()`.
@@ -152,8 +184,8 @@ Preferred symbol order:
 - Getter-style APIs are tolerated when they already exist, but do not mix
   `owner_object_get()` and `owner_get_object()` inside one owner cluster. Rename
   them only in a dedicated cleanup. Existing `plane_pmm_get_stats()` and
-  `plane_vm_map_get_stats()` are older public API names; do not churn them
-  opportunistically in unrelated patches.
+  `plane_vm_map_get_stats()` use their established public API shape; do not
+  churn them opportunistically in unrelated patches.
 
 Avoid these stale names in new code:
 
@@ -169,13 +201,17 @@ Plane uses an XNU-like owner cluster rule. `*_internal.h` means "private to the
 owning cluster", not necessarily "only included by one .c file".
 
 - Generic `include/plane/` is public Plane kernel API.
-- Generic `include/hal/` is public HAL API. It must not expose x86_64, GRUB,
-  Limine, or Multiboot2 implementation details.
-- `hal/x86_64/` is the x86_64 owner cluster. Its internal headers may be shared
+- Machine-facing APIs go through `include/machine/` selectors and public
+  architecture facts/APIs live under `include/<arch>/`.
+- `include/machine/` is the XNU-like current-machine selector layer. Generic
+  kernel code should include `<machine/...>` when it needs current-architecture
+  pmap, page geometry, CPU, or trap facts rather than a generic machine service.
+  Selector headers must not grow implementation logic or matching `.c` files.
+- `arch/x86_64/` is the x86_64 owner cluster. Its internal headers may be shared
   by x86_64 implementation files and white-box tests.
 - `boot/limine/` and `boot/multiboot2/` are boot protocol parser clusters. They
   parse protocol data and fill Plane handoff structures.
-- `hal/x86_64/boot/*` is the x86_64 boot adapter cluster. It may include x86_64
+- `arch/x86_64/boot/*` is the x86_64 boot adapter cluster. It may include x86_64
   internal headers because it translates boot handoff into x86_64 state.
 - `kernel/mm/` is the MM owner cluster. It may share VM object/page/map/zone
   internal headers, but public callers should use `include/plane/*`.
@@ -190,11 +226,20 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 
 - Include the most specific header needed by the file.
 - Do not add the repository root as a global include root.
-- `hal/` is the arch-private include root. x86_64 internals should be included
-  as `<x86_64/foo_internal.h>` or `<x86_64/foo.h>` when the header is an
-  arch-private service.
-- Public x86_64 hardware definition headers live under `include/hal/x86_64/`
-  only when assembly or other public arch code legitimately needs them.
+- `arch/` is the arch-private include root for implementation-owned service and
+  internal headers. x86_64 internals should be included as
+  `<x86_64/foo_internal.h>` or `<x86_64/foo.h>` when the header is an
+  arch-private service such as MSR or pmap internals.
+- `machine` headers are selectors, not owner clusters. They may forward to a
+  public architecture header, but must not expose root-clone/build helpers or
+  other implementation internals.
+- Public x86_64 headers live under `include/x86_64/`. Machine-neutral callers
+  should prefer `include/machine/` selectors where one exists; x86_64
+  implementation files, boot adapters, assembly, linker scripts, and white-box
+  tests may include `<x86_64/...>` directly.
+- x86_64 white-box tests may include implementation files through the `arch/`
+  include root, for example `<x86_64/lapic.c>`. Production generic code must
+  not include implementation `.c` files or arch-private internals directly.
 - `plane/util.h` is for generic utility macros such as `container_of`,
   `ARRAY_SIZE`, and alignment helpers. It must not include `plane/bits.h`.
 - Files that need bit operations must explicitly include `plane/bits.h`.
@@ -222,9 +267,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   constants.
 - Do not add unused hardware constants just because they exist in the manual.
   Add fields when code or tests use them.
-- If a generic HAL API would expose x86-only terms such as LAPIC, fixed IPI,
-  xAPIC, x2APIC, PAT, or PTE, keep that detail in x86_64 internals and map it
-  to a generic concept.
+- If a public generic or machine-facing API would expose x86-only terms such as
+  LAPIC, fixed IPI, xAPIC, x2APIC, PAT, or PTE, keep that detail in x86_64
+  internals and map it to the appropriate owner concept.
 
 ## Boot, Handoff, And Startup
 
@@ -263,7 +308,7 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   `WARN_ON*()` side effects into named local variables.
 - Library-style helpers should usually return `false` or an error sentinel and
   let the caller decide whether to `BUG_ON_MSG()`.
-- Do not use silent `hal_cpu_hang()` from C paths when printk/serial
+- Do not use silent `ml_cpu_halt()` from C paths when printk/serial
   diagnostics are available. Keep raw hangs for very early assembly or terminal
   halt paths where diagnostics cannot be trusted.
 
@@ -345,12 +390,12 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   device memory.
 - Bootloader HHDM or MB2 bootstrap mappings are temporary bootstrap physmap
   windows. After page-table ownership, Plane installs its owned physmap.
-- `hal_mmu_enable_physmap()` is the generic startup-stage entry for enabling
+- `physmap_enable()` is the generic startup-stage entry for enabling
   RAM physmap conversion. Arch-private state and window geometry stay in
   x86_64 physmap internals.
-- `hal_mmu_physmap_phys_to_virt()`,
-  `hal_mmu_physmap_phys_range_to_virt()`, and
-  `hal_mmu_physmap_virt_to_phys()` must enforce actual required coverage, not
+- `physmap_phys_to_virt()`,
+  `physmap_phys_range_to_virt()`, and
+  `physmap_virt_to_phys()` must enforce actual required coverage, not
   blindly expose the whole rounded window.
 - `plane_io_map()` is the formal runtime path for device and framebuffer
   mappings. IO-map entries are VA reservations plus pmap mappings; they do not
@@ -362,8 +407,8 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - Active kernel pmap wrappers are responsible for local TLB invalidation.
   Root-parameter helpers must not invalidate TLB entries.
 - Mapping attributes are explicit pmap semantics. Prefer
-  `struct hal_mmu_map_options { prot, attr }` over ad hoc bitsets.
-- `hal_mmu_protect_kernel_page()` changes current protection only and must
+  `struct pmap_map_options { prot, attr }` over ad hoc bitsets.
+- `pmap_protect_kernel_page()` changes current protection only and must
   preserve existing cache attribute bits.
 
 ## SMP
@@ -383,14 +428,15 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - `plane_smp_startup_*` names are for AP startup launch helpers. Do not revive
   `plane_smp_boot_*`.
 - Local APIC/xAPIC details stay in x86_64 local interrupt implementation.
-  Generic HAL callers use `hal_local_interrupt_*`.
+  Generic callers use `<machine/local_interrupt.h>` and the
+  `ml_local_interrupt_*` machine routines.
 - Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
   the frame and vector, the local interrupt controller owns EOI and dispatch
   glue, SMP owns inter-processor event meaning and CPU pending signal bits, and
   pmap owns the TLB-flush update hook and later shootdown payload. Generic SMP
-  may call the generic `<hal/pmap.h>` hook, but must not include
-  architecture-specific pmap headers. Do not put pmap shootdown policy in the
-  architecture exception handler or in LAPIC register code.
+  may call `pmap_update_interrupt()` through `<machine/pmap.h>`, but must not
+  include architecture-specific pmap headers. Do not put pmap shootdown policy
+  in the architecture exception handler or in LAPIC register code.
 - Keep SMP event names separate from hardware vector allocation. Use durable
   semantic names such as `PLANE_SMP_EVENT_AST` or
   `PLANE_SMP_EVENT_TLB_FLUSH`; use explicit vector-allocation names such as
@@ -399,8 +445,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   are intentionally the same ABI.
 - Use `signal` for XNU-like cross-CPU delivery/pending state:
   `plane_smp_signal_cpu()`, `plane_smp_signal_handler()`, and
-  `plane_cpu_data.cpu_signals`. Keep `IPI` only for HAL/LAPIC hardware send
-  primitives such as `hal_local_interrupt_send_ipi()`.
+  `plane_cpu_data.cpu_signals`. Keep `IPI` only for machine local-interrupt
+  hardware send primitives and x86_64 LAPIC implementation/tests, such as
+  `ml_local_interrupt_send_ipi()`.
 
 ## Tests
 
@@ -408,7 +455,7 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   assertions.
 - Test files should focus on input, call, and expected result. Shared failure
   formatting belongs in test support helpers.
-- Keep stubs at the test boundary. Do not move module-specific HAL, PMM, or
+- Keep stubs at the test boundary. Do not move module-specific machine, PMM, or
   printk stubs into generic support unless multiple tests genuinely need them.
 - Tests should instantiate their own state when the production object model
   allows it. Hardware dependencies can be replaced by test stubs at the link
@@ -416,9 +463,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - x86_64 arch-private tests should be named `x86_64_*_test`.
 - Tests may include arch-private or MM internal headers when they explicitly
   test those owner clusters.
-- Keep test names and assertion labels in the current vocabulary. Avoid stale
-  labels such as "old boot", "early MMU", "direct map", or "bootstrap object"
-  when the tested object is now zone-backed or physmap-owned.
+- Keep test names and assertion labels in the current vocabulary. Prefer names
+  that describe the current object being tested, such as startup, physmap, or
+  zone-backed object state.
 
 ## Build, Configuration, And Generated Files
 
@@ -440,12 +487,12 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 ## Verification
 
 Run verification proportional to the touched code. For this repository, boot
-paths are part of MM/HAL correctness.
+paths are part of MM/machine correctness.
 
 - Always run `make unit-check` for code changes unless the user explicitly asks
   for a non-validated draft.
 - Always run `git diff --check`.
-- For MMU, pmap, physmap, IO-map, framebuffer, boot, HAL, SMP startup, or
+- For MMU, pmap, physmap, IO-map, framebuffer, boot, machine, SMP startup, or
   kernel initialization changes, also verify Limine and MB2/GRUB QEMU smoke.
 - Smoke means booting long enough to see:
   `Kernel initialization completed. System halted.`

@@ -1,9 +1,8 @@
 #include <stdarg.h>
 
 #include <klib/stdio.h>
-#include <hal/serial.h>
-#include <hal/cpu.h>
-#include <hal/irq.h>
+#include <machine/serial.h>
+#include <machine/machine_routines.h>
 #include <plane/printk.h>
 #include <plane/spinlock.h>
 
@@ -14,7 +13,7 @@ static struct plane_spinlock printk_lock = PLANE_SPINLOCK_INIT;
 static void printk_raw_puts(const char *buf, int len)
 {
 	for (int i = 0; i < len && buf[i] != '\0'; i++) {
-		hal_serial_putchar(buf[i]);
+		serial_putchar(buf[i]);
 	}
 }
 
@@ -37,7 +36,7 @@ void panic(const char *fmt, ...)
 	char buf[PRINTK_BUF_SIZE];
 	va_list args;
 
-	hal_irq_disable();
+	ml_interrupts_disable();
 	bool locked = plane_spin_try_lock(&printk_lock);
 	
 	va_start(args, fmt);
@@ -52,5 +51,5 @@ void panic(const char *fmt, ...)
 		plane_spin_unlock(&printk_lock);
 	}
 	
-	hal_cpu_hang();
+	ml_cpu_halt();
 }

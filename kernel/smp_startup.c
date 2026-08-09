@@ -1,4 +1,4 @@
-#include <hal/cpu.h>
+#include <machine/machine_routines.h>
 
 #include <plane/kmem.h>
 #include <plane/smp.h>
@@ -64,9 +64,9 @@ void plane_smp_startup_enter_ap(struct plane_cpu_data *data)
 {
 	if (data == NULL || data->self != data ||
 	    plane_vaddr_is_null(data->ap_stack_top)) {
-		hal_cpu_hang();
+		ml_cpu_halt();
 	}
 
-	hal_cpu_enter_on_stack(data->ap_stack_top,
+	ml_cpu_enter_on_stack(data->ap_stack_top,
 			       plane_smp_ap_park_entry, data);
 }

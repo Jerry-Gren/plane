@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <hal/x86_64/descriptor_defs.h>
+#include <x86_64/descriptor_defs.h>
 
 #include "support/test.h"
 

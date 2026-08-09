@@ -5,8 +5,8 @@
 
 #include <boot/multiboot2/mb2_arch.h>
 
-#include <hal/cpu.h>
-#include <hal/serial.h>
+#include <machine/machine_routines.h>
+#include <machine/serial.h>
 
 #include <plane/boot_info.h>
 #include <plane/entry.h>
@@ -189,7 +189,7 @@ static void boot_mb2_add_reservations(struct plane_boot_info *info,
 
 void mb2_entry(uint64_t magic, uint64_t info_addr)
 {
-	hal_serial_init();
+	serial_init();
 
 	/* check magic number passed by multiboot2 */
 	BUG_ON_MSG(magic != MULTIBOOT2_BOOTLOADER_MAGIC,
@@ -262,5 +262,5 @@ void mb2_entry(uint64_t magic, uint64_t info_addr)
 
 	kmain(&b_info);
 
-	hal_cpu_hang();
+	ml_cpu_halt();
 }

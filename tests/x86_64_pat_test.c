@@ -1,8 +1,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/x86_64/cpu_features.h>
-#include <hal/x86_64/msr_defs.h>
+#include <x86_64/cpu_features.h>
+#include <x86_64/msr_defs.h>
 
 #include "support/test.h"
 
@@ -15,7 +15,7 @@ static uint32_t test_write_count;
 static uint32_t test_last_write_msr;
 static uint64_t test_last_write_value;
 
-#include "../hal/x86_64/pat.c"
+#include <x86_64/pat.c>
 
 bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 {

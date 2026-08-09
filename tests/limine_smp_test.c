@@ -1,63 +1,62 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/cpu.h>
-#include <hal/irq.h>
-#include <hal/local_interrupt.h>
-#include <hal/pmap.h>
+#include <machine/machine_routines.h>
+#include <machine/local_interrupt.h>
+#include <machine/pmap.h>
 #include <plane/kmem.h>
 #include <plane/smp.h>
 
 #include "../boot/limine/limine_smp_internal.h"
 #include "support/test.h"
 
-bool hal_cpu_set_current_data(struct plane_cpu_data *data)
+bool ml_cpu_set_current_data(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }
 
-bool hal_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
+bool ml_cpu_prepare_ap_startup_context(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }
 
-bool hal_cpu_install_ap_startup_context(struct plane_cpu_data *data)
+bool ml_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }
 
-bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool hal_local_interrupt_init_ap(struct plane_cpu_data *data)
+bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }
 
-bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 {
 	(void)logical_id;
 	(void)vector;
 	return false;
 }
 
-void hal_pmap_update_interrupt(void)
+void pmap_update_interrupt(void)
 {
 }
 
-void hal_irq_disable(void)
+void ml_interrupts_disable(void)
 {
 }
 
-void hal_cpu_hang(void)
+void ml_cpu_halt(void)
 {
 	for (;;) {
 	}
 }
 
-void hal_cpu_enter_on_stack(plane_vaddr_t stack_top,
+void ml_cpu_enter_on_stack(plane_vaddr_t stack_top,
 			    void (*entry)(struct plane_cpu_data *data),
 			    struct plane_cpu_data *data)
 {

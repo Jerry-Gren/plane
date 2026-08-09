@@ -1,4 +1,4 @@
-#include <hal/mmu.h>
+#include <machine/pmap.h>
 
 #include <stddef.h>
 
@@ -119,7 +119,7 @@ static bool vm_fault_resolve_page(struct plane_vm_fault_state *state,
 		return true;
 	}
 
-	if (hal_mmu_translate_kernel_page(state->ref.info.page_vaddr,
+	if (pmap_translate_kernel_page(state->ref.info.page_vaddr,
 					  &mapped_phys)) {
 		return false;
 	}
@@ -159,21 +159,21 @@ static bool vm_fault_enter_pmap(const struct plane_vm_fault_state *state)
 {
 	plane_paddr_t page_phys = plane_vm_page_phys(state->page);
 	plane_paddr_t mapped_phys;
-	struct hal_mmu_map_options options =
-		hal_mmu_default_map_options(state->ref.info.prot);
+	struct pmap_map_options options =
+		pmap_default_map_options(state->ref.info.prot);
 
 	if (!vm_fault_page_phys_is_valid(page_phys)) {
 		return false;
 	}
 
-	if (hal_mmu_translate_kernel_page(state->ref.info.page_vaddr,
+	if (pmap_translate_kernel_page(state->ref.info.page_vaddr,
 					  &mapped_phys)) {
 		return plane_paddr_equal(mapped_phys, page_phys) &&
-		       hal_mmu_protect_kernel_page(state->ref.info.page_vaddr,
+		       pmap_protect_kernel_page(state->ref.info.page_vaddr,
 						   state->ref.info.prot);
 	}
 
-	return hal_mmu_map_kernel_page(state->ref.info.page_vaddr, page_phys,
+	return pmap_map_kernel_page(state->ref.info.page_vaddr, page_phys,
 				       options);
 }
 

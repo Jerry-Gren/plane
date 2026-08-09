@@ -1,7 +1,7 @@
-#include <hal/hal.h>
-#include <hal/local_interrupt.h>
-#include <hal/mmu.h>
-#include <hal/serial.h>
+#include <machine/machine_routines.h>
+#include <machine/local_interrupt.h>
+#include <machine/pmap.h>
+#include <machine/serial.h>
 
 #include <plane/boot_info.h>
 #include <plane/framebuffer.h>
@@ -20,9 +20,9 @@ static uint64_t remap_step;
 static uint64_t release_vaddr;
 static uint64_t release_size;
 
-void hal_serial_init(void) {}
+void serial_init(void) {}
 
-bool hal_arch_startup_init(void)
+bool ml_startup_init(void)
 {
 	return true;
 }
@@ -47,7 +47,7 @@ bool plane_memmap_sanitize(struct plane_mem_info *mem)
 	return mem != NULL;
 }
 
-bool hal_mmu_enable_physmap(const struct plane_mem_info *mem)
+bool physmap_enable(const struct plane_mem_info *mem)
 {
 	return mem != NULL;
 }
@@ -57,7 +57,7 @@ bool plane_pmm_init(const struct plane_mem_info *mem)
 	return mem != NULL;
 }
 
-bool hal_mmu_take_kernel_page_table_ownership(void)
+bool pmap_take_kernel_page_table_ownership(void)
 {
 	ownership_step = ++current_step;
 	return true;
@@ -79,7 +79,7 @@ bool plane_framebuffer_remap(struct plane_framebuffer_info *framebuffer_info)
 	return framebuffer_info != NULL;
 }
 
-bool hal_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }

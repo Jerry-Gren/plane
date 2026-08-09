@@ -40,7 +40,7 @@ static uint64_t test_page_phys_raw(const struct plane_page *page)
 	return plane_paddr_raw(plane_vm_page_phys(page));
 }
 
-plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
+plane_vaddr_t physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 						 uint64_t size)
 {
 	uint64_t raw = plane_paddr_raw(phys_addr);
@@ -56,9 +56,9 @@ plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 	return plane_vaddr_from_ptr(&physmap_storage[raw]);
 }
 
-plane_vaddr_t hal_mmu_physmap_phys_to_virt(plane_paddr_t phys_addr)
+plane_vaddr_t physmap_phys_to_virt(plane_paddr_t phys_addr)
 {
-	return hal_mmu_physmap_phys_range_to_virt(phys_addr, 1);
+	return physmap_phys_range_to_virt(phys_addr, 1);
 }
 
 static void reset_physmap_stub(void)

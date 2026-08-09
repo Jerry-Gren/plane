@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <hal/x86_64/cpu_features.h>
+#include <x86_64/cpu_features.h>
 
 #include "support/printk_stubs.h"
 #include "support/test.h"

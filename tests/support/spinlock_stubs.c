@@ -1,5 +1,4 @@
-#include <hal/cpu.h>
-#include <hal/irq.h>
+#include <machine/machine_routines.h>
 
 #include <stdint.h>
 
@@ -40,22 +39,22 @@ uint64_t test_spinlock_stub_irqsave_max_depth(void)
 	return irqsave_max_depth;
 }
 
-void hal_irq_disable(void)
+void ml_interrupts_disable(void)
 {
 	test_irq_enabled = false;
 }
 
-void hal_irq_enable(void)
+void ml_interrupts_enable(void)
 {
 	test_irq_enabled = true;
 }
 
-bool hal_irq_is_enabled(void)
+bool ml_get_interrupts_enabled(void)
 {
 	return test_irq_enabled;
 }
 
-plane_irq_state_t hal_irq_save(void)
+plane_irq_state_t ml_irq_save(void)
 {
 	plane_irq_state_t state = {
 		.enabled = test_irq_enabled
@@ -68,11 +67,11 @@ plane_irq_state_t hal_irq_save(void)
 	if (irqsave_depth > irqsave_max_depth) {
 		irqsave_max_depth = irqsave_depth;
 	}
-	hal_irq_disable();
+	ml_interrupts_disable();
 	return state;
 }
 
-void hal_irq_restore(plane_irq_state_t state)
+void ml_irq_restore(plane_irq_state_t state)
 {
 	irqrestore_count++;
 	if (irqsave_depth != 0) {
@@ -81,6 +80,6 @@ void hal_irq_restore(plane_irq_state_t state)
 	test_irq_enabled = state.enabled;
 }
 
-void hal_cpu_relax(void)
+void cpu_pause(void)
 {
 }

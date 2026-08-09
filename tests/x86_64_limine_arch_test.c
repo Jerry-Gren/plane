@@ -1,8 +1,8 @@
 #include <stdint.h>
 
 #include <boot/limine/limine_arch.h>
-#include <hal/mmu.h>
-#include <hal/x86_64/address_space.h>
+#include <machine/pmap.h>
+#include <x86_64/address_space.h>
 #include <plane/memmap.h>
 
 #include "support/test.h"
@@ -108,8 +108,8 @@ static int test_limine_arch_installs_hhdm_physmap(void)
 					     &handoff),
 				     true);
 	failures += test_expect_bool("limine arch enable physmap",
-				     hal_mmu_enable_physmap(&mem), true);
-	vaddr = hal_mmu_physmap_phys_to_virt(test_paddr(0x2000));
+				     physmap_enable(&mem), true);
+	vaddr = physmap_phys_to_virt(test_paddr(0x2000));
 	failures += test_expect_u64("limine arch physmap base",
 				    plane_vaddr_raw(vaddr),
 				    test_hhdm_base() + 0x2000);

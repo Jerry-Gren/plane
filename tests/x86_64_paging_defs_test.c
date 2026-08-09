@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/x86_64/address_space.h>
+#include <x86_64/address_space.h>
 
 #include "support/test.h"
 

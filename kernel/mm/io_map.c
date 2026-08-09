@@ -1,5 +1,5 @@
-#include <hal/mmu.h>
-#include <hal/page.h>
+#include <machine/pmap.h>
+#include <machine/page.h>
 
 #include <plane/io_map.h>
 #include <plane/mm.h>
@@ -17,14 +17,14 @@ static bool io_map_cache_is_valid(enum plane_io_map_cache cache)
 	       cache == PLANE_IO_MAP_CACHE_WRITE_COMBINE;
 }
 
-static struct hal_mmu_map_options io_map_options(uint32_t prot,
+static struct pmap_map_options io_map_options(uint32_t prot,
 						 enum plane_io_map_cache cache)
 {
-	return (struct hal_mmu_map_options){
+	return (struct pmap_map_options){
 		.prot = prot,
 		.attr = cache == PLANE_IO_MAP_CACHE_DEVICE ?
-			HAL_MMU_MAPPING_DEVICE :
-			HAL_MMU_MAPPING_WRITE_COMBINE,
+			PMAP_MAPPING_ATTR_DEVICE :
+			PMAP_MAPPING_ATTR_WRITE_COMBINE,
 	};
 }
 
@@ -64,7 +64,7 @@ static bool io_map_unmap_pages(plane_vaddr_t base, uint64_t page_count)
 		plane_vaddr_t page_vaddr;
 
 		if (!plane_vaddr_add_pages(base, i - 1, &page_vaddr) ||
-		    !hal_mmu_unmap_kernel_page(page_vaddr)) {
+		    !pmap_unmap_kernel_page(page_vaddr)) {
 			return false;
 		}
 	}
@@ -116,7 +116,7 @@ bool plane_io_map(plane_paddr_t phys_addr,
 
 		page_phys = plane_paddr_make(plane_paddr_raw(phys_base) +
 					     phys_offset);
-		if (!hal_mmu_map_kernel_page(page_vaddr, page_phys,
+		if (!pmap_map_kernel_page(page_vaddr, page_phys,
 					     io_map_options(prot, cache))) {
 			break;
 		}

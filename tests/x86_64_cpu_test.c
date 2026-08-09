@@ -1,9 +1,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <hal/cpu.h>
-#include <hal/x86_64/cpu_features.h>
-#include <hal/x86_64/msr_defs.h>
+#include <machine/machine_routines.h>
+#include <x86_64/cpu_features.h>
+#include <x86_64/msr_defs.h>
 #include <plane/smp.h>
 
 #include "support/test.h"
@@ -43,7 +43,7 @@ static int test_set_current_data_rejects_null(void)
 	reset_msr_test();
 	test_has_msr = true;
 	failures += test_expect_bool("null current data rejected",
-				     hal_cpu_set_current_data(NULL), false);
+				     ml_cpu_set_current_data(NULL), false);
 	failures += test_expect_u32("null does not write msr",
 				    msr_write_count, 0);
 	return failures;
@@ -56,7 +56,7 @@ static int test_set_current_data_requires_msr_feature(void)
 
 	reset_msr_test();
 	failures += test_expect_bool("missing msr rejected",
-				     hal_cpu_set_current_data(&data), false);
+				     ml_cpu_set_current_data(&data), false);
 	failures += test_expect_u32("missing msr does not write",
 				    msr_write_count, 0);
 	return failures;
@@ -75,7 +75,7 @@ static int test_set_current_data_writes_gs_base(void)
 	reset_msr_test();
 	test_has_msr = true;
 	failures += test_expect_bool("set current data succeeds",
-				     hal_cpu_set_current_data(&data), true);
+				     ml_cpu_set_current_data(&data), true);
 	failures += test_expect_u32("writes once", msr_write_count, 1);
 	failures += test_expect_u32("writes gs base msr",
 				    last_msr, X86_64_MSR_IA32_GS_BASE);
@@ -94,7 +94,7 @@ static int test_set_current_data_propagates_msr_write_failure(void)
 	test_has_msr = true;
 	test_msr_write_should_fail = true;
 	failures += test_expect_bool("write failure rejected",
-				     hal_cpu_set_current_data(&data), false);
+				     ml_cpu_set_current_data(&data), false);
 	failures += test_expect_u32("write attempted once",
 				    msr_write_count, 1);
 	failures += test_expect_u32("write failure uses gs base",
