@@ -106,18 +106,21 @@ Preferred symbol order:
   `plane_vm_page_reset_resident_links()`,
   `x86_64_physmap_set_bootstrap_window()`, and
   `x86_64_pmap_build_physmap_in_owned_root()`.
-- File-local helpers do not need the full public owner prefix, but they should
-  still name the first semantic object being operated on when one is clear.
-  Prefer `<local_owner>_<verb>_<object>()` over
-  `<verb>_<local_owner>_<object>()`: `page_reset_runtime()`,
-  `page_set_object_prev_locked()`, `resident_hash_lookup_page()`,
-  `map_enter_locked()`, `pmm_alloc_phys_pages_locked()`, and
-  `kmem_release_resident_page()`.
-- If the first semantic object is a sub-owner, name that sub-owner rather than
-  the broader file owner. A single map entry should use `map_entry_*`, such as
-  `map_entry_set_range()`. A map entry array/storage should use
-  `map_entries_*`, such as `map_entries_reset()`. A helper that operates on the
-  map object itself should keep `map_*`, such as `map_alloc_entry_index()`.
+- File-local helpers do not need the public `plane_` prefix, but they should
+  still use the real owner family when the file belongs to a durable owner
+  cluster. In MM owner files, prefer `vm_fault_*`, `vm_map_*`,
+  `vm_object_*`, `vm_page_*`, and `vm_zone_*` helper families, matching the
+  XNU-style owner-first shape without adding the public `plane_` prefix:
+  `vm_page_reset_runtime_locked()`, `vm_page_set_object_prev_locked()`,
+  `vm_object_resident_hash_lookup_page()`, `vm_map_enter_locked()`, and
+  `vm_fault_enter_pmap()`.
+- If a durable sub-owner family exists inside an owner file, keep it under the
+  file owner rather than inventing a detached owner. A single VM map entry
+  helper should use `vm_map_entry_*`, such as `vm_map_entry_set_range()`. VM map
+  entry array/storage helpers should use `vm_map_entries_*`, such as
+  `vm_map_entries_reset()`. Resident-hash helpers inside VM object should use
+  `vm_object_resident_hash_*`. PMM and kmem file-local helpers may use
+  `pmm_*` and `kmem_*` because those names already identify their owner.
 - Do not force an owner prefix onto tiny pure arithmetic or generic local
   predicates with no durable owner. Natural helpers such as `hole_can_fit()`,
   `range_contains()`, or `ranges_overlap()` are acceptable when adding a module
@@ -132,9 +135,10 @@ Preferred symbol order:
 - Predicate helpers should put the entity before the predicate word when that
   reads clearly. Public or cross-file predicates should read as
   `owner_is_property()`, such as `plane_vm_page_is_guard()`. File-local examples
-  include `guard_page_is_active()`, `object_is_range_valid()`, and
-  `map_entry_is_guarded()`. Boolean locals and parameters should use `is_*`,
-  `has_*`, or `can_*`, such as `is_writable`.
+  include `vm_page_guard_is_active()`, `object_is_range_valid()` when it remains
+  a tiny `vm_map.c` object preflight helper, and
+  `vm_map_entry_is_guarded()`. Boolean locals and parameters should use
+  `is_*`, `has_*`, or `can_*`, such as `is_writable`.
 - Relation and capability predicates may keep natural verb forms when `is`
   would make the name worse: `owner_can_action()`, `range_contains()`,
   `range_overlaps()`, `entry_contains_addr()`, or `elem_belongs_to_zone()`.

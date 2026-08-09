@@ -35,17 +35,17 @@ static uint64_t page_count_from_size(uint64_t size)
 	return size / PAGE_SIZE;
 }
 
-static plane_irq_state_t map_lock(struct plane_vm_map *map)
+static plane_irq_state_t vm_map_lock(struct plane_vm_map *map)
 {
 	return plane_spin_lock_irqsave(&map->lock);
 }
 
-static void map_unlock(struct plane_vm_map *map, plane_irq_state_t state)
+static void vm_map_unlock(struct plane_vm_map *map, plane_irq_state_t state)
 {
 	plane_spin_unlock_irqrestore(&map->lock, state);
 }
 
-static void map_entry_set_range(struct plane_vm_map_entry *entry,
+static void vm_map_entry_set_range(struct plane_vm_map_entry *entry,
 			    uint64_t start,
 			    uint64_t end,
 			    uint64_t user_start,
@@ -57,7 +57,7 @@ static void map_entry_set_range(struct plane_vm_map_entry *entry,
 	entry->user_end = plane_vaddr_make(user_end);
 }
 
-static bool enter_flags_are_valid(uint32_t flags)
+static bool vm_map_enter_flags_are_valid(uint32_t flags)
 {
 	bool anywhere = (flags & PLANE_VM_MAP_ENTER_ANYWHERE) != 0;
 	bool fixed = (flags & PLANE_VM_MAP_ENTER_FIXED) != 0;
@@ -90,7 +90,7 @@ static bool object_is_range_valid(const struct plane_vm_object *object,
 	return end <= offset_limit;
 }
 
-static void map_entries_reset(struct plane_vm_map_entry *entries,
+static void vm_map_entries_reset(struct plane_vm_map_entry *entries,
 			  uint64_t entry_capacity)
 {
 	for (uint64_t i = 0; i < entry_capacity; i++) {
@@ -100,7 +100,7 @@ static void map_entries_reset(struct plane_vm_map_entry *entries,
 	}
 }
 
-static void map_reset(struct plane_vm_map *map,
+static void vm_map_reset(struct plane_vm_map *map,
 		      struct plane_vm_map_entry *entries,
 		      uint64_t entry_capacity)
 {
@@ -110,10 +110,10 @@ static void map_reset(struct plane_vm_map *map,
 		.entry_capacity = entry_capacity,
 		.entries = entries,
 	};
-	map_entries_reset(entries, entry_capacity);
+	vm_map_entries_reset(entries, entry_capacity);
 }
 
-static bool map_entries_storage_range(const struct plane_vm_map_entry *entries,
+static bool vm_map_entries_storage_range(const struct plane_vm_map_entry *entries,
 				uint64_t entry_capacity,
 				uintptr_t *start,
 				uintptr_t *end)
@@ -135,7 +135,7 @@ static bool map_entries_storage_range(const struct plane_vm_map_entry *entries,
 	return true;
 }
 
-static bool map_entries_storage_overlaps(const struct plane_vm_map_entry *first,
+static bool vm_map_entries_storage_overlaps(const struct plane_vm_map_entry *first,
 				   uint64_t first_capacity,
 				   const struct plane_vm_map_entry *second,
 				   uint64_t second_capacity)
@@ -145,9 +145,9 @@ static bool map_entries_storage_overlaps(const struct plane_vm_map_entry *first,
 	uintptr_t second_start;
 	uintptr_t second_end;
 
-	if (!map_entries_storage_range(first, first_capacity,
+	if (!vm_map_entries_storage_range(first, first_capacity,
 				 &first_start, &first_end) ||
-	    !map_entries_storage_range(second, second_capacity,
+	    !vm_map_entries_storage_range(second, second_capacity,
 				 &second_start, &second_end)) {
 		return true;
 	}
@@ -155,7 +155,7 @@ static bool map_entries_storage_overlaps(const struct plane_vm_map_entry *first,
 	return first_start < second_end && second_start < first_end;
 }
 
-static int64_t map_alloc_entry_index(struct plane_vm_map *map)
+static int64_t vm_map_alloc_entry_index(struct plane_vm_map *map)
 {
 	for (uint64_t i = 0; i < map->entry_capacity; i++) {
 		if (!map->entries[i].used) {
@@ -166,7 +166,7 @@ static int64_t map_alloc_entry_index(struct plane_vm_map *map)
 	return -1;
 }
 
-static uint64_t map_available_entry_count(const struct plane_vm_map *map)
+static uint64_t vm_map_available_entry_count(const struct plane_vm_map *map)
 {
 	return map->entry_capacity - map->entry_count;
 }
@@ -186,7 +186,7 @@ static bool object_can_reference_count(struct plane_vm_object *object,
 	       ref_count <= UINT64_MAX - count;
 }
 
-static void map_insert_entry(struct plane_vm_map *map,
+static void vm_map_insert_entry(struct plane_vm_map *map,
 			 uint64_t index,
 			 uint64_t start,
 			 uint64_t end,
@@ -199,7 +199,7 @@ static void map_insert_entry(struct plane_vm_map *map,
 			 uint64_t prev,
 			 uint64_t next)
 {
-	map_entry_set_range(&map->entries[index], start, end, user_start, user_end);
+	vm_map_entry_set_range(&map->entries[index], start, end, user_start, user_end);
 	map->entries[index].object = object;
 	map->entries[index].object_offset = object_offset;
 	map->entries[index].prot = prot;
@@ -228,7 +228,7 @@ static bool hole_can_fit(uint64_t start, uint64_t end, uint64_t size)
 	return end >= start && end - start >= size;
 }
 
-static bool map_find_first_fit(struct plane_vm_map *map,
+static bool vm_map_find_first_fit(struct plane_vm_map *map,
 			   uint64_t size,
 			   uint64_t *start,
 			   uint64_t *prev,
@@ -262,7 +262,7 @@ static bool map_find_first_fit(struct plane_vm_map *map,
 	return false;
 }
 
-static bool map_entry_overlaps_range(const struct plane_vm_map_entry *entry,
+static bool vm_map_entry_overlaps_range(const struct plane_vm_map_entry *entry,
 				 uint64_t start,
 				 uint64_t end)
 {
@@ -272,7 +272,7 @@ static bool map_entry_overlaps_range(const struct plane_vm_map_entry *entry,
 	return entry_start < end && start < entry_end;
 }
 
-static bool map_entry_has_guards(const struct plane_vm_map_entry *entry)
+static bool vm_map_entry_has_guards(const struct plane_vm_map_entry *entry)
 {
 	uint64_t entry_start = plane_vaddr_raw(entry->start);
 	uint64_t entry_end = plane_vaddr_raw(entry->end);
@@ -282,7 +282,7 @@ static bool map_entry_has_guards(const struct plane_vm_map_entry *entry)
 	return entry_start != user_start || entry_end != user_end;
 }
 
-static bool map_entry_contains_user_addr(const struct plane_vm_map_entry *entry,
+static bool vm_map_entry_contains_user_addr(const struct plane_vm_map_entry *entry,
 				     uint64_t addr)
 {
 	uint64_t user_start = plane_vaddr_raw(entry->user_start);
@@ -291,12 +291,12 @@ static bool map_entry_contains_user_addr(const struct plane_vm_map_entry *entry,
 	return user_start <= addr && addr < user_end;
 }
 
-static int64_t map_find_user_entry(struct plane_vm_map *map, uint64_t addr)
+static int64_t vm_map_find_user_entry(struct plane_vm_map *map, uint64_t addr)
 {
 	uint64_t current = map->head;
 
 	while (current != VM_MAP_ENTRY_NONE) {
-		if (map_entry_contains_user_addr(&map->entries[current], addr)) {
+		if (vm_map_entry_contains_user_addr(&map->entries[current], addr)) {
 			return (int64_t)current;
 		}
 		current = map->entries[current].next;
@@ -305,7 +305,7 @@ static int64_t map_find_user_entry(struct plane_vm_map *map, uint64_t addr)
 	return -1;
 }
 
-static bool map_entry_account_split_reference(struct plane_vm_map_entry *entry,
+static bool vm_map_entry_account_split_reference(struct plane_vm_map_entry *entry,
 			      uint64_t *split_count)
 {
 	if (*split_count == UINT64_MAX) {
@@ -316,7 +316,7 @@ static bool map_entry_account_split_reference(struct plane_vm_map_entry *entry,
 	return object_can_reference_count(entry->object, *split_count);
 }
 
-static bool map_clip_entry_start(struct plane_vm_map *map,
+static bool vm_map_clip_entry_start(struct plane_vm_map *map,
 			     uint64_t index,
 			     uint64_t start)
 {
@@ -334,7 +334,7 @@ static bool map_clip_entry_start(struct plane_vm_map *map,
 		return false;
 	}
 
-	new_index = map_alloc_entry_index(map);
+	new_index = vm_map_alloc_entry_index(map);
 	if (new_index < 0) {
 		return false;
 	}
@@ -365,7 +365,7 @@ static bool map_clip_entry_start(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_clip_entry_end(struct plane_vm_map *map,
+static bool vm_map_clip_entry_end(struct plane_vm_map *map,
 			   uint64_t index,
 			   uint64_t end)
 {
@@ -383,7 +383,7 @@ static bool map_clip_entry_end(struct plane_vm_map *map,
 		return false;
 	}
 
-	new_index = map_alloc_entry_index(map);
+	new_index = vm_map_alloc_entry_index(map);
 	if (new_index < 0) {
 		return false;
 	}
@@ -414,7 +414,7 @@ static bool map_clip_entry_end(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_plan_protect_user_range(struct plane_vm_map *map,
+static bool vm_map_plan_protect_user_range(struct plane_vm_map *map,
 				    uint64_t start,
 				    uint64_t end,
 				    uint32_t prot,
@@ -429,7 +429,7 @@ static bool map_plan_protect_user_range(struct plane_vm_map *map,
 	};
 
 	while (cursor < end) {
-		int64_t entry_index = map_find_user_entry(map, cursor);
+		int64_t entry_index = vm_map_find_user_entry(map, cursor);
 		struct plane_vm_map_entry *entry;
 		uint64_t segment_end;
 
@@ -451,20 +451,20 @@ static bool map_plan_protect_user_range(struct plane_vm_map *map,
 		}
 
 		if (cursor > entry_user_start &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 
 		segment_end = end < entry_user_end ? end : entry_user_end;
 		if (segment_end < entry_user_end &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 
 		cursor = segment_end;
 	}
 
-	if (split_count > map_available_entry_count(map)) {
+	if (split_count > vm_map_available_entry_count(map)) {
 		return false;
 	}
 
@@ -472,7 +472,7 @@ static bool map_plan_protect_user_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_plan_wire_user_range(struct plane_vm_map *map,
+static bool vm_map_plan_wire_user_range(struct plane_vm_map *map,
 				 uint64_t start,
 				 uint64_t end,
 				 bool wire,
@@ -487,7 +487,7 @@ static bool map_plan_wire_user_range(struct plane_vm_map *map,
 	};
 
 	while (cursor < end) {
-		int64_t entry_index = map_find_user_entry(map, cursor);
+		int64_t entry_index = vm_map_find_user_entry(map, cursor);
 		struct plane_vm_map_entry *entry;
 		uint64_t segment_end;
 
@@ -510,20 +510,20 @@ static bool map_plan_wire_user_range(struct plane_vm_map *map,
 		}
 
 		if (cursor > entry_user_start &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 
 		segment_end = end < entry_user_end ? end : entry_user_end;
 		if (segment_end < entry_user_end &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 
 		cursor = segment_end;
 	}
 
-	if (split_count > map_available_entry_count(map)) {
+	if (split_count > vm_map_available_entry_count(map)) {
 		return false;
 	}
 
@@ -531,7 +531,7 @@ static bool map_plan_wire_user_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_plan_delete_reserved_range(struct plane_vm_map *map,
+static bool vm_map_plan_delete_reserved_range(struct plane_vm_map *map,
 				       uint64_t start,
 				       uint64_t end,
 				       struct vm_map_range_plan *plan)
@@ -561,15 +561,15 @@ static bool map_plan_delete_reserved_range(struct plane_vm_map *map,
 		if (entry->wired_count != 0) {
 			return false;
 		}
-		if (map_entry_has_guards(entry) && partial) {
+		if (vm_map_entry_has_guards(entry) && partial) {
 			return false;
 		}
 		if (split_start &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 		if (split_end &&
-		    !map_entry_account_split_reference(entry, &split_count)) {
+		    !vm_map_entry_account_split_reference(entry, &split_count)) {
 			return false;
 		}
 		if (!partial &&
@@ -584,7 +584,7 @@ static bool map_plan_delete_reserved_range(struct plane_vm_map *map,
 		current = entry->next;
 	}
 
-	if (split_count > map_available_entry_count(map)) {
+	if (split_count > vm_map_available_entry_count(map)) {
 		return false;
 	}
 
@@ -592,7 +592,7 @@ static bool map_plan_delete_reserved_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_find_delete_range(struct plane_vm_map *map,
+static bool vm_map_find_delete_range(struct plane_vm_map *map,
 			      uint64_t start,
 			      uint64_t end,
 			      struct vm_map_delete_plan *plan)
@@ -640,7 +640,7 @@ static bool map_find_delete_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_apply_protect_user_range(struct plane_vm_map *map,
+static bool vm_map_apply_protect_user_range(struct plane_vm_map *map,
 				     uint64_t start,
 				     uint64_t end,
 				     const struct vm_map_range_plan *plan,
@@ -657,7 +657,7 @@ static bool map_apply_protect_user_range(struct plane_vm_map *map,
 
 		if (start > entry_user_start &&
 		    start < entry_user_end &&
-		    !map_clip_entry_start(map, current, start)) {
+		    !vm_map_clip_entry_start(map, current, start)) {
 			return false;
 		}
 
@@ -666,7 +666,7 @@ static bool map_apply_protect_user_range(struct plane_vm_map *map,
 		entry_user_end = plane_vaddr_raw(entry->user_end);
 		if (end > entry_user_start &&
 		    end < entry_user_end &&
-		    !map_clip_entry_end(map, current, end)) {
+		    !vm_map_clip_entry_end(map, current, end)) {
 			return false;
 		}
 
@@ -691,7 +691,7 @@ static bool map_apply_protect_user_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_apply_wire_user_range(struct plane_vm_map *map,
+static bool vm_map_apply_wire_user_range(struct plane_vm_map *map,
 				  uint64_t start,
 				  uint64_t end,
 				  const struct vm_map_range_plan *plan,
@@ -707,7 +707,7 @@ static bool map_apply_wire_user_range(struct plane_vm_map *map,
 
 		if (start > entry_user_start &&
 		    start < entry_user_end &&
-		    !map_clip_entry_start(map, current, start)) {
+		    !vm_map_clip_entry_start(map, current, start)) {
 			return false;
 		}
 
@@ -716,7 +716,7 @@ static bool map_apply_wire_user_range(struct plane_vm_map *map,
 		entry_user_end = plane_vaddr_raw(entry->user_end);
 		if (end > entry_user_start &&
 		    end < entry_user_end &&
-		    !map_clip_entry_end(map, current, end)) {
+		    !vm_map_clip_entry_end(map, current, end)) {
 			return false;
 		}
 
@@ -740,7 +740,7 @@ static bool map_apply_wire_user_range(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_find_fixed_position(struct plane_vm_map *map,
+static bool vm_map_find_fixed_position(struct plane_vm_map *map,
 				uint64_t start,
 				uint64_t *prev,
 				uint64_t *next)
@@ -759,7 +759,7 @@ static bool map_find_fixed_position(struct plane_vm_map *map,
 	return true;
 }
 
-static bool map_range_contains(struct plane_vm_map *map,
+static bool vm_map_range_contains(struct plane_vm_map *map,
 			       uint64_t start,
 			       uint64_t end)
 {
@@ -767,7 +767,7 @@ static bool map_range_contains(struct plane_vm_map *map,
 	       end <= plane_vaddr_raw(map->end);
 }
 
-static void zap_init(struct vm_map_zap *zap)
+static void vm_map_zap_init(struct vm_map_zap *zap)
 {
 	*zap = (struct vm_map_zap){
 		.head = VM_MAP_ENTRY_NONE,
@@ -777,7 +777,7 @@ static void zap_init(struct vm_map_zap *zap)
 	};
 }
 
-static void zap_append(struct plane_vm_map *map,
+static void vm_map_zap_append(struct plane_vm_map *map,
 		       struct vm_map_zap *zap,
 		       uint64_t index)
 {
@@ -794,7 +794,7 @@ static void zap_append(struct plane_vm_map *map,
 	zap->count++;
 }
 
-static void zap_detach_entry(struct plane_vm_map *map,
+static void vm_map_zap_detach_entry(struct plane_vm_map *map,
 			     struct vm_map_zap *zap,
 			     uint64_t index)
 {
@@ -814,28 +814,28 @@ static void zap_detach_entry(struct plane_vm_map *map,
 	}
 
 	map->entry_count--;
-	zap_append(map, zap, index);
+	vm_map_zap_append(map, zap, index);
 }
 
-static void zap_detach_range(struct plane_vm_map *map,
+static void vm_map_zap_detach_range(struct plane_vm_map *map,
 			     const struct vm_map_delete_plan *plan,
 			     struct vm_map_zap *zap)
 {
 	uint64_t current = plan->first;
 
-	zap_init(zap);
+	vm_map_zap_init(zap);
 	if (plan->count == 0) {
 		return;
 	}
 	while (current != plan->stop) {
 		uint64_t next = map->entries[current].next;
 
-		zap_detach_entry(map, zap, current);
+		vm_map_zap_detach_entry(map, zap, current);
 		current = next;
 	}
 }
 
-static void zap_dispose(struct plane_vm_map *map, struct vm_map_zap *zap)
+static void vm_map_zap_dispose(struct plane_vm_map *map, struct vm_map_zap *zap)
 {
 	uint64_t current = zap->head;
 
@@ -851,10 +851,10 @@ static void zap_dispose(struct plane_vm_map *map, struct vm_map_zap *zap)
 		map->entries[current].next = VM_MAP_ENTRY_NONE;
 		current = next;
 	}
-	zap_init(zap);
+	vm_map_zap_init(zap);
 }
 
-static int64_t map_find_exact_entry(struct plane_vm_map *map,
+static int64_t vm_map_find_exact_entry(struct plane_vm_map *map,
 				uint64_t vaddr,
 				uint64_t page_count)
 {
@@ -879,7 +879,7 @@ static int64_t map_find_exact_entry(struct plane_vm_map *map,
 	return -1;
 }
 
-static uint64_t reserved_pages(struct plane_vm_map *map)
+static uint64_t vm_map_reserved_pages(struct plane_vm_map *map)
 {
 	uint64_t pages = 0;
 	uint64_t current = map->head;
@@ -894,7 +894,7 @@ static uint64_t reserved_pages(struct plane_vm_map *map)
 	return pages;
 }
 
-static uint64_t user_pages(struct plane_vm_map *map)
+static uint64_t vm_map_user_pages(struct plane_vm_map *map)
 {
 	uint64_t pages = 0;
 	uint64_t current = map->head;
@@ -909,7 +909,7 @@ static uint64_t user_pages(struct plane_vm_map *map)
 	return pages;
 }
 
-static uint64_t map_free_range_count(struct plane_vm_map *map)
+static uint64_t vm_map_free_range_count(struct plane_vm_map *map)
 {
 	uint64_t count = 0;
 	uint64_t cursor = plane_vaddr_raw(map->base);
@@ -930,7 +930,7 @@ static uint64_t map_free_range_count(struct plane_vm_map *map)
 	return count;
 }
 
-static bool map_rehome_entries_locked(struct plane_vm_map *map,
+static bool vm_map_rehome_entries_locked(struct plane_vm_map *map,
 				  struct plane_vm_map_entry *entries,
 				  uint64_t entry_capacity)
 {
@@ -942,12 +942,12 @@ static bool map_rehome_entries_locked(struct plane_vm_map *map,
 	if (entries == map->entries) {
 		return entry_capacity == map->entry_capacity;
 	}
-	if (map_entries_storage_overlaps(map->entries, map->entry_capacity,
+	if (vm_map_entries_storage_overlaps(map->entries, map->entry_capacity,
 				   entries, entry_capacity)) {
 		return false;
 	}
 
-	map_entries_reset(entries, entry_capacity);
+	vm_map_entries_reset(entries, entry_capacity);
 	for (uint64_t i = 0; i < map->entry_capacity; i++) {
 		if (map->entries[i].used) {
 			entries[i] = map->entries[i];
@@ -979,7 +979,7 @@ bool plane_vm_map_init(struct plane_vm_map *map,
 		return false;
 	}
 
-	map_reset(map, entries, entry_capacity);
+	vm_map_reset(map, entries, entry_capacity);
 	plane_spin_init(&map->lock);
 	map->base = plane_vaddr_make(raw_base);
 	map->end = plane_vaddr_make(end);
@@ -998,13 +998,13 @@ bool plane_vm_map_rehome_entries(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	rehomed = map_rehome_entries_locked(map, entries, entry_capacity);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	rehomed = vm_map_rehome_entries_locked(map, entries, entry_capacity);
+	vm_map_unlock(map, state);
 	return rehomed;
 }
 
-static bool map_enter_locked(struct plane_vm_map *map,
+static bool vm_map_enter_locked(struct plane_vm_map *map,
 			 const struct plane_vm_map_enter_options *options,
 			 plane_vaddr_t *vaddr)
 {
@@ -1032,7 +1032,7 @@ static bool map_enter_locked(struct plane_vm_map *map,
 	if (vaddr == NULL ||
 	    !map->initialized ||
 	    options->page_count == 0 ||
-	    !enter_flags_are_valid(options->flags) ||
+	    !vm_map_enter_flags_are_valid(options->flags) ||
 	    (options->object == NULL && options->object_offset != 0) ||
 	    (options->object != NULL &&
 	     options->object_offset != PLANE_VM_MAP_OBJECT_OFFSET_AUTO &&
@@ -1047,7 +1047,7 @@ static bool map_enter_locked(struct plane_vm_map *map,
 	entry_object = options->object;
 	entry_object_offset = options->object_offset;
 	raw_address = plane_vaddr_raw(options->address);
-	zap_init(&zap);
+	vm_map_zap_init(&zap);
 
 	if (va_only && entry_object != NULL) {
 		return false;
@@ -1071,25 +1071,25 @@ static bool map_enter_locked(struct plane_vm_map *map,
 		start = user_start - guard_size;
 		if (!plane_checked_add_u64(start, size, &end) ||
 		    !plane_checked_add_u64(user_start, user_size, &user_end) ||
-		    !map_range_contains(map, start, end)) {
+		    !vm_map_range_contains(map, start, end)) {
 			return false;
 		}
 		if (overwrite) {
-			if (!map_find_delete_range(map, start, end, &delete_plan)) {
+			if (!vm_map_find_delete_range(map, start, end, &delete_plan)) {
 				return false;
 			}
 			prev = delete_plan.prev;
 			next = delete_plan.stop;
 		} else {
-			if (!map_find_fixed_position(map, start, &prev, &next) ||
+			if (!vm_map_find_fixed_position(map, start, &prev, &next) ||
 			    (next != VM_MAP_ENTRY_NONE &&
-			     map_entry_overlaps_range(&map->entries[next],
+			     vm_map_entry_overlaps_range(&map->entries[next],
 						  start, end))) {
 				return false;
 			}
 		}
 	} else {
-		if (!map_find_first_fit(map, size, &start, &prev, &next) ||
+		if (!vm_map_find_first_fit(map, size, &start, &prev, &next) ||
 		    !plane_checked_add_u64(start, size, &end) ||
 		    !plane_checked_add_u64(start, guard_size, &user_start) ||
 		    !plane_checked_add_u64(user_start, user_size, &user_end)) {
@@ -1119,7 +1119,7 @@ static bool map_enter_locked(struct plane_vm_map *map,
 		entry_object_offset = 0;
 	}
 
-	entry_index = map_alloc_entry_index(map);
+	entry_index = vm_map_alloc_entry_index(map);
 	if ((!overwrite || delete_plan.count == 0) && entry_index < 0) {
 		if (entry_object != NULL) {
 			plane_vm_object_deallocate(entry_object);
@@ -1128,9 +1128,9 @@ static bool map_enter_locked(struct plane_vm_map *map,
 	}
 
 	if (overwrite && delete_plan.count != 0) {
-		zap_detach_range(map, &delete_plan, &zap);
+		vm_map_zap_detach_range(map, &delete_plan, &zap);
 		entry_index = (int64_t)zap.reusable;
-		zap_dispose(map, &zap);
+		vm_map_zap_dispose(map, &zap);
 		if (entry_index < 0) {
 			if (entry_object != NULL) {
 				plane_vm_object_deallocate(entry_object);
@@ -1139,7 +1139,7 @@ static bool map_enter_locked(struct plane_vm_map *map,
 		}
 	}
 
-	map_insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,
+	vm_map_insert_entry(map, (uint64_t)entry_index, start, end, user_start, user_end,
 		     entry_object, entry_object_offset, options->prot,
 		     options->max_prot, prev, next);
 	*vaddr = plane_vaddr_make(user_start);
@@ -1157,13 +1157,13 @@ bool plane_vm_map_enter(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	entered = map_enter_locked(map, options, vaddr);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	entered = vm_map_enter_locked(map, options, vaddr);
+	vm_map_unlock(map, state);
 	return entered;
 }
 
-static bool map_delete_range_locked(struct plane_vm_map *map,
+static bool vm_map_delete_range_locked(struct plane_vm_map *map,
 				plane_vaddr_t start,
 				uint64_t page_count)
 {
@@ -1179,8 +1179,8 @@ static bool map_delete_range_locked(struct plane_vm_map *map,
 	    !plane_vaddr_is_page_aligned(start) ||
 	    !plane_checked_page_offset(page_count, &size) ||
 	    !plane_checked_add_u64(raw_start, size, &end) ||
-	    !map_range_contains(map, raw_start, end) ||
-	    !map_plan_delete_reserved_range(map, raw_start, end, &range_plan)) {
+	    !vm_map_range_contains(map, raw_start, end) ||
+	    !vm_map_plan_delete_reserved_range(map, raw_start, end, &range_plan)) {
 		return false;
 	}
 
@@ -1196,7 +1196,7 @@ static bool map_delete_range_locked(struct plane_vm_map *map,
 
 			if (raw_start > entry_start &&
 			    raw_start < entry_end &&
-			    !map_clip_entry_start(map, current, raw_start)) {
+			    !vm_map_clip_entry_start(map, current, raw_start)) {
 				return false;
 			}
 			entry = &map->entries[current];
@@ -1204,7 +1204,7 @@ static bool map_delete_range_locked(struct plane_vm_map *map,
 			entry_end = plane_vaddr_raw(entry->end);
 			if (end > entry_start &&
 			    end < entry_end &&
-			    !map_clip_entry_end(map, current, end)) {
+			    !vm_map_clip_entry_end(map, current, end)) {
 				return false;
 			}
 			next = map->entries[current].next;
@@ -1212,15 +1212,15 @@ static bool map_delete_range_locked(struct plane_vm_map *map,
 		}
 	}
 
-	if (!map_find_delete_range(map, raw_start, end, &plan)) {
+	if (!vm_map_find_delete_range(map, raw_start, end, &plan)) {
 		return false;
 	}
 	if (plan.count == 0) {
 		return true;
 	}
 
-	zap_detach_range(map, &plan, &zap);
-	zap_dispose(map, &zap);
+	vm_map_zap_detach_range(map, &plan, &zap);
+	vm_map_zap_dispose(map, &zap);
 	return true;
 }
 
@@ -1235,13 +1235,13 @@ bool plane_vm_map_delete_range(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	deleted = map_delete_range_locked(map, start, page_count);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	deleted = vm_map_delete_range_locked(map, start, page_count);
+	vm_map_unlock(map, state);
 	return deleted;
 }
 
-static bool map_lookup_allocation_locked(
+static bool vm_map_lookup_allocation_locked(
 	struct plane_vm_map *map,
 	plane_vaddr_t vaddr,
 	uint64_t page_count,
@@ -1256,7 +1256,7 @@ static bool map_lookup_allocation_locked(
 		return false;
 	}
 
-	entry_index = map_find_exact_entry(map, raw_vaddr, page_count);
+	entry_index = vm_map_find_exact_entry(map, raw_vaddr, page_count);
 	if (entry_index < 0) {
 		return false;
 	}
@@ -1296,13 +1296,13 @@ bool plane_vm_map_lookup_allocation(
 		return false;
 	}
 
-	state = map_lock(map);
-	found = map_lookup_allocation_locked(map, vaddr, page_count, info);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	found = vm_map_lookup_allocation_locked(map, vaddr, page_count, info);
+	vm_map_unlock(map, state);
 	return found;
 }
 
-static bool map_lookup_page_locked(struct plane_vm_map *map,
+static bool vm_map_lookup_page_locked(struct plane_vm_map *map,
 			       plane_vaddr_t vaddr,
 			       struct plane_vm_map_page_info *info)
 {
@@ -1317,7 +1317,7 @@ static bool map_lookup_page_locked(struct plane_vm_map *map,
 		return false;
 	}
 
-	entry_index = map_find_user_entry(map, page_vaddr);
+	entry_index = vm_map_find_user_entry(map, page_vaddr);
 	if (entry_index < 0) {
 		return false;
 	}
@@ -1353,9 +1353,9 @@ bool plane_vm_map_lookup_page(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	found = map_lookup_page_locked(map, vaddr, info);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	found = vm_map_lookup_page_locked(map, vaddr, info);
+	vm_map_unlock(map, state);
 	return found;
 }
 
@@ -1372,8 +1372,8 @@ bool plane_vm_map_lookup_page_ref(struct plane_vm_map *map,
 	}
 
 	*ref = (struct plane_vm_map_page_ref){0};
-	state = map_lock(map);
-	if (!map_lookup_page_locked(map, vaddr, &info) ||
+	state = vm_map_lock(map);
+	if (!vm_map_lookup_page_locked(map, vaddr, &info) ||
 	    !plane_vm_object_reference(info.object)) {
 		goto out;
 	}
@@ -1383,7 +1383,7 @@ bool plane_vm_map_lookup_page_ref(struct plane_vm_map *map,
 	found = true;
 
 out:
-	map_unlock(map, state);
+	vm_map_unlock(map, state);
 	return found;
 }
 
@@ -1398,7 +1398,7 @@ void plane_vm_map_release_page_ref(struct plane_vm_map_page_ref *ref)
 	*ref = (struct plane_vm_map_page_ref){0};
 }
 
-static bool map_protect_pages_locked(struct plane_vm_map *map,
+static bool vm_map_protect_pages_locked(struct plane_vm_map *map,
 				 plane_vaddr_t vaddr,
 				 uint64_t page_count,
 				 uint32_t prot)
@@ -1414,12 +1414,12 @@ static bool map_protect_pages_locked(struct plane_vm_map *map,
 	    !plane_vm_prot_is_valid(prot) ||
 	    !plane_checked_page_offset(page_count, &size) ||
 	    !plane_checked_add_u64(raw_vaddr, size, &end) ||
-	    !map_range_contains(map, raw_vaddr, end) ||
-	    !map_plan_protect_user_range(map, raw_vaddr, end, prot, &plan)) {
+	    !vm_map_range_contains(map, raw_vaddr, end) ||
+	    !vm_map_plan_protect_user_range(map, raw_vaddr, end, prot, &plan)) {
 		return false;
 	}
 
-	return map_apply_protect_user_range(map, raw_vaddr, end, &plan, prot, false);
+	return vm_map_apply_protect_user_range(map, raw_vaddr, end, &plan, prot, false);
 }
 
 bool plane_vm_map_protect_pages(struct plane_vm_map *map,
@@ -1434,13 +1434,13 @@ bool plane_vm_map_protect_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	protected = map_protect_pages_locked(map, vaddr, page_count, prot);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	protected = vm_map_protect_pages_locked(map, vaddr, page_count, prot);
+	vm_map_unlock(map, state);
 	return protected;
 }
 
-static bool map_protect_max_pages_locked(struct plane_vm_map *map,
+static bool vm_map_protect_max_pages_locked(struct plane_vm_map *map,
 				     plane_vaddr_t vaddr,
 				     uint64_t page_count,
 				     uint32_t max_prot)
@@ -1456,12 +1456,12 @@ static bool map_protect_max_pages_locked(struct plane_vm_map *map,
 	    !plane_vm_prot_is_valid(max_prot) ||
 	    !plane_checked_page_offset(page_count, &size) ||
 	    !plane_checked_add_u64(raw_vaddr, size, &end) ||
-	    !map_range_contains(map, raw_vaddr, end) ||
-	    !map_plan_protect_user_range(map, raw_vaddr, end, max_prot, &plan)) {
+	    !vm_map_range_contains(map, raw_vaddr, end) ||
+	    !vm_map_plan_protect_user_range(map, raw_vaddr, end, max_prot, &plan)) {
 		return false;
 	}
 
-	return map_apply_protect_user_range(map, raw_vaddr, end, &plan, max_prot, true);
+	return vm_map_apply_protect_user_range(map, raw_vaddr, end, &plan, max_prot, true);
 }
 
 bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
@@ -1476,13 +1476,13 @@ bool plane_vm_map_protect_max_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	protected = map_protect_max_pages_locked(map, vaddr, page_count, max_prot);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	protected = vm_map_protect_max_pages_locked(map, vaddr, page_count, max_prot);
+	vm_map_unlock(map, state);
 	return protected;
 }
 
-static bool map_wire_pages_locked(struct plane_vm_map *map,
+static bool vm_map_wire_pages_locked(struct plane_vm_map *map,
 			      plane_vaddr_t vaddr,
 			      uint64_t page_count)
 {
@@ -1496,12 +1496,12 @@ static bool map_wire_pages_locked(struct plane_vm_map *map,
 	    !plane_vaddr_is_page_aligned(vaddr) ||
 	    !plane_checked_page_offset(page_count, &size) ||
 	    !plane_checked_add_u64(raw_vaddr, size, &end) ||
-	    !map_range_contains(map, raw_vaddr, end) ||
-	    !map_plan_wire_user_range(map, raw_vaddr, end, true, &plan)) {
+	    !vm_map_range_contains(map, raw_vaddr, end) ||
+	    !vm_map_plan_wire_user_range(map, raw_vaddr, end, true, &plan)) {
 		return false;
 	}
 
-	return map_apply_wire_user_range(map, raw_vaddr, end, &plan, true);
+	return vm_map_apply_wire_user_range(map, raw_vaddr, end, &plan, true);
 }
 
 bool plane_vm_map_wire_pages(struct plane_vm_map *map,
@@ -1515,13 +1515,13 @@ bool plane_vm_map_wire_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	wired = map_wire_pages_locked(map, vaddr, page_count);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	wired = vm_map_wire_pages_locked(map, vaddr, page_count);
+	vm_map_unlock(map, state);
 	return wired;
 }
 
-static bool map_unwire_pages_locked(struct plane_vm_map *map,
+static bool vm_map_unwire_pages_locked(struct plane_vm_map *map,
 				plane_vaddr_t vaddr,
 				uint64_t page_count)
 {
@@ -1535,12 +1535,12 @@ static bool map_unwire_pages_locked(struct plane_vm_map *map,
 	    !plane_vaddr_is_page_aligned(vaddr) ||
 	    !plane_checked_page_offset(page_count, &size) ||
 	    !plane_checked_add_u64(raw_vaddr, size, &end) ||
-	    !map_range_contains(map, raw_vaddr, end) ||
-	    !map_plan_wire_user_range(map, raw_vaddr, end, false, &plan)) {
+	    !vm_map_range_contains(map, raw_vaddr, end) ||
+	    !vm_map_plan_wire_user_range(map, raw_vaddr, end, false, &plan)) {
 		return false;
 	}
 
-	return map_apply_wire_user_range(map, raw_vaddr, end, &plan, false);
+	return vm_map_apply_wire_user_range(map, raw_vaddr, end, &plan, false);
 }
 
 bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
@@ -1554,13 +1554,13 @@ bool plane_vm_map_unwire_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	unwired = map_unwire_pages_locked(map, vaddr, page_count);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	unwired = vm_map_unwire_pages_locked(map, vaddr, page_count);
+	vm_map_unlock(map, state);
 	return unwired;
 }
 
-static bool map_free_pages_locked(struct plane_vm_map *map,
+static bool vm_map_free_pages_locked(struct plane_vm_map *map,
 			      plane_vaddr_t vaddr,
 			      uint64_t page_count)
 {
@@ -1581,7 +1581,7 @@ static bool map_free_pages_locked(struct plane_vm_map *map,
 		return false;
 	}
 
-	first_index = map_find_user_entry(map, raw_vaddr);
+	first_index = vm_map_find_user_entry(map, raw_vaddr);
 	if (first_index < 0) {
 		return false;
 	}
@@ -1597,7 +1597,7 @@ static bool map_free_pages_locked(struct plane_vm_map *map,
 
 		if (raw_vaddr > entry_user_start ||
 		    user_end < entry_user_end) {
-			if (map_entry_has_guards(entry)) {
+			if (vm_map_entry_has_guards(entry)) {
 				return false;
 			}
 		}
@@ -1607,7 +1607,7 @@ static bool map_free_pages_locked(struct plane_vm_map *map,
 			    entry_user_start) {
 			return false;
 		}
-		if (map_entry_has_guards(entry)) {
+		if (vm_map_entry_has_guards(entry)) {
 			guarded = true;
 		}
 		reserved_end = plane_vaddr_raw(entry->end);
@@ -1631,12 +1631,12 @@ static bool map_free_pages_locked(struct plane_vm_map *map,
 		    user_end != current_user_end) {
 			return false;
 		}
-		return map_delete_range_locked(
+		return vm_map_delete_range_locked(
 			map, plane_vaddr_make(reserved_start),
 			page_count_from_size(reserved_end - reserved_start));
 	}
 
-	return map_delete_range_locked(map, vaddr, page_count);
+	return vm_map_delete_range_locked(map, vaddr, page_count);
 }
 
 bool plane_vm_map_free_pages(struct plane_vm_map *map,
@@ -1650,13 +1650,13 @@ bool plane_vm_map_free_pages(struct plane_vm_map *map,
 		return false;
 	}
 
-	state = map_lock(map);
-	freed = map_free_pages_locked(map, vaddr, page_count);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	freed = vm_map_free_pages_locked(map, vaddr, page_count);
+	vm_map_unlock(map, state);
 	return freed;
 }
 
-static struct plane_vm_map_stats map_stats_locked(struct plane_vm_map *map)
+static struct plane_vm_map_stats vm_map_stats_locked(struct plane_vm_map *map)
 {
 	struct plane_vm_map_stats stats = {0};
 
@@ -1666,10 +1666,10 @@ static struct plane_vm_map_stats map_stats_locked(struct plane_vm_map *map)
 
 	stats.total_pages = page_count_from_size(plane_vaddr_raw(map->end) -
 						plane_vaddr_raw(map->base));
-	stats.reserved_pages = reserved_pages(map);
-	stats.user_pages = user_pages(map);
+	stats.reserved_pages = vm_map_reserved_pages(map);
+	stats.user_pages = vm_map_user_pages(map);
 	stats.free_pages = stats.total_pages - stats.reserved_pages;
-	stats.map_free_range_count = map_free_range_count(map);
+	stats.map_free_range_count = vm_map_free_range_count(map);
 	stats.allocation_count = map->entry_count;
 	return stats;
 }
@@ -1683,8 +1683,8 @@ struct plane_vm_map_stats plane_vm_map_get_stats(struct plane_vm_map *map)
 		return (struct plane_vm_map_stats){0};
 	}
 
-	state = map_lock(map);
-	stats = map_stats_locked(map);
-	map_unlock(map, state);
+	state = vm_map_lock(map);
+	stats = vm_map_stats_locked(map);
+	vm_map_unlock(map, state);
 	return stats;
 }

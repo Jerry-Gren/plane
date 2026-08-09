@@ -33,7 +33,7 @@ static struct plane_vm_zone_segment bootstrap_object_segment;
 static struct plane_vm_zone object_zone;
 static struct plane_spinlock object_zone_spinlock = PLANE_SPINLOCK_INIT;
 
-static bool object_zone_ensure_locked(void)
+static bool vm_object_zone_ensure_locked(void)
 {
 	if (object_zone.initialized) {
 		return true;
@@ -45,38 +45,38 @@ static bool object_zone_ensure_locked(void)
 				  &bootstrap_object_segment);
 }
 
-static struct plane_spinlock *object_spinlock(const struct plane_vm_object *object)
+static struct plane_spinlock *vm_object_spinlock(const struct plane_vm_object *object)
 {
 	return (struct plane_spinlock *)&object->lock;
 }
 
-static plane_irq_state_t object_lock(const struct plane_vm_object *object)
+static plane_irq_state_t vm_object_lock(const struct plane_vm_object *object)
 {
-	return plane_spin_lock_irqsave(object_spinlock(object));
+	return plane_spin_lock_irqsave(vm_object_spinlock(object));
 }
 
-static void object_unlock(const struct plane_vm_object *object,
+static void vm_object_unlock(const struct plane_vm_object *object,
 			  plane_irq_state_t state)
 {
-	plane_spin_unlock_irqrestore(object_spinlock(object), state);
+	plane_spin_unlock_irqrestore(vm_object_spinlock(object), state);
 }
 
-static plane_irq_state_t resident_hash_lock(void)
+static plane_irq_state_t vm_object_resident_hash_lock(void)
 {
 	return plane_spin_lock_irqsave(&resident_hash_spinlock);
 }
 
-static void resident_hash_unlock(plane_irq_state_t state)
+static void vm_object_resident_hash_unlock(plane_irq_state_t state)
 {
 	plane_spin_unlock_irqrestore(&resident_hash_spinlock, state);
 }
 
-static plane_irq_state_t object_zone_lock(void)
+static plane_irq_state_t vm_object_zone_lock(void)
 {
 	return plane_spin_lock_irqsave(&object_zone_spinlock);
 }
 
-static void object_zone_unlock(plane_irq_state_t state)
+static void vm_object_zone_unlock(plane_irq_state_t state)
 {
 	plane_spin_unlock_irqrestore(&object_zone_spinlock, state);
 }
@@ -122,7 +122,7 @@ static bool pointer_array_ranges_overlap(struct plane_page **first,
 	return first_start < second_end && second_start < first_end;
 }
 
-static bool object_offset_is_valid(const struct plane_vm_object *object, uint64_t offset)
+static bool vm_object_offset_is_valid(const struct plane_vm_object *object, uint64_t offset)
 {
 	return object != NULL &&
 	       object->initialized &&
@@ -131,7 +131,7 @@ static bool object_offset_is_valid(const struct plane_vm_object *object, uint64_
 	       offset < object->offset_limit;
 }
 
-static bool resident_page_offset_matches(struct plane_page *page, uint64_t offset)
+static bool vm_object_resident_page_offset_matches(struct plane_page *page, uint64_t offset)
 {
 	uint64_t page_offset;
 
@@ -139,7 +139,7 @@ static bool resident_page_offset_matches(struct plane_page *page, uint64_t offse
 	       page_offset == offset;
 }
 
-static uint64_t resident_hash_index(const struct plane_vm_object *object,
+static uint64_t vm_object_resident_hash_index(const struct plane_vm_object *object,
 				    uint64_t offset)
 {
 	uintptr_t object_key = (uintptr_t)object;
@@ -149,11 +149,11 @@ static uint64_t resident_hash_index(const struct plane_vm_object *object,
 	       (resident_hash_bucket_count - 1);
 }
 
-static struct plane_page *resident_hash_lookup_page(struct plane_vm_object *object,
+static struct plane_page *vm_object_resident_hash_lookup_page(struct plane_vm_object *object,
 					    uint64_t offset)
 {
 	struct plane_page *page =
-		resident_hash[resident_hash_index(object, offset)];
+		resident_hash[vm_object_resident_hash_index(object, offset)];
 
 	while (page != NULL) {
 		BUG_ON_MSG(!plane_vm_page_object_is_hashed(page),
@@ -161,7 +161,7 @@ static struct plane_page *resident_hash_lookup_page(struct plane_vm_object *obje
 		BUG_ON_MSG(!plane_vm_page_object_is_tabled(page),
 			   "resident hash page is not marked tabled");
 		if (plane_vm_page_object(page) == object &&
-		    resident_page_offset_matches(page, offset)) {
+		    vm_object_resident_page_offset_matches(page, offset)) {
 			object->resident_hint = page;
 			return page;
 		}
@@ -172,7 +172,7 @@ static struct plane_page *resident_hash_lookup_page(struct plane_vm_object *obje
 	return NULL;
 }
 
-static struct plane_page *object_lookup_page(struct plane_vm_object *object,
+static struct plane_page *vm_object_lookup_page(struct plane_vm_object *object,
 				    uint64_t offset)
 {
 	struct plane_page *page;
@@ -190,7 +190,7 @@ static struct plane_page *object_lookup_page(struct plane_vm_object *object,
 			   "resident hint page is not marked tabled");
 		BUG_ON_MSG(plane_vm_page_object(object->resident_hint) != object,
 			   "resident hint page belongs to another object");
-		if (resident_page_offset_matches(object->resident_hint, offset)) {
+		if (vm_object_resident_page_offset_matches(object->resident_hint, offset)) {
 			return object->resident_hint;
 		}
 
@@ -200,7 +200,7 @@ static struct plane_page *object_lookup_page(struct plane_vm_object *object,
 				   "resident hint next page is not marked tabled");
 			BUG_ON_MSG(plane_vm_page_object(page) != object,
 				   "resident hint next page belongs to another object");
-			if (resident_page_offset_matches(page, offset)) {
+			if (vm_object_resident_page_offset_matches(page, offset)) {
 				object->resident_hint = page;
 				return page;
 			}
@@ -212,7 +212,7 @@ static struct plane_page *object_lookup_page(struct plane_vm_object *object,
 				   "resident hint prev page is not marked tabled");
 			BUG_ON_MSG(plane_vm_page_object(page) != object,
 				   "resident hint prev page belongs to another object");
-			if (resident_page_offset_matches(page, offset)) {
+			if (vm_object_resident_page_offset_matches(page, offset)) {
 				object->resident_hint = page;
 				return page;
 			}
@@ -227,7 +227,7 @@ static struct plane_page *object_lookup_page(struct plane_vm_object *object,
 				   "resident list page is not marked tabled");
 			BUG_ON_MSG(plane_vm_page_object(page) != object,
 				   "resident list page belongs to another object");
-			if (resident_page_offset_matches(page, offset)) {
+			if (vm_object_resident_page_offset_matches(page, offset)) {
 				object->resident_hint = page;
 				return page;
 			}
@@ -237,14 +237,14 @@ static struct plane_page *object_lookup_page(struct plane_vm_object *object,
 		return NULL;
 	}
 
-	return resident_hash_lookup_page(object, offset);
+	return vm_object_resident_hash_lookup_page(object, offset);
 }
 
-static bool resident_hash_remove_page_at(struct plane_vm_object *object,
+static bool vm_object_resident_hash_remove_page_at(struct plane_vm_object *object,
 				     struct plane_page *page,
 				     uint64_t offset)
 {
-	uint64_t index = resident_hash_index(object, offset);
+	uint64_t index = vm_object_resident_hash_index(object, offset);
 	struct plane_page *current = resident_hash[index];
 	struct plane_page *prev = NULL;
 
@@ -277,26 +277,26 @@ static bool resident_hash_remove_page_at(struct plane_vm_object *object,
 	return false;
 }
 
-static void resident_hash_remove_page(struct plane_vm_object *object,
+static void vm_object_resident_hash_remove_page(struct plane_vm_object *object,
 				  struct plane_page *page,
 				  uint64_t offset)
 {
 	BUG_ON_MSG(!plane_vm_page_object_is_hashed(page),
 		   "resident page is not marked hashed");
-	BUG_ON_MSG(!resident_hash_remove_page_at(object, page, offset),
+	BUG_ON_MSG(!vm_object_resident_hash_remove_page_at(object, page, offset),
 		   "resident page missing from hash");
 	BUG_ON_MSG(!plane_vm_page_set_object_hashed(page, false),
 		   "failed to clear resident hash state");
 }
 
-static void resident_hash_insert_page(struct plane_vm_object *object,
+static void vm_object_resident_hash_insert_page(struct plane_vm_object *object,
 				  struct plane_page *page,
 				  uint64_t offset)
 {
-	uint64_t index = resident_hash_index(object, offset);
+	uint64_t index = vm_object_resident_hash_index(object, offset);
 
 	BUG_ON_MSG(plane_vm_page_object(page) != object ||
-		   !resident_page_offset_matches(page, offset),
+		   !vm_object_resident_page_offset_matches(page, offset),
 		   "resident page hash insert without object identity");
 	BUG_ON_MSG(!plane_vm_page_object_is_tabled(page),
 		   "resident page hash insert before resident list insert");
@@ -312,7 +312,7 @@ static void resident_hash_insert_page(struct plane_vm_object *object,
 		   "failed to mark resident page hashed");
 }
 
-static void resident_list_append_page(struct plane_vm_object *object,
+static void vm_object_resident_list_append_page(struct plane_vm_object *object,
 				 struct plane_page *page)
 {
 	struct plane_page *old_tail = object->resident_tail;
@@ -343,7 +343,7 @@ static void resident_list_append_page(struct plane_vm_object *object,
 		   "failed to mark resident page tabled");
 }
 
-static void resident_list_remove_page(struct plane_vm_object *object,
+static void vm_object_resident_list_remove_page(struct plane_vm_object *object,
 				 struct plane_page *page,
 				 uint64_t offset)
 {
@@ -352,7 +352,7 @@ static void resident_list_remove_page(struct plane_vm_object *object,
 
 	BUG_ON_MSG(!plane_vm_page_object_is_tabled(page),
 		   "resident page is not marked tabled");
-	resident_hash_remove_page(object, page, offset);
+	vm_object_resident_hash_remove_page(object, page, offset);
 
 	if (prev != NULL) {
 		BUG_ON_MSG(!plane_vm_page_set_object_next(prev, next),
@@ -380,14 +380,14 @@ static void resident_list_remove_page(struct plane_vm_object *object,
 	}
 }
 
-static bool object_count_is_valid(const struct plane_vm_object *object)
+static bool vm_object_count_is_valid(const struct plane_vm_object *object)
 {
 	return object != NULL && object->initialized && object->alive;
 }
 
-static bool object_can_deallocate_locked(const struct plane_vm_object *object)
+static bool vm_object_can_deallocate_locked(const struct plane_vm_object *object)
 {
-	if (!object_count_is_valid(object) ||
+	if (!vm_object_count_is_valid(object) ||
 	    object->ref_count == 0) {
 		return false;
 	}
@@ -412,8 +412,8 @@ bool plane_vm_object_account_page_wired(struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object) ||
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object) ||
 	    object->wired_page_count == UINT64_MAX) {
 		goto out;
 	}
@@ -422,7 +422,7 @@ bool plane_vm_object_account_page_wired(struct plane_vm_object *object)
 	wired = true;
 
 out:
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return wired;
 }
 
@@ -435,8 +435,8 @@ bool plane_vm_object_account_page_unwired(struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object) ||
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object) ||
 	    object->wired_page_count == 0) {
 		goto out;
 	}
@@ -445,7 +445,7 @@ bool plane_vm_object_account_page_unwired(struct plane_vm_object *object)
 	unwired = true;
 
 out:
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return unwired;
 }
 
@@ -453,12 +453,12 @@ bool plane_vm_object_add_zone_storage(struct plane_vm_object *storage,
 				      uint64_t count,
 				      struct plane_vm_zone_segment *segment)
 {
-	plane_irq_state_t state = object_zone_lock();
+	plane_irq_state_t state = vm_object_zone_lock();
 	bool added;
 
-	added = object_zone_ensure_locked() &&
+	added = vm_object_zone_ensure_locked() &&
 		plane_vm_zone_add_storage(&object_zone, storage, count, segment);
-	object_zone_unlock(state);
+	vm_object_zone_unlock(state);
 	return added;
 }
 
@@ -474,7 +474,7 @@ bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
 		return false;
 	}
 
-	state = resident_hash_lock();
+	state = vm_object_resident_hash_lock();
 	old_hash = resident_hash;
 	old_bucket_count = resident_hash_bucket_count;
 	if (buckets == resident_hash) {
@@ -507,7 +507,7 @@ bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
 
 			BUG_ON_MSG(!plane_vm_page_object_offset(page, &offset),
 				   "hashed resident page missing object offset");
-			index = resident_hash_index(object, offset);
+			index = vm_object_resident_hash_index(object, offset);
 			BUG_ON_MSG(!plane_vm_page_set_object_hash_next(
 					   page, resident_hash[index]),
 				   "failed to rehash resident page");
@@ -520,7 +520,7 @@ bool plane_vm_object_rehome_resident_hash(struct plane_page **buckets,
 	rehomed = true;
 
 out:
-	resident_hash_unlock(state);
+	vm_object_resident_hash_unlock(state);
 	return rehomed;
 }
 
@@ -583,15 +583,15 @@ bool plane_vm_object_allocate(uint64_t offset_limit,
 		return false;
 	}
 
-	state = object_zone_lock();
-	if (!object_zone_ensure_locked()) {
-		object_zone_unlock(state);
+	state = vm_object_zone_lock();
+	if (!vm_object_zone_ensure_locked()) {
+		vm_object_zone_unlock(state);
 		return false;
 	}
 
 	candidate = plane_vm_zone_alloc(&object_zone);
 	if (candidate == NULL) {
-		object_zone_unlock(state);
+		vm_object_zone_unlock(state);
 		return false;
 	}
 
@@ -609,7 +609,7 @@ bool plane_vm_object_allocate(uint64_t offset_limit,
 		.initialized = true,
 	};
 	plane_spin_init(&candidate->lock);
-	object_zone_unlock(state);
+	vm_object_zone_unlock(state);
 	*object = candidate;
 	return true;
 }
@@ -623,8 +623,8 @@ bool plane_vm_object_reference(struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object) ||
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object) ||
 	    object->ref_count == UINT64_MAX) {
 		goto out;
 	}
@@ -633,7 +633,7 @@ bool plane_vm_object_reference(struct plane_vm_object *object)
 	referenced = true;
 
 out:
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return referenced;
 }
 
@@ -647,8 +647,8 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	if (!object_can_deallocate_locked(object)) {
+	state = vm_object_lock(object);
+	if (!vm_object_can_deallocate_locked(object)) {
 		goto out;
 	}
 
@@ -677,15 +677,15 @@ bool plane_vm_object_deallocate(struct plane_vm_object *object)
 	object->ref_count = 0;
 	object->alive = false;
 	object->initialized = false;
-	object_unlock(object, state);
-	state = object_zone_lock();
+	vm_object_unlock(object, state);
+	state = vm_object_zone_lock();
 	deallocated = plane_vm_zone_free(&object_zone, object);
-	object_zone_unlock(state);
+	vm_object_zone_unlock(state);
 	BUG_ON_MSG(!deallocated, "failed to free zone-backed VM object");
 	return true;
 
 out:
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return deallocated;
 }
 
@@ -698,9 +698,9 @@ bool plane_vm_object_can_deallocate(const struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	can_deallocate = object_can_deallocate_locked(object);
-	object_unlock(object, state);
+	state = vm_object_lock(object);
+	can_deallocate = vm_object_can_deallocate_locked(object);
+	vm_object_unlock(object, state);
 	return can_deallocate;
 }
 
@@ -725,19 +725,19 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 		return false;
 	}
 
-	object_state = object_lock(object);
-	hash_state = resident_hash_lock();
-	if (!object_offset_is_valid(object, offset) ||
+	object_state = vm_object_lock(object);
+	hash_state = vm_object_resident_hash_lock();
+	if (!vm_object_offset_is_valid(object, offset) ||
 	    object->resident_page_count == UINT64_MAX ||
 	    (wire_count != 0 && object->wired_page_count == UINT64_MAX) ||
-	    object_lookup_page(object, offset) != NULL) {
+	    vm_object_lookup_page(object, offset) != NULL) {
 		goto out;
 	}
 	if (!plane_vm_page_attach_object(page, object, offset)) {
 		goto out;
 	}
-	resident_list_append_page(object, page);
-	resident_hash_insert_page(object, page, offset);
+	vm_object_resident_list_append_page(object, page);
+	vm_object_resident_hash_insert_page(object, page, offset);
 	object->resident_page_count++;
 	if (wire_count != 0) {
 		object->wired_page_count++;
@@ -745,8 +745,8 @@ bool plane_vm_object_insert_page(struct plane_vm_object *object,
 	inserted = true;
 
 out:
-	resident_hash_unlock(hash_state);
-	object_unlock(object, object_state);
+	vm_object_resident_hash_unlock(hash_state);
+	vm_object_unlock(object, object_state);
 	return inserted;
 }
 
@@ -761,17 +761,17 @@ struct plane_page *plane_vm_object_lookup_page(struct plane_vm_object *object,
 		return NULL;
 	}
 
-	object_state = object_lock(object);
-	hash_state = resident_hash_lock();
-	if (!object_offset_is_valid(object, offset)) {
+	object_state = vm_object_lock(object);
+	hash_state = vm_object_resident_hash_lock();
+	if (!vm_object_offset_is_valid(object, offset)) {
 		goto out;
 	}
 
-	page = object_lookup_page(object, offset);
+	page = vm_object_lookup_page(object, offset);
 
 out:
-	resident_hash_unlock(hash_state);
-	object_unlock(object, object_state);
+	vm_object_resident_hash_unlock(hash_state);
+	vm_object_unlock(object, object_state);
 	return page;
 }
 
@@ -787,24 +787,24 @@ struct plane_page *plane_vm_object_lookup_and_hold_page(
 		return NULL;
 	}
 
-	object_state = object_lock(object);
-	hash_state = resident_hash_lock();
-	if (!object_offset_is_valid(object, offset)) {
+	object_state = vm_object_lock(object);
+	hash_state = vm_object_resident_hash_lock();
+	if (!vm_object_offset_is_valid(object, offset)) {
 		goto out;
 	}
 
-	page = object_lookup_page(object, offset);
+	page = vm_object_lookup_page(object, offset);
 	if (page != NULL && !plane_vm_page_hold(page)) {
 		page = NULL;
 	}
 
 out:
-	resident_hash_unlock(hash_state);
-	object_unlock(object, object_state);
+	vm_object_resident_hash_unlock(hash_state);
+	vm_object_unlock(object, object_state);
 	return page;
 }
 
-static struct plane_page *object_remove_page_locked(struct plane_vm_object *object,
+static struct plane_page *vm_object_remove_page_locked(struct plane_vm_object *object,
 					     uint64_t offset,
 					     struct plane_page *expected_page,
 					     bool allow_held)
@@ -813,11 +813,11 @@ static struct plane_page *object_remove_page_locked(struct plane_vm_object *obje
 	uint64_t wire_count;
 	uint64_t hold_count;
 
-	if (!object_offset_is_valid(object, offset)) {
+	if (!vm_object_offset_is_valid(object, offset)) {
 		return NULL;
 	}
 
-	page = object_lookup_page(object, offset);
+	page = vm_object_lookup_page(object, offset);
 	if (object->resident_page_count == 0 ||
 	    page == NULL ||
 	    (expected_page != NULL && page != expected_page) ||
@@ -827,7 +827,7 @@ static struct plane_page *object_remove_page_locked(struct plane_vm_object *obje
 	    (wire_count != 0 && object->wired_page_count == 0)) {
 		return NULL;
 	}
-	resident_list_remove_page(object, page, offset);
+	vm_object_resident_list_remove_page(object, page, offset);
 	BUG_ON_MSG(!plane_vm_page_detach_object(page, object, offset),
 		   "failed to detach resident page from object");
 	object->resident_page_count--;
@@ -849,12 +849,12 @@ struct plane_page *plane_vm_object_remove_page(struct plane_vm_object *object,
 		return NULL;
 	}
 
-	object_state = object_lock(object);
-	hash_state = resident_hash_lock();
-	page = object_remove_page_locked(object, offset, NULL, false);
+	object_state = vm_object_lock(object);
+	hash_state = vm_object_resident_hash_lock();
+	page = vm_object_remove_page_locked(object, offset, NULL, false);
 
-	resident_hash_unlock(hash_state);
-	object_unlock(object, object_state);
+	vm_object_resident_hash_unlock(hash_state);
+	vm_object_unlock(object, object_state);
 	return page;
 }
 
@@ -875,11 +875,11 @@ struct plane_page *plane_vm_object_remove_held_page(
 		return NULL;
 	}
 
-	object_state = object_lock(object);
-	hash_state = resident_hash_lock();
-	page = object_remove_page_locked(object, offset, held_page, true);
-	resident_hash_unlock(hash_state);
-	object_unlock(object, object_state);
+	object_state = vm_object_lock(object);
+	hash_state = vm_object_resident_hash_lock();
+	page = vm_object_remove_page_locked(object, offset, held_page, true);
+	vm_object_resident_hash_unlock(hash_state);
+	vm_object_unlock(object, object_state);
 	return page;
 }
 
@@ -893,14 +893,14 @@ uint64_t plane_vm_object_resident_page_count(
 		return 0;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object)) {
-		object_unlock(object, state);
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object)) {
+		vm_object_unlock(object, state);
 		return 0;
 	}
 
 	count = object->resident_page_count;
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return count;
 }
 
@@ -914,14 +914,14 @@ uint64_t plane_vm_object_wired_page_count(
 		return 0;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object)) {
-		object_unlock(object, state);
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object)) {
+		vm_object_unlock(object, state);
 		return 0;
 	}
 
 	count = object->wired_page_count;
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return count;
 }
 
@@ -934,9 +934,9 @@ uint64_t plane_vm_object_ref_count(const struct plane_vm_object *object)
 		return 0;
 	}
 
-	state = object_lock(object);
+	state = vm_object_lock(object);
 	ref_count = object->ref_count;
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return ref_count;
 }
 
@@ -949,14 +949,14 @@ uint64_t plane_vm_object_offset_limit(const struct plane_vm_object *object)
 		return 0;
 	}
 
-	state = object_lock(object);
-	if (!object_count_is_valid(object)) {
-		object_unlock(object, state);
+	state = vm_object_lock(object);
+	if (!vm_object_count_is_valid(object)) {
+		vm_object_unlock(object, state);
 		return 0;
 	}
 
 	offset_limit = object->offset_limit;
-	object_unlock(object, state);
+	vm_object_unlock(object, state);
 	return offset_limit;
 }
 
@@ -969,8 +969,8 @@ bool plane_vm_object_is_alive(const struct plane_vm_object *object)
 		return false;
 	}
 
-	state = object_lock(object);
-	alive = object_count_is_valid(object);
-	object_unlock(object, state);
+	state = vm_object_lock(object);
+	alive = vm_object_count_is_valid(object);
+	vm_object_unlock(object, state);
 	return alive;
 }
