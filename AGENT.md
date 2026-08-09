@@ -269,8 +269,13 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - Add locks at owner-cluster boundaries and document what each lock protects.
   Prefer a small explicit lock order over broad lock nesting. Current VM object
   internal order is object lock before resident hash lock. Current cross-owner
-  MM order is VM map lock before VM object lock, then resident hash lock, then
-  VM page lock for page-local metadata updates.
+  MM order is pmap lock before PMM lock before VM page lock. VM map/object
+  paths use VM map lock before VM object lock, then resident hash lock, then VM
+  page lock for page-local metadata updates.
+- Active kernel pmap wrappers may enter PMM while holding the pmap lock because
+  page-table allocation/free is part of active root mutation. Do not call
+  mutating active pmap APIs while holding PMM, VM page, resident hash, VM
+  object, or VM map locks.
 - PMM has its own irqsave spinlock for allocator globals, metadata placement,
   free queue use, and allocator lifecycle transitions in `struct plane_page`.
   PMM may briefly enter VM page helpers while holding the PMM lock. Do not

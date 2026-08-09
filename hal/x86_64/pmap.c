@@ -9,11 +9,29 @@
 #include <plane/overflow.h>
 #include <plane/printk.h>
 #include <plane/pmm.h>
+#include <plane/spinlock.h>
 #include <plane/util.h>
 #include <plane/vm_prot.h>
 
 #include <x86_64/physmap_internal.h>
 #include <x86_64/pmap_internal.h>
+
+/*
+ * Protects active kernel page-table mutation and active-root translation
+ * snapshots. Owned-root helpers below are caller-owned/startup-only and do not
+ * take this lock. Current lock order: pmap -> PMM -> VM page.
+ */
+static struct plane_spinlock kernel_pmap_lock = PLANE_SPINLOCK_INIT;
+
+static plane_irq_state_t lock_pmap(void)
+{
+	return plane_spin_lock_irqsave(&kernel_pmap_lock);
+}
+
+static void unlock_pmap(plane_irq_state_t state)
+{
+	plane_spin_unlock_irqrestore(&kernel_pmap_lock, state);
+}
 
 plane_paddr_t __weak x86_64_pmap_current_root_phys(void)
 {
@@ -713,46 +731,18 @@ bool x86_64_pmap_translate_in_root(plane_paddr_t root_pml4_phys,
 	return false;
 }
 
-bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
-				 plane_paddr_t phys_addr,
-				 struct hal_mmu_map_options options)
+bool x86_64_pmap_protect_page_in_owned_root(plane_paddr_t root_pml4_phys,
+					    plane_vaddr_t vaddr,
+					    uint32_t prot)
 {
-	if (!x86_64_pmap_map_page_in_owned_root(x86_64_pmap_current_root_phys(),
-						vaddr, phys_addr, options)) {
-		return false;
-	}
-
-	hal_mmu_invalidate_tlb(vaddr);
-	return true;
-}
-
-bool x86_64_pmap_unmap_kernel_page(plane_vaddr_t vaddr)
-{
-	if (!x86_64_pmap_unmap_page_in_owned_root(x86_64_pmap_current_root_phys(),
-						  vaddr)) {
-		return false;
-	}
-
-	hal_mmu_invalidate_tlb(vaddr);
-	return true;
-}
-
-bool x86_64_pmap_translate_kernel_page(plane_vaddr_t vaddr,
-				       plane_paddr_t *phys_addr)
-{
-	return x86_64_pmap_translate_in_root(x86_64_pmap_current_root_phys(),
-					     vaddr, phys_addr);
-}
-
-bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
-{
-	plane_paddr_t current_phys = x86_64_pmap_current_root_phys();
+	plane_paddr_t current_phys = root_pml4_phys;
 	uint64_t raw_vaddr = plane_vaddr_raw(vaddr);
 	uint64_t *table;
 	uint64_t entry;
 	uint64_t index;
 
 	if (!plane_vaddr_is_page_aligned(vaddr) ||
+	    !plane_paddr_is_page_aligned(root_pml4_phys) ||
 	    !plane_vm_prot_is_valid(prot)) {
 		return false;
 	}
@@ -790,8 +780,67 @@ bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 		entry |= X86_64_PAGING_ENTRY_WRITE;
 	}
 	table[index] = entry;
-	hal_mmu_invalidate_tlb(vaddr);
 	return true;
+}
+
+bool x86_64_pmap_map_kernel_page(plane_vaddr_t vaddr,
+				 plane_paddr_t phys_addr,
+				 struct hal_mmu_map_options options)
+{
+	plane_irq_state_t state;
+	bool mapped;
+
+	state = lock_pmap();
+	mapped = x86_64_pmap_map_page_in_owned_root(
+		x86_64_pmap_current_root_phys(), vaddr, phys_addr, options);
+	if (mapped) {
+		hal_mmu_invalidate_tlb(vaddr);
+	}
+	unlock_pmap(state);
+	return mapped;
+}
+
+bool x86_64_pmap_unmap_kernel_page(plane_vaddr_t vaddr)
+{
+	plane_irq_state_t state;
+	bool unmapped;
+
+	state = lock_pmap();
+	unmapped = x86_64_pmap_unmap_page_in_owned_root(
+		x86_64_pmap_current_root_phys(), vaddr);
+	if (unmapped) {
+		hal_mmu_invalidate_tlb(vaddr);
+	}
+	unlock_pmap(state);
+	return unmapped;
+}
+
+bool x86_64_pmap_translate_kernel_page(plane_vaddr_t vaddr,
+				       plane_paddr_t *phys_addr)
+{
+	plane_irq_state_t state;
+	bool translated;
+
+	state = lock_pmap();
+	translated = x86_64_pmap_translate_in_root(
+		x86_64_pmap_current_root_phys(), vaddr, phys_addr);
+	unlock_pmap(state);
+	return translated;
+}
+
+bool x86_64_pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
+{
+	plane_irq_state_t state;
+	bool protected;
+
+	state = lock_pmap();
+	protected = x86_64_pmap_protect_page_in_owned_root(
+		x86_64_pmap_current_root_phys(), vaddr, prot);
+	if (protected) {
+		hal_mmu_invalidate_tlb(vaddr);
+	}
+	unlock_pmap(state);
+	return protected;
 }
 
 bool hal_mmu_map_kernel_page(plane_vaddr_t vaddr,
@@ -826,6 +875,11 @@ bool hal_mmu_take_kernel_page_table_ownership(void)
 		return false;
 	}
 
+	/*
+	 * Startup ownership handoff runs before APs enter the general kernel
+	 * path. The cloned root is not active until write_cr3_phys(), so
+	 * owned-root builders below run without the active pmap lock.
+	 */
 	skip[0].base = physmap.bootstrap_base;
 	skip[0].size = physmap.bootstrap_size;
 	skip[1].base = plane_vaddr_make(X86_64_PHYSMAP_BASE);

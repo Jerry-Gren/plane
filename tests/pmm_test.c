@@ -8,6 +8,7 @@
 #include <plane/pmm.h>
 #include <plane/vm_page.h>
 
+#include "support/spinlock_stubs.h"
 #include "support/test.h"
 
 static bool physmap_available = true;
@@ -15,10 +16,6 @@ static bool physmap_available = true;
 static uint64_t physmap_limit = PHYSMAP_STORAGE_SIZE;
 static uint8_t physmap_storage[PHYSMAP_STORAGE_SIZE]
 	__aligned(PAGE_SIZE);
-
-void test_spinlock_stub_reset_counts(void);
-uint64_t test_spinlock_stub_irqsave_depth(void);
-uint64_t test_spinlock_stub_irqsave_max_depth(void);
 
 static plane_paddr_t test_paddr(uint64_t raw)
 {

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "spinlock_stubs.h"
+
 static bool test_irq_enabled = true;
 static uint64_t irqsave_count;
 static uint64_t irqrestore_count;

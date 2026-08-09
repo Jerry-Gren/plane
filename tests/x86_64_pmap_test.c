@@ -10,6 +10,7 @@
 #include <plane/pmm.h>
 #include <plane/vm_prot.h>
 
+#include "support/spinlock_stubs.h"
 #include "support/test.h"
 #include <x86_64/physmap_internal.h>
 #include <x86_64/pmap_internal.h>
@@ -25,6 +26,7 @@ static uint64_t alloc_fail_after;
 static uint64_t physmap_blocked_phys;
 static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
+static uint64_t invalidate_lock_depth;
 static uint64_t flush_count;
 static bool test_pat_wc_ready;
 static plane_vaddr_t test_physmap_base;
@@ -93,11 +95,13 @@ static void reset_pmap_test(void)
 	physmap_blocked_phys = UINT64_MAX;
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
+	invalidate_lock_depth = 0;
 	flush_count = 0;
 	test_pat_wc_ready = true;
 	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
 	test_physmap_size = ARCH_HUGE_PAGE_SIZE;
 	test_physmap_initialized = true;
+	test_spinlock_stub_reset_counts();
 }
 
 plane_vaddr_t hal_mmu_physmap_phys_range_to_virt(plane_paddr_t phys_addr,
@@ -132,6 +136,7 @@ plane_vaddr_t hal_mmu_physmap_phys_to_virt(plane_paddr_t phys_addr)
 void hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
 	invalidated_vaddr = plane_vaddr_raw(vaddr);
+	invalidate_lock_depth = test_spinlock_stub_irqsave_depth();
 	invalidate_count++;
 }
 
@@ -302,6 +307,15 @@ static bool test_pmap_translate_in_root(uint64_t root,
 	return true;
 }
 
+static bool test_pmap_protect_in_root(uint64_t root,
+				      uint64_t vaddr,
+				      uint32_t prot)
+{
+	return x86_64_pmap_protect_page_in_owned_root(test_paddr(root),
+						      test_vaddr(vaddr),
+						      prot);
+}
+
 static bool test_pmap_clone_kernel_page_tables(uint64_t source_pml4_phys,
 					       uint64_t *new_pml4_phys)
 {
@@ -399,6 +413,14 @@ static uint64_t *test_kernel_pte(uint64_t vaddr)
 	pt = test_physmap_phys_to_virt(
 		pte_phys(pd[X86_64_PAGING_PD_INDEX(vaddr)]));
 	return &pt[X86_64_PAGING_PT_INDEX(vaddr)];
+}
+
+static void reset_active_pmap_observation(void)
+{
+	invalidated_vaddr = UINTPTR_MAX;
+	invalidate_count = 0;
+	invalidate_lock_depth = 0;
+	test_spinlock_stub_reset_counts();
 }
 
 #define hal_mmu_physmap_phys_to_virt(phys_addr) \
@@ -520,6 +542,14 @@ static int test_active_kernel_map_invalidates(void)
 				    invalidate_count, 1);
 	failures += test_expect_u64("active map invalidated vaddr",
 				    invalidated_vaddr, vaddr);
+	failures += test_expect_u64("active map locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active map unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active map releases lock",
+				    test_spinlock_stub_irqsave_depth(), 0);
+	failures += test_expect_u64("active map invalidate under lock",
+				    invalidate_lock_depth, 1);
 
 	return failures;
 }
@@ -541,8 +571,7 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 	failures += test_expect_u64("protect setup writable",
 				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
 
-	invalidate_count = 0;
-	invalidated_vaddr = UINTPTR_MAX;
+	reset_active_pmap_observation();
 	failures += test_expect_bool("protect readonly",
 				     x86_64_pmap_protect_kernel_page(
 					     vaddr, PLANE_VM_PROT_READ),
@@ -553,7 +582,14 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 				    invalidate_count, 1);
 	failures += test_expect_u64("protect readonly vaddr",
 				    invalidated_vaddr, vaddr);
+	failures += test_expect_u64("protect readonly locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("protect readonly unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("protect readonly invalidate under lock",
+				    invalidate_lock_depth, 1);
 
+	reset_active_pmap_observation();
 	failures += test_expect_bool("protect writable",
 				     x86_64_pmap_protect_kernel_page(
 					     vaddr,
@@ -562,8 +598,10 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 				     true);
 	failures += test_expect_u64("protect writable sets write",
 				    *pte & X86_64_PAGING_ENTRY_WRITE, X86_64_PAGING_ENTRY_WRITE);
-	failures += test_expect_u64("protect writable invalidates again",
-				    invalidate_count, 2);
+	failures += test_expect_u64("protect writable invalidates",
+				    invalidate_count, 1);
+	failures += test_expect_u64("protect writable locks",
+				    test_spinlock_stub_irqsave_count(), 1);
 	return failures;
 }
 
@@ -667,6 +705,43 @@ static int test_mapping_attrs_validate_and_protect_preserves_cache_bits(void)
 	return failures;
 }
 
+static int test_owned_root_protect_preserves_cache_bits_without_active_lock(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	uint64_t *pte;
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"owned protect setup map",
+		x86_64_pmap_map_page_in_owned_root(
+			test_page_phys(0), vaddr, 0x12345000ull,
+			test_map_options(PLANE_VM_PROT_READ |
+					 PLANE_VM_PROT_WRITE,
+					 HAL_MMU_MAPPING_DEVICE)),
+		true);
+	pte = test_kernel_pte(vaddr);
+	reset_active_pmap_observation();
+	failures += test_expect_bool("owned protect readonly",
+				     test_pmap_protect_in_root(
+					     test_page_phys(0), vaddr,
+					     PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u64("owned protect preserves pcd",
+				    *pte & X86_64_PAGING_ENTRY_PCD,
+				    X86_64_PAGING_ENTRY_PCD);
+	failures += test_expect_u64("owned protect preserves pwt",
+				    *pte & X86_64_PAGING_ENTRY_PWT,
+				    X86_64_PAGING_ENTRY_PWT);
+	failures += test_expect_u64("owned protect clears write",
+				    *pte & X86_64_PAGING_ENTRY_WRITE, 0);
+	failures += test_expect_u64("owned protect does not lock active pmap",
+				    test_spinlock_stub_irqsave_count(), 0);
+	failures += test_expect_u64("owned protect does not invalidate",
+				    invalidate_count, 0);
+
+	return failures;
+}
+
 static int test_hal_kernel_page_wrappers(void)
 {
 	uint64_t vaddr = 0xffff800000402000ull;
@@ -710,6 +785,35 @@ static int test_hal_kernel_page_wrappers(void)
 	return failures;
 }
 
+static int test_active_kernel_translate_locks_snapshot(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	plane_paddr_t phys = {0};
+	int failures = 0;
+
+	failures += test_expect_bool("translate lock setup map",
+				     x86_64_pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
+				     true);
+	reset_active_pmap_observation();
+	failures += test_expect_bool("active translate",
+				     x86_64_pmap_translate_kernel_page(
+					     test_vaddr(vaddr), &phys),
+				     true);
+	failures += test_expect_u64("active translate phys",
+				    test_paddr_raw(phys), 0x12345000ull);
+	failures += test_expect_u64("active translate locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active translate unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active translate no invalidate",
+				    invalidate_count, 0);
+
+	return failures;
+}
+
 static int test_protect_page_rejects_invalid_paths(void)
 {
 	uint64_t *pml4 = test_table(0);
@@ -739,6 +843,91 @@ static int test_protect_page_rejects_invalid_paths(void)
 				     false);
 	failures += test_expect_u64("protect reject no invalidate",
 				    invalidate_count, 0);
+	return failures;
+}
+
+static int test_active_kernel_failures_release_lock_without_invalidate(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	plane_paddr_t phys = {0};
+	int failures = 0;
+
+	failures += test_expect_bool(
+		"active map failure",
+		x86_64_pmap_map_kernel_page(
+			vaddr + 1, 0x12345000ull,
+			test_default_options(PLANE_VM_PROT_READ)),
+		false);
+	failures += test_expect_u64("active map failure locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active map failure unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active map failure no invalidate",
+				    invalidate_count, 0);
+	failures += test_expect_u64("active map failure releases lock",
+				    test_spinlock_stub_irqsave_depth(), 0);
+
+	reset_active_pmap_observation();
+	failures += test_expect_bool("active unmap failure",
+				     x86_64_pmap_unmap_kernel_page(vaddr),
+				     false);
+	failures += test_expect_u64("active unmap failure locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active unmap failure unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active unmap failure no invalidate",
+				    invalidate_count, 0);
+
+	reset_active_pmap_observation();
+	failures += test_expect_bool("active protect failure",
+				     x86_64_pmap_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
+				     false);
+	failures += test_expect_u64("active protect failure locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active protect failure unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active protect failure no invalidate",
+				    invalidate_count, 0);
+
+	reset_active_pmap_observation();
+	failures += test_expect_bool("active translate failure",
+				     x86_64_pmap_translate_kernel_page(
+					     test_vaddr(vaddr), &phys),
+				     false);
+	failures += test_expect_u64("active translate failure locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active translate failure unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active translate failure no invalidate",
+				    invalidate_count, 0);
+
+	return failures;
+}
+
+static int test_active_kernel_map_failure_rolls_back_and_unlocks(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	alloc_fail_after = 1;
+	failures += test_expect_bool(
+		"active map allocation failure",
+		x86_64_pmap_map_kernel_page(
+			vaddr, 0x12345000ull,
+			test_default_options(PLANE_VM_PROT_READ)),
+		false);
+	failures += test_expect_u64("active map failure rollback",
+				    pmm_allocated_page_count(), 0);
+	failures += test_expect_u64("active map alloc failure locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active map alloc failure unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active map alloc failure no invalidate",
+				    invalidate_count, 0);
+	failures += test_expect_u64("active map alloc failure releases lock",
+				    test_spinlock_stub_irqsave_depth(), 0);
+
 	return failures;
 }
 
@@ -963,6 +1152,12 @@ static int test_active_kernel_unmap_invalidates(void)
 				    invalidate_count, 1);
 	failures += test_expect_u64("active unmap invalidated vaddr",
 				    invalidated_vaddr, vaddr);
+	failures += test_expect_u64("active unmap locks",
+				    test_spinlock_stub_irqsave_count(), 1);
+	failures += test_expect_u64("active unmap unlocks",
+				    test_spinlock_stub_irqrestore_count(), 1);
+	failures += test_expect_u64("active unmap invalidate under lock",
+				    invalidate_lock_depth, 1);
 
 	return failures;
 }
@@ -1394,8 +1589,12 @@ int main(void)
 		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
 		TEST_CASE(test_mapping_attrs_encode_pte_cache_bits),
 		TEST_CASE(test_mapping_attrs_validate_and_protect_preserves_cache_bits),
+		TEST_CASE(test_owned_root_protect_preserves_cache_bits_without_active_lock),
 		TEST_CASE(test_hal_kernel_page_wrappers),
+		TEST_CASE(test_active_kernel_translate_locks_snapshot),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
+		TEST_CASE(test_active_kernel_failures_release_lock_without_invalidate),
+		TEST_CASE(test_active_kernel_map_failure_rolls_back_and_unlocks),
 		TEST_CASE(test_map_page_rejects_invalid_inputs),
 		TEST_CASE(test_map_page_rejects_existing_leaf),
 		TEST_CASE(test_map_page_rejects_huge_intermediate),

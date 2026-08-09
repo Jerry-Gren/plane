@@ -10,6 +10,7 @@
 #include <plane/vm_object.h>
 #include <plane/vm_page.h>
 
+#include "support/spinlock_stubs.h"
 #include "support/test.h"
 #include "../kernel/mm/vm_page_internal.h"
 #include "../kernel/mm/vm_zone_internal.h"
@@ -23,10 +24,6 @@ static uint64_t physmap_limit = PHYSMAP_STORAGE_SIZE;
 static uint8_t physmap_storage[PHYSMAP_STORAGE_SIZE] __aligned(PAGE_SIZE);
 static uint8_t extra_guard_storage[PAGE_SIZE] __aligned(PAGE_SIZE);
 static struct plane_vm_zone_segment extra_guard_segment;
-
-void test_spinlock_stub_reset_counts(void);
-uint64_t test_spinlock_stub_irqsave_depth(void);
-uint64_t test_spinlock_stub_irqsave_max_depth(void);
 
 static plane_paddr_t test_paddr(uint64_t raw)
 {
