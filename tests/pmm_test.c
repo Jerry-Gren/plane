@@ -16,6 +16,12 @@ static uint64_t physmap_limit = PHYSMAP_STORAGE_SIZE;
 static uint8_t physmap_storage[PHYSMAP_STORAGE_SIZE]
 	__aligned(PAGE_SIZE);
 
+void test_spinlock_stub_reset_counts(void);
+uint64_t test_spinlock_stub_irqsave_count(void);
+uint64_t test_spinlock_stub_irqrestore_count(void);
+uint64_t test_spinlock_stub_irqsave_depth(void);
+uint64_t test_spinlock_stub_irqsave_max_depth(void);
+
 static plane_paddr_t test_paddr(uint64_t raw)
 {
 	return plane_paddr_make(raw);
@@ -52,6 +58,35 @@ static void reset_physmap_stub(void)
 	physmap_available = true;
 	physmap_limit = PHYSMAP_STORAGE_SIZE;
 	memset(physmap_storage, 0, sizeof(physmap_storage));
+	test_spinlock_stub_reset_counts();
+}
+
+static int check_spinlock_counts(const char *prefix,
+				 uint64_t irqsave,
+				 uint64_t irqrestore,
+				 uint64_t max_depth,
+				 uint64_t depth)
+{
+	int failures = 0;
+	char name[96];
+
+	snprintf(name, sizeof(name), "%s irqsave", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqsave_count(),
+				    irqsave);
+	snprintf(name, sizeof(name), "%s irqrestore", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqrestore_count(),
+				    irqrestore);
+	snprintf(name, sizeof(name), "%s max depth", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqsave_max_depth(),
+				    max_depth);
+	snprintf(name, sizeof(name), "%s depth", prefix);
+	failures += test_expect_u64(name,
+				    test_spinlock_stub_irqsave_depth(),
+				    depth);
+	return failures;
 }
 
 static int check_page_state(const char *name,
@@ -728,6 +763,44 @@ static int test_free_rejects_invalid_ranges(void)
 	return failures;
 }
 
+static int test_public_pmm_operations_take_lock_once(void)
+{
+	struct plane_mem_info mem = {0};
+	struct plane_pmm_stats stats;
+	plane_paddr_t phys;
+	int failures = 0;
+
+	add_region(&mem, 0x1000, 0x6000, PLANE_MEM_USABLE);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("lock init",
+				     plane_pmm_init(&mem), true);
+	failures += check_spinlock_counts("lock init", 1, 1, 1, 0);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("lock alloc page",
+				     plane_pmm_alloc_page_phys(&phys), true);
+	failures += check_spinlock_counts("lock alloc page", 1, 1, 1, 0);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("lock free page",
+				     plane_pmm_free_page_phys(phys), true);
+	failures += check_spinlock_counts("lock free page", 1, 1, 1, 0);
+
+	test_spinlock_stub_reset_counts();
+	stats = plane_pmm_get_stats();
+	(void)stats;
+	failures += check_spinlock_counts("lock stats", 1, 1, 1, 0);
+
+	test_spinlock_stub_reset_counts();
+	failures += test_expect_bool("lock alloc wrapper",
+				     plane_pmm_alloc_pages_phys(1, 1, &phys),
+				     true);
+	failures += check_spinlock_counts("lock alloc wrapper", 1, 1, 1, 0);
+
+	return failures;
+}
+
 static int test_init_fails_without_physmap(void)
 {
 	struct plane_mem_info mem = {0};
@@ -778,6 +851,7 @@ int main(void)
 		TEST_CASE(test_multi_page_phys_api_updates_metadata),
 		TEST_CASE(test_free_merges_ranges),
 		TEST_CASE(test_free_rejects_invalid_ranges),
+		TEST_CASE(test_public_pmm_operations_take_lock_once),
 		TEST_CASE(test_init_fails_without_physmap),
 		TEST_CASE(test_init_fails_without_metadata_range_coverage),
 	};

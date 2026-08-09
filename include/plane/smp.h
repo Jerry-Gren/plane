@@ -13,9 +13,9 @@
  * Initial SMP foundation records topology and installs BSP CPU data into the
  * arch current-data slot. APs may be started only far enough to install
  * per-CPU architecture context, current data, and local interrupt state before
- * parking in a halt loop; PMM/VM/pmap/kmem remain BSP-only. Plane does not
- * expose a CPU-local fast accessor, IPI dispatch, TLB shootdown, or scheduling
- * yet.
+ * parking in a halt loop. Only documented PMM allocator locking exists; VM,
+ * pmap, and kmem are not general SMP paths. Plane does not expose a CPU-local
+ * fast accessor, IPI dispatch, TLB shootdown, or scheduling yet.
  */
 enum plane_cpu_startup_state {
 	PLANE_CPU_STARTUP_OFFLINE = 0,

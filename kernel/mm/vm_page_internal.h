@@ -49,7 +49,8 @@ struct plane_vm_page_managed_range {
  * Public callers should use vm_object insert/remove instead.
  * Tabled/hashed state is VM-resident membership state, not public page API.
  * Queue links are owned by plane_vm_page_queue_* helpers; PMM owns the free
- * allocator policy, but not the queue linkage mechanics.
+ * allocator policy and protects free queue use with the PMM lock, but not the
+ * queue linkage mechanics or full resident metadata concurrency.
  */
 void plane_vm_page_reset_runtime(void);
 bool plane_vm_page_install_pool(

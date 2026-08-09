@@ -248,8 +248,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 
 ## MM, PMM, VM, And pmap
 
-- PMM is currently an early, single-core allocator. Do not assume SMP safety,
-  locking, or atomic semantics until those are added explicitly.
+- PMM is still an early allocator. Only documented PMM allocator/free queue
+  locking exists; do not assume broader MM SMP safety or atomic semantics until
+  those are added explicitly.
 - Use existing `plane_spinlock` plus irqsave for early MM metadata locks.
   Do not introduce sleep locks or wait-based synchronization before scheduler
   and wait queues exist.
@@ -257,6 +258,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   Prefer a small explicit lock order over broad lock nesting. Current VM object
   internal order is object lock before resident hash lock. Current cross-owner
   MM order is VM map lock before VM object lock.
+- PMM has its own irqsave spinlock for allocator globals, metadata placement,
+  free queue use, and allocator lifecycle transitions in `struct plane_page`.
+  Do not allocate/free PMM pages while holding VM map or VM object locks.
 - Physical page 0 is reserved as a null physical guard. PMM must never allocate
   or manage it.
 - `struct plane_page` is the XNU-like page metadata foundation. Do not expand
@@ -310,8 +314,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 
 - Current SMP support is a foundation only. APs may be discovered, prepared,
   started, and parked, but they must not enter general kernel execution.
-- MM, PMM, pmap, VM object, VM map, and kmem are still BSP-only unless a patch
-  explicitly introduces locking and verifies it.
+- MM, pmap, VM resident metadata, and kmem are still BSP-only unless a patch
+  explicitly introduces locking and verifies it. PMM has only the documented
+  allocator/free queue lock boundary.
 - `plane_cpu_data` owns per-CPU state; `self` must point to its own object.
 - BSP startup installs current CPU data through the arch hook before exposing
   initialized SMP state.

@@ -16,6 +16,8 @@
  * PLANE_PMM_ALLOC_ZERO is requested.
  * Each managed physical page has a small struct plane_page. Page metadata
  * queries and resident-page operations live in the VM page layer.
+ * PMM's allocator state and free queue are protected by an early irqsave
+ * spinlock. This does not make VM page resident metadata fully SMP-safe.
  * Physical page zero is reserved by Plane's own ownership policy even if a
  * bootloader reports it as usable; null physical addresses must not be
  * returned by the allocator.
