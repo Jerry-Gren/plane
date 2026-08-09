@@ -1,8 +1,23 @@
 #include <stdint.h>
 
-#include <x86_64/msr_defs.h>
+#include <x86_64/proc_reg.h>
 
 #include "support/test.h"
+
+static int test_control_and_flags_bits_match_manual_fields(void)
+{
+	int failures = 0;
+
+	failures += test_expect_u64("rflags if",
+				    X86_64_RFLAGS_IF, 1ull << 9);
+	failures += test_expect_u64("rflags id",
+				    X86_64_RFLAGS_ID, 1ull << 21);
+	failures += test_expect_u64("cr0 pe", X86_64_CR0_PE, 1ull << 0);
+	failures += test_expect_u64("cr0 pg", X86_64_CR0_PG, 1ull << 31);
+	failures += test_expect_u64("cr4 pae", X86_64_CR4_PAE, 1ull << 5);
+
+	return failures;
+}
 
 static int test_msr_numbers_match_manual_indices(void)
 {
@@ -68,11 +83,12 @@ static int test_cr_pat_fields_match_memory_type_slots(void)
 int main(void)
 {
 	static const struct test_case cases[] = {
+		TEST_CASE(test_control_and_flags_bits_match_manual_fields),
 		TEST_CASE(test_msr_numbers_match_manual_indices),
 		TEST_CASE(test_apic_base_fields_match_xapic_mode),
 		TEST_CASE(test_cr_pat_fields_match_memory_type_slots),
 	};
 
-	return test_run_cases("x86_64_msr_defs_test",
+	return test_run_cases("x86_64_proc_reg_test",
 			      cases, TEST_ARRAY_SIZE(cases));
 }

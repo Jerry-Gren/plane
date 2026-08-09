@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #include <x86_64/cpu_features.h>
-#include <x86_64/msr_defs.h>
+#include <x86_64/proc_reg.h>
 
 #include "support/test.h"
 
@@ -29,13 +29,13 @@ bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 	return false;
 }
 
-uint64_t x86_64_msr_read(uint32_t msr)
+uint64_t rdmsr64(uint32_t msr)
 {
 	test_read_count++;
 	return msr == X86_64_MSR_IA32_CR_PAT ? test_pat_msr_value : 0;
 }
 
-bool x86_64_msr_write(uint32_t msr, uint64_t value)
+bool wrmsr64(uint32_t msr, uint64_t value)
 {
 	test_write_count++;
 	test_last_write_msr = msr;

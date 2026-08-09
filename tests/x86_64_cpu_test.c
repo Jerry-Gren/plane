@@ -3,7 +3,7 @@
 
 #include <machine/machine_routines.h>
 #include <x86_64/cpu_features.h>
-#include <x86_64/msr_defs.h>
+#include <x86_64/proc_reg.h>
 #include <plane/smp.h>
 
 #include "support/test.h"
@@ -19,7 +19,7 @@ bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 	return feature == X86_64_CPU_FEATURE_MSR && test_has_msr;
 }
 
-bool x86_64_msr_write(uint32_t msr, uint64_t value)
+bool wrmsr64(uint32_t msr, uint64_t value)
 {
 	msr_write_count++;
 	last_msr = msr;

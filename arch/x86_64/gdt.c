@@ -1,7 +1,6 @@
 #include <machine/machine_routines.h>
+#include <x86_64/desc.h>
 #include <x86_64/descriptor_defs.h>
-#include <x86_64/gdt.h>
-#include <x86_64/idt.h>
 
 #include <plane/smp.h>
 

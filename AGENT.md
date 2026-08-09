@@ -161,9 +161,9 @@ Preferred symbol order:
   helpers such as `write_pixel()`, `write_u32_string()`,
   `set_vendor_string()`, `set_brand_string()`, `collect_cpuid_raw()`,
   `sort_boundaries()`, and `choose_interval_type()` when the reversed form is
-  less readable. Processor-register operations such as `read_cr2()` and
-  `write_cr3_phys()` may also keep the natural action-first form until a
-  dedicated processor-register helper family exists.
+  less readable. Processor-register primitives in the `proc_reg` owner, such
+  as `read_cr2()`, `write_cr3_phys()`, `rdmsr64()`, and `invlpg()`, also keep
+  the XNU-like natural action-first form.
 - Predicate helpers should put the entity before the predicate word when that
   reads clearly. Public or cross-file predicates should read as
   `owner_is_property()`, such as `plane_vm_page_is_guard()`. File-local examples
@@ -193,6 +193,7 @@ Avoid these stale names in new code:
 - `boot_mem`, `plane_sanitize_memory_map`
 - `smp_boot`, `plane_smp_boot_*`, `PLANE_CPU_BOOT_*`, `boot_state`
 - `arch_mmu`, `mb2_early_mmu`, `pmap_active.c`, `msr_internal.h`
+- `msr.h`, `msr_defs.h`, `processor_defs.h` for processor-register facts
 - `direct_map` for the runtime physmap path
 
 ## Owner Clusters
@@ -229,7 +230,7 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - `arch/` is the arch-private include root for implementation-owned service and
   internal headers. x86_64 internals should be included as
   `<x86_64/foo_internal.h>` or `<x86_64/foo.h>` when the header is an
-  arch-private service such as MSR or pmap internals.
+  arch-private service such as `proc_reg` or pmap internals.
 - `machine` headers are selectors, not owner clusters. They may forward to a
   public architecture header, but must not expose root-clone/build helpers or
   other implementation internals.
@@ -257,11 +258,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   - `descriptor_defs.h`: GDT/TSS selectors, descriptor encodings, TSS layout.
   - `interrupt_defs.h`: IDT gates, exception vectors, interrupt frame, #PF
     error-code bits.
-  - `processor_defs.h`: RFLAGS, CR0/CR4, EFER, PAT entry encodings used by
-    startup paths.
-  - `msr_defs.h`: MSR numbers and MSR field bits.
   - `cpuid_defs.h`: CPUID leaves, registers, and field masks used by decoders.
   - `lapic_regs.h`: LAPIC register-space offsets and field helpers.
+- Processor-register facts and primitives such as RFLAGS, CR0/CR4, MSR
+  numbers, RDMSR/WRMSR, CR2/CR3, INVLPG, CLI, and STI belong to arch-private
+  `<x86_64/proc_reg.h>`, following the XNU-like `proc_reg` owner boundary.
 - Implementation files should express behavior: probe, configure, map, clone,
   enter, teardown, dispatch. They should not grow large piles of magic hardware
   constants.

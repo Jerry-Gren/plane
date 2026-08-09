@@ -8,14 +8,13 @@
 #include <machine/page.h>
 #include <x86_64/cpu_features.h>
 #include <x86_64/interrupt_defs.h>
-#include <x86_64/msr_defs.h>
 #include <plane/address.h>
 #include <plane/io_map.h>
 #include <plane/printk.h>
 #include <plane/smp.h>
 
 #include "lapic_regs.h"
-#include <x86_64/msr.h>
+#include <x86_64/proc_reg.h>
 
 /*
  * XNU-like local APIC foundation, narrowed to xAPIC MMIO setup and fixed IPI
@@ -76,7 +75,7 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 		return false;
 	}
 
-	apic_base = x86_64_msr_read(X86_64_MSR_IA32_APIC_BASE);
+	apic_base = rdmsr64(X86_64_MSR_IA32_APIC_BASE);
 	if ((apic_base & X86_64_MSR_IA32_APIC_BASE_X2APIC) != 0) {
 		return false;
 	}
@@ -102,9 +101,9 @@ static bool lapic_probe_xapic(plane_vaddr_t *mmio_base)
 	}
 
 	if ((apic_base & X86_64_MSR_IA32_APIC_BASE_ENABLE) == 0) {
-		if (!x86_64_msr_write(X86_64_MSR_IA32_APIC_BASE,
-				      apic_base |
-					      X86_64_MSR_IA32_APIC_BASE_ENABLE)) {
+		if (!wrmsr64(X86_64_MSR_IA32_APIC_BASE,
+			     apic_base |
+				     X86_64_MSR_IA32_APIC_BASE_ENABLE)) {
 			BUG_ON_MSG(!plane_io_unmap(mapped_base, ARCH_PAGE_SIZE),
 				   "failed to rollback LAPIC IO map");
 			return false;

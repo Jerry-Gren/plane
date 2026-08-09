@@ -4,8 +4,7 @@
 #include <x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 #include <x86_64/cpuid_defs.h>
 #include <x86_64/descriptor_defs.h>
-#include <x86_64/msr_defs.h>
-#include <x86_64/processor_defs.h>
+#include <x86_64/proc_reg.h>
 #include <plane/bits.h>
 
 /* Macros */

@@ -6,6 +6,7 @@
 #include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 #include <x86_64/cpu_features.h>
+#include <x86_64/proc_reg.h>
 #include <plane/io_map.h>
 #include <plane/smp.h>
 
@@ -57,7 +58,7 @@ bool x86_64_cpu_has_feature(enum x86_64_cpu_feature feature)
 	return false;
 }
 
-uint64_t x86_64_msr_read(uint32_t msr)
+uint64_t rdmsr64(uint32_t msr)
 {
 	if (msr == X86_64_MSR_IA32_APIC_BASE) {
 		return test_apic_base_msr;
@@ -66,7 +67,7 @@ uint64_t x86_64_msr_read(uint32_t msr)
 	return 0;
 }
 
-bool x86_64_msr_write(uint32_t msr, uint64_t value)
+bool wrmsr64(uint32_t msr, uint64_t value)
 {
 	test_msr_write_count++;
 	test_msr_write_msr = msr;

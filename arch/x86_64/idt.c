@@ -1,6 +1,6 @@
+#include <x86_64/desc.h>
 #include <x86_64/descriptor_defs.h>
 #include <x86_64/interrupt_defs.h>
-#include <x86_64/idt.h>
 #include <x86_64/pio.h>
 
 /* in idt_flush.S */

@@ -1,10 +1,9 @@
 #include <x86_64/cpu_features.h>
-#include <x86_64/msr_defs.h>
 #include <x86_64/pat.h>
 
 #include <stdint.h>
 
-#include <x86_64/msr.h>
+#include <x86_64/proc_reg.h>
 
 static bool pat_write_combine_ready;
 
@@ -17,11 +16,11 @@ bool x86_64_pat_init(void)
 		return false;
 	}
 
-	pat = x86_64_msr_read(X86_64_MSR_IA32_CR_PAT);
+	pat = rdmsr64(X86_64_MSR_IA32_CR_PAT);
 	pat &= ~X86_64_MSR_IA32_CR_PAT_ENTRY_MASK(1);
 	pat |= X86_64_MSR_IA32_CR_PAT_MEMORY_WC <<
 	       X86_64_MSR_IA32_CR_PAT_ENTRY_SHIFT(1);
-	if (!x86_64_msr_write(X86_64_MSR_IA32_CR_PAT, pat)) {
+	if (!wrmsr64(X86_64_MSR_IA32_CR_PAT, pat)) {
 		return false;
 	}
 

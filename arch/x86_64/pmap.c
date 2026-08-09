@@ -11,6 +11,7 @@
 #include <plane/util.h>
 #include <plane/vm_prot.h>
 #include <x86_64/pmap.h>
+#include <x86_64/proc_reg.h>
 
 #include <x86_64/physmap_internal.h>
 #include <x86_64/pmap_internal.h>
@@ -34,10 +35,7 @@ static void pmap_unlock(plane_irq_state_t state)
 
 plane_paddr_t __weak x86_64_pmap_current_root_phys(void)
 {
-	uint64_t cr3;
-
-	__asm__ volatile ("mov %%cr3, %0" : "=r" (cr3));
-	return plane_paddr_make(cr3 & X86_64_PAGING_ENTRY_ADDR_MASK);
+	return read_cr3_phys();
 }
 
 bool pmap_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
@@ -59,18 +57,12 @@ void __weak pmap_invalidate_tlb(plane_vaddr_t vaddr)
 	 * payload; the current signal dispatch scaffold only acknowledges
 	 * events.
 	 */
-	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
+	invlpg(vaddr);
 }
 
 void __weak pmap_flush_tlb_all(void)
 {
-	__asm__ volatile (
-		"mov %%cr3, %%rax\n\t"
-		"mov %%rax, %%cr3\n\t"
-		: /* no input */
-		: /* no output */
-		: "rax", "memory"
-	);
+	reload_cr3();
 }
 
 void __weak pmap_update_interrupt(void)
@@ -86,17 +78,6 @@ static void pmap_assert_page_table_phys(plane_paddr_t phys_addr)
 {
 	BUG_ON_MSG(plane_paddr_is_null(phys_addr),
 		   "PMM allocated null physical page for page table");
-}
-
-static void write_cr3_phys(plane_paddr_t phys_addr)
-{
-	/*
-	 * CR3 holds the physical base of the active top-level paging
-	 * structure. Plane treats physical zero as reserved/null, so reaching
-	 * this point with a null paddr means PMM ownership policy was violated.
-	 */
-	pmap_assert_page_table_phys(phys_addr);
-	__asm__ volatile ("mov %0, %%cr3" : : "r" (plane_paddr_raw(phys_addr)) : "memory");
 }
 
 static uint64_t *pmap_table_from_phys(plane_paddr_t phys_addr)
@@ -889,6 +870,12 @@ bool pmap_take_kernel_page_table_ownership(void)
 		return false;
 	}
 
+	/*
+	 * CR3 holds the physical base of the active top-level paging structure.
+	 * Plane treats physical zero as reserved/null, so a null paddr here
+	 * means PMM ownership policy was violated.
+	 */
+	pmap_assert_page_table_phys(new_pml4_phys);
 	write_cr3_phys(new_pml4_phys);
 	x86_64_physmap_commit_owned();
 	pmap_flush_tlb_all();

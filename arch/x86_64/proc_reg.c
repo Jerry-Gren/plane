@@ -1,6 +1,6 @@
-#include <x86_64/msr.h>
+#include <x86_64/proc_reg.h>
 
-uint64_t x86_64_msr_read(uint32_t msr)
+uint64_t rdmsr64(uint32_t msr)
 {
 	uint32_t lo;
 	uint32_t hi;
@@ -9,7 +9,7 @@ uint64_t x86_64_msr_read(uint32_t msr)
 	return ((uint64_t)hi << 32) | lo;
 }
 
-bool x86_64_msr_write(uint32_t msr, uint64_t value)
+bool wrmsr64(uint32_t msr, uint64_t value)
 {
 	uint32_t lo = (uint32_t)value;
 	uint32_t hi = (uint32_t)(value >> 32);

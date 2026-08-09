@@ -1,8 +1,7 @@
 #include <machine/machine_routines.h>
 #include <x86_64/cpu_features.h>
-#include <x86_64/gdt.h>
-#include <x86_64/idt.h>
 #include <x86_64/pat.h>
+#include <x86_64/desc.h>
 
 bool ml_startup_init(void)
 {

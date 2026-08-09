@@ -3,6 +3,7 @@
 #include <machine/local_interrupt.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
+#include <x86_64/proc_reg.h>
 
 #define CODE_DUMP_BYTES 16
 
@@ -40,14 +41,6 @@ static const char *exception_names[32] = {
     "Security Exception (#SX)",                 /* 30 (AMD) */
     "Reserved"                                  /* 31 */
 };
-
-static uint64_t read_cr2(void)
-{
-	uint64_t cr2;
-
-	__asm__ volatile ("mov %%cr2, %0" : "=r" (cr2));
-	return cr2;
-}
 
 static int x86_64_exception_range_in_kernel_text(plane_vaddr_t addr,
 						 uint64_t size)
