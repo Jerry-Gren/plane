@@ -7,8 +7,12 @@
 #include <plane/compiler.h>
 #include <plane/smp.h>
 
+#define PLANE_SMP_IPI_VECTOR_RESCHEDULE 0xf0u
+#define PLANE_SMP_IPI_VECTOR_PMAP_UPDATE 0xf1u
+
 struct plane_cpu_data *plane_cpu_get_startup_data(uint32_t logical_id);
 bool plane_smp_cpu_data_is_startable_ap(const struct plane_cpu_data *cpu);
+uint64_t plane_smp_ipi_count(uint8_t vector);
 bool plane_smp_startup_prepare_ap_stacks(void);
 bool plane_smp_mark_ap_starting(uint32_t logical_id);
 bool plane_smp_mark_ap_parked(struct plane_cpu_data *data);

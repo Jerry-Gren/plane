@@ -56,7 +56,6 @@ x86_64_lapic_mmio_offset(enum x86_64_lapic_reg reg)
 #define X86_64_LAPIC_ICR_DEST_SHIFT      24u
 
 #define X86_64_LAPIC_LVT_MASKED          BIT(16)
-#define X86_64_LAPIC_VECTOR_MIN          32u
 
 static inline uint32_t x86_64_lapic_xapic_id(uint32_t id_reg)
 {
@@ -71,11 +70,6 @@ static inline uint32_t x86_64_lapic_version(uint32_t version_reg)
 static inline bool x86_64_lapic_version_supported(uint32_t version_reg)
 {
 	return x86_64_lapic_version(version_reg) >= X86_64_LAPIC_MIN_VERSION;
-}
-
-static inline bool x86_64_lapic_external_vector_is_valid(uint8_t vector)
-{
-	return vector >= X86_64_LAPIC_VECTOR_MIN;
 }
 
 static inline uint32_t x86_64_lapic_svr_enable(uint8_t vector)

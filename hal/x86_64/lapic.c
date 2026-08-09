@@ -8,6 +8,7 @@
 #include <hal/mmu.h>
 #include <hal/page.h>
 #include <hal/x86_64/cpu_features.h>
+#include <hal/x86_64/interrupt_defs.h>
 #include <hal/x86_64/msr_defs.h>
 #include <plane/address.h>
 #include <plane/io_map.h>
@@ -19,8 +20,8 @@
 
 /*
  * XNU-like local APIC foundation, narrowed to xAPIC MMIO setup and fixed IPI
- * primitives. Timer/error/IPI dispatch and x2APIC are intentionally left for
- * later SMP milestones.
+ * primitives. Timer/error payloads, full IPI event payloads, and x2APIC are
+ * intentionally left for later SMP milestones.
  */
 
 static plane_vaddr_t lapic_mmio_base;
@@ -195,13 +196,31 @@ bool hal_local_interrupt_eoi(void)
 	return true;
 }
 
+bool hal_local_interrupt_dispatch(uint32_t vector)
+{
+	bool handled;
+	bool eoi_sent;
+
+	if (!lapic_initialized || !x86_64_intr_vector_is_external(vector)) {
+		return false;
+	}
+
+	handled = plane_smp_handle_ipi((uint8_t)vector);
+	if (!handled) {
+		pr_warn("Unhandled local interrupt vector %u\n", vector);
+	}
+
+	eoi_sent = hal_local_interrupt_eoi();
+	return handled && eoi_sent;
+}
+
 bool hal_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 {
 	plane_irq_state_t irq_state;
 	uint32_t lapic_id;
 
 	if (!lapic_initialized || logical_id >= lapic_cpu_count ||
-	    !x86_64_lapic_external_vector_is_valid(vector)) {
+	    !x86_64_intr_vector_is_external(vector)) {
 		return false;
 	}
 

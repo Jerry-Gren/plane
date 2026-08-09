@@ -73,10 +73,22 @@ static int test_exception_vector_helper(void)
 	failures += test_expect_bool("external vector is not exception",
 				     x86_64_intr_vector_is_exception(32),
 				     false);
-	failures += test_expect_bool("default external sentinel rejected",
-				     x86_64_intr_vector_is_exception(
-					     X86_64_INTR_EXTERNAL_DEFAULT_VECTOR),
+	failures += test_expect_bool("external min is external",
+				     x86_64_intr_vector_is_external(
+					     X86_64_INTR_VECTOR_EXTERNAL_MIN),
+				     true);
+	failures += test_expect_bool("external max is external",
+				     x86_64_intr_vector_is_external(
+					     X86_64_INTR_VECTOR_EXTERNAL_MAX),
+				     true);
+	failures += test_expect_bool("exception is not external",
+				     x86_64_intr_vector_is_external(31),
 				     false);
+	failures += test_expect_bool("past idt is not external",
+				     x86_64_intr_vector_is_external(256),
+				     false);
+	failures += test_expect_u32("external vector count",
+				    X86_64_INTR_EXTERNAL_VECTOR_COUNT, 224);
 
 	return failures;
 }

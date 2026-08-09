@@ -15,6 +15,8 @@ static struct plane_cpu_data cpu_data[PLANE_MAX_CPUS];
 static struct plane_cpu_data *current_cpu_data;
 static uint32_t runtime_cpu_count;
 static bool smp_initialized;
+static uint64_t ipi_reschedule_count;
+static uint64_t ipi_pmap_update_count;
 
 bool plane_smp_info_init(struct plane_smp_info *info)
 {
@@ -140,6 +142,8 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 		return false;
 	}
 
+	ipi_reschedule_count = 0;
+	ipi_pmap_update_count = 0;
 	current_cpu_data->online = true;
 	smp_initialized = true;
 	return true;
@@ -289,6 +293,58 @@ enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 	}
 
 	return plane_atomic_load_u32(&cpu->startup_state);
+}
+
+static bool smp_cpu_can_handle_ipi(const struct plane_cpu_data *cpu)
+{
+	uint32_t state;
+
+	if (!smp_initialized || cpu == NULL || cpu->self != cpu ||
+	    !cpu->present) {
+		return false;
+	}
+	if (cpu->is_bsp) {
+		return cpu->online;
+	}
+
+	state = plane_atomic_load_u32(&cpu->startup_state);
+	return state == PLANE_CPU_STARTUP_PREPARED ||
+	       state == PLANE_CPU_STARTUP_PARKED;
+}
+
+bool plane_smp_handle_ipi(uint8_t vector)
+{
+	if (!smp_cpu_can_handle_ipi(current_cpu_data)) {
+		return false;
+	}
+
+	switch (vector) {
+	case PLANE_SMP_IPI_VECTOR_RESCHEDULE:
+		ipi_reschedule_count++;
+		return true;
+	case PLANE_SMP_IPI_VECTOR_PMAP_UPDATE:
+		/*
+		 * This is only the event-dispatch landing pad. Remote TLB
+		 * payload and rendezvous state belong to the later pmap
+		 * shootdown milestone.
+		 */
+		ipi_pmap_update_count++;
+		return true;
+	default:
+		return false;
+	}
+}
+
+uint64_t plane_smp_ipi_count(uint8_t vector)
+{
+	switch (vector) {
+	case PLANE_SMP_IPI_VECTOR_RESCHEDULE:
+		return ipi_reschedule_count;
+	case PLANE_SMP_IPI_VECTOR_PMAP_UPDATE:
+		return ipi_pmap_update_count;
+	default:
+		return 0;
+	}
 }
 
 void plane_smp_ap_park_entry(struct plane_cpu_data *data)

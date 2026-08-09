@@ -7,12 +7,16 @@
  * x86-64 interrupt, exception, and IDT definitions used by Plane today.
  *
  * Intel SDM Vol.3 Chapters 7 and 8 plus AMD APM Vol.2 Chapter 8 define the
- * IDT gate format, exception vector assignments, and page-fault error-code
- * bits. Keep this header scoped to the current minimal exception path: IST
- * routing, syscall/user traps, and interrupt dispatch are later milestones.
+ * IDT gate format, exception vector assignments, external interrupt vector
+ * range, and page-fault error-code bits. Keep this header scoped to the
+ * current minimal exception/local-interrupt path: IST routing, syscall/user
+ * traps, IOAPIC/PIC routing, and full interrupt dispatch are later milestones.
  */
 #define X86_64_INTR_IDT_ENTRIES 256
-#define X86_64_INTR_EXTERNAL_DEFAULT_VECTOR 256
+#define X86_64_INTR_VECTOR_EXTERNAL_MIN 32
+#define X86_64_INTR_VECTOR_EXTERNAL_MAX 255
+#define X86_64_INTR_EXTERNAL_VECTOR_COUNT \
+	(X86_64_INTR_VECTOR_EXTERNAL_MAX - X86_64_INTR_VECTOR_EXTERNAL_MIN + 1)
 
 #define X86_64_INTR_GATE_TYPE_INTERRUPT64 0x0e
 #define X86_64_INTR_GATE_TYPE_TRAP64      0x0f
@@ -145,6 +149,12 @@ x86_64_intr_set_idt_entry(struct x86_64_intr_idt_entry *entry,
 static inline bool x86_64_intr_vector_is_exception(uint64_t vector)
 {
 	return vector < 32;
+}
+
+static inline bool x86_64_intr_vector_is_external(uint64_t vector)
+{
+	return vector >= X86_64_INTR_VECTOR_EXTERNAL_MIN &&
+	       vector <= X86_64_INTR_VECTOR_EXTERNAL_MAX;
 }
 
 static inline bool x86_64_intr_pf_error_is_known(uint64_t error_code)

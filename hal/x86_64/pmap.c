@@ -56,7 +56,8 @@ void __weak hal_mmu_invalidate_tlb(plane_vaddr_t vaddr)
 {
 	/*
 	 * INVLPG invalidates cached translations for one linear address on the
-	 * current CPU. Cross-CPU shootdown comes with the later SMP pmap path.
+	 * current CPU. Cross-CPU shootdown comes with the later pmap-update IPI
+	 * payload; the current IPI dispatch scaffold only acknowledges events.
 	 */
 	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
 }

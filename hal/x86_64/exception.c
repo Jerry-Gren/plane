@@ -1,5 +1,6 @@
 #include <hal/x86_64/exception.h>
 #include <hal/x86_64/linkage.h>
+#include <hal/local_interrupt.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
 
@@ -104,8 +105,14 @@ void x86_64_exception_handler(struct x86_64_intr_frame *frame)
 {
 	uint64_t cr2 = 0;
 
+	if (x86_64_intr_vector_is_external(frame->int_no)) {
+		hal_local_interrupt_dispatch((uint32_t)frame->int_no);
+		return;
+	}
+
 	if (!x86_64_intr_vector_is_exception(frame->int_no)) {
-		pr_warn("Unhandled interrupt/irq triggered but ignored.\n");
+		pr_warn("Invalid x86_64 interrupt vector %llu\n",
+			frame->int_no);
 		return;
 	}
 

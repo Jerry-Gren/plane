@@ -177,6 +177,14 @@ static int test_runtime_rejects_invalid_before_init(void)
 				    plane_cpu_current_data(), NULL);
 	failures += test_expect_ptr("uninitialized cpu data get",
 				    plane_cpu_get_data(0), NULL);
+	failures += test_expect_bool("uninitialized ipi rejected",
+				     plane_smp_handle_ipi(
+					     PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+				     false);
+	failures += test_expect_u64("uninitialized ipi count",
+				    plane_smp_ipi_count(
+					    PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+				    0);
 	failures += test_expect_bool("uninitialized prepare rejected",
 				     plane_smp_prepare_ap_stack(
 					     1, plane_vaddr_make(0x1000), 1),
@@ -244,6 +252,33 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 	}
 	failures += test_expect_ptr("out of range cpu data get",
 				    plane_cpu_get_data(5), NULL);
+	return failures;
+}
+
+static int test_ipi_dispatch_counts_known_vectors(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("reschedule ipi handled",
+				     plane_smp_handle_ipi(
+					     PLANE_SMP_IPI_VECTOR_RESCHEDULE),
+				     true);
+	failures += test_expect_bool("pmap update ipi handled",
+				     plane_smp_handle_ipi(
+					     PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+				     true);
+	failures += test_expect_bool("unknown ipi rejected",
+				     plane_smp_handle_ipi(0xef), false);
+	failures += test_expect_u64("reschedule ipi count",
+				    plane_smp_ipi_count(
+					    PLANE_SMP_IPI_VECTOR_RESCHEDULE),
+				    1);
+	failures += test_expect_u64("pmap update ipi count",
+				    plane_smp_ipi_count(
+					    PLANE_SMP_IPI_VECTOR_PMAP_UPDATE),
+				    1);
+	failures += test_expect_u64("unknown ipi count",
+				    plane_smp_ipi_count(0xef), 0);
 	return failures;
 }
 
@@ -451,6 +486,7 @@ int main(void)
 		TEST_CASE(test_builder_truncates_extra_cpus),
 		TEST_CASE(test_runtime_rejects_invalid_before_init),
 		TEST_CASE(test_runtime_accepts_multi_cpu_bsp_topology),
+		TEST_CASE(test_ipi_dispatch_counts_known_vectors),
 		TEST_CASE(test_ap_stack_prepare_and_state_transitions),
 		TEST_CASE(test_ap_stack_prepare_rejects_after_context_failure_path),
 		TEST_CASE(test_runtime_rejects_reinit_without_state_change),

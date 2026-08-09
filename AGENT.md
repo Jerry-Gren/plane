@@ -384,6 +384,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   `plane_smp_boot_*`.
 - Local APIC/xAPIC details stay in x86_64 local interrupt implementation.
   Generic HAL callers use `hal_local_interrupt_*`.
+- Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
+  the frame and vector, the local interrupt controller owns EOI and dispatch
+  glue, SMP owns IPI event meaning, and pmap will own the later TLB shootdown
+  payload. Do not put pmap shootdown policy in the architecture exception
+  handler or in LAPIC register code.
 
 ## Tests
 

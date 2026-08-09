@@ -22,9 +22,10 @@ DECL_ISR(16) DECL_ISR(17) DECL_ISR(18) DECL_ISR(19) DECL_ISR(20) DECL_ISR(21) DE
 DECL_ISR(24) DECL_ISR(25) DECL_ISR(26) DECL_ISR(27) DECL_ISR(28) DECL_ISR(29) DECL_ISR(30) DECL_ISR(31)
 
 /* in interrupts.S */
-extern void x86_64_isr_default(void);
+extern void (*x86_64_isr_external_stub_table[
+	X86_64_INTR_EXTERNAL_VECTOR_COUNT])(void);
 
-static void *x86_64_isr_stub_table[32] = {
+static void (*const x86_64_isr_exception_stub_table[32])(void) = {
 	x86_64_isr0, x86_64_isr1, x86_64_isr2, x86_64_isr3,
 	x86_64_isr4, x86_64_isr5, x86_64_isr6, x86_64_isr7,
 	x86_64_isr8, x86_64_isr9, x86_64_isr10, x86_64_isr11,
@@ -44,26 +45,27 @@ static void idt_set_descriptor(uint8_t vector, uintptr_t isr, uint8_t attributes
 
 void x86_64_idt_init(void)
 {
+	uint8_t kernel_interrupt_attr = x86_64_intr_idt_attr(
+		true, X86_64_DESC_DPL_KERNEL,
+		X86_64_INTR_GATE_TYPE_INTERRUPT64);
+
 	/* set idtr */
 	idtr.limit = sizeof(idt) - 1;
 	idtr.base  = (uint64_t)&idt;
 
-	/* fill all entries with default isr handler */
-	for (int i = 0; i < X86_64_INTR_IDT_ENTRIES; i++) {
-		idt_set_descriptor(
-			i, (uintptr_t)x86_64_isr_default,
-			x86_64_intr_idt_attr(
-				true, X86_64_DESC_DPL_KERNEL,
-				X86_64_INTR_GATE_TYPE_INTERRUPT64));
+	for (uint32_t i = X86_64_INTR_VECTOR_EXTERNAL_MIN;
+	     i <= X86_64_INTR_VECTOR_EXTERNAL_MAX; i++) {
+		idt_set_descriptor(i,
+			(uintptr_t)x86_64_isr_external_stub_table[
+				i - X86_64_INTR_VECTOR_EXTERNAL_MIN],
+			kernel_interrupt_attr);
 	}
 
 	/* override entries for first 32 vectors */
 	for (int i = 0; i < 32; i++) {
 		idt_set_descriptor(
-			i, (uintptr_t)x86_64_isr_stub_table[i],
-			x86_64_intr_idt_attr(
-				true, X86_64_DESC_DPL_KERNEL,
-				X86_64_INTR_GATE_TYPE_INTERRUPT64));
+			i, (uintptr_t)x86_64_isr_exception_stub_table[i],
+			kernel_interrupt_attr);
 	}
 
 	/* disabling 8259 pic */
