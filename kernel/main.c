@@ -6,7 +6,6 @@
 #include <plane/printk.h>
 #include <plane/pmm.h>
 #include <plane/smp.h>
-#include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 #include <machine/serial.h>
 #include <machine/machine_routines.h>

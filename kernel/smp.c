@@ -1,7 +1,6 @@
 #include <stddef.h>
 
 #include <machine/machine_routines.h>
-#include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 
 #include <plane/atomic.h>

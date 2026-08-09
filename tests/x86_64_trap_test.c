@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #include <x86_64/trap.h>
-#include <machine/local_interrupt.h>
+#include <machine/machine_routines.h>
 #include <plane/kmem.h>
 #include <plane/vm_prot.h>
 

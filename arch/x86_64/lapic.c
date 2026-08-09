@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #include <machine/machine_routines.h>
-#include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 #include <machine/page.h>
 #include <x86_64/cpu_features.h>

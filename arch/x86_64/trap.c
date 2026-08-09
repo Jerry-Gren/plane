@@ -1,6 +1,6 @@
 #include <x86_64/trap.h>
 #include <x86_64/linkage.h>
-#include <machine/local_interrupt.h>
+#include <machine/machine_routines.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
 #include <x86_64/proc_reg.h>

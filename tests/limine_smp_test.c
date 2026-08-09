@@ -2,7 +2,6 @@
 #include <stdint.h>
 
 #include <machine/machine_routines.h>
-#include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 #include <plane/kmem.h>
 #include <plane/smp.h>

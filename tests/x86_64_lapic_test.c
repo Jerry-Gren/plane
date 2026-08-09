@@ -3,7 +3,6 @@
 #include <string.h>
 
 #include <machine/machine_routines.h>
-#include <machine/local_interrupt.h>
 #include <machine/pmap.h>
 #include <x86_64/cpu_features.h>
 #include <x86_64/proc_reg.h>

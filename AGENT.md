@@ -44,8 +44,8 @@ Prefer small, manual patches that preserve surrounding style.
   wrappers after a machine-facing owner exists.
 - Use `ml_*` for machine routines: current-machine services that generic kernel
   code calls through `include/machine/`, such as startup, interrupt state, CPU
-  data installation, local interrupt controller entry points, IO/physical
-  access, and later machine-level hooks.
+  data installation, local interrupt controller hooks, IO/physical access, and
+  later machine-level hooks.
 - Use `cpu_*` for CPU-local primitives and CPU data operations that name the
   processor action itself, such as `cpu_pause()`. Do not force these into
   `ml_cpu_*` merely because they are architecture-backed.
@@ -124,9 +124,9 @@ Use these words consistently:
 - `physmap`: Plane's RAM physical map. Do not use `direct_map` in new names.
 - `pmap`: page-table construction, active kernel mappings, root ownership, and
   TLB invalidation.
-- `local_interrupt`: machine-selected local interrupt controller boundary.
-  Do not expose x86-specific LAPIC terms through machine-facing names unless
-  the interface is explicitly x86_64-only.
+- `local interrupt`: machine-routine hooks for the current CPU's local
+  interrupt controller. Keep x86-specific LAPIC terms inside x86_64 owners
+  unless the interface is explicitly x86_64-only.
 
 Preferred symbol order:
 
@@ -433,9 +433,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   install current CPU data, initialize local interrupts, mark parked, halt.
 - `plane_smp_startup_*` names are for AP startup launch helpers. Do not revive
   `plane_smp_boot_*`.
-- Local APIC/xAPIC details stay in x86_64 local interrupt implementation.
-  Generic callers use `<machine/local_interrupt.h>` and the
-  `ml_local_interrupt_*` machine routines.
+- Local APIC/xAPIC details stay in the x86_64 LAPIC implementation. Generic
+  callers use `<machine/machine_routines.h>` and the
+  `ml_local_interrupt_*` machine-routine hooks.
 - Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
   the frame and vector, the local interrupt controller owns EOI and dispatch
   glue, SMP owns inter-processor event meaning and CPU pending signal bits, and
