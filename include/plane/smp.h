@@ -15,9 +15,9 @@
  * per-CPU architecture context, current data, and CPU interrupt state before
  * parking in a halt loop. Plane has a minimal CPU signal dispatch scaffold for
  * architecture CPU-interrupt delivery, but APs remain parked/offline and
- * TLB-flush events only acknowledge receipt. Plane does not expose a
- * CPU-local fast accessor, remote TLB shootdown, scheduling, or general AP
- * execution yet.
+ * TLB-flush events enter pmap's current full-flush payload scaffold. Plane
+ * does not expose a CPU-local fast accessor, range shootdown rendezvous,
+ * scheduling, or general AP execution yet.
  */
 enum plane_cpu_startup_state {
 	PLANE_CPU_STARTUP_OFFLINE = 0,
@@ -25,6 +25,18 @@ enum plane_cpu_startup_state {
 	PLANE_CPU_STARTUP_STARTING,
 	PLANE_CPU_STARTUP_PARKED,
 	PLANE_CPU_STARTUP_FAILED,
+};
+
+enum plane_smp_event {
+	PLANE_SMP_EVENT_AST = 0,
+	PLANE_SMP_EVENT_TLB_FLUSH,
+	PLANE_SMP_EVENT_COUNT,
+};
+
+enum plane_smp_signal_mode {
+	PLANE_SMP_SIGNAL_SYNC = 0,
+	PLANE_SMP_SIGNAL_ASYNC,
+	PLANE_SMP_SIGNAL_NOSYNC,
 };
 
 struct plane_cpu_info {
@@ -79,6 +91,9 @@ bool plane_cpu_is_bsp(void);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
+bool plane_smp_signal_cpu(uint32_t logical_id,
+			  enum plane_smp_event event,
+			  enum plane_smp_signal_mode mode);
 bool plane_smp_signal_handler(void);
 
 /*

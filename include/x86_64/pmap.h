@@ -55,8 +55,8 @@ void pmap_invalidate_tlb(plane_vaddr_t vaddr);
 void pmap_flush_tlb_all(void);
 
 /*
- * XNU-like pmap update interrupt landing pad for SMP TLB-flush signals.
- * Remote shootdown payload and rendezvous state are later pmap milestones.
+ * XNU-like pmap update interrupt landing pad for SMP TLB_FLUSH signals.
+ * The pmap-owned sender side will attach range/cpumask rendezvous later.
  */
 void pmap_update_interrupt(void);
 

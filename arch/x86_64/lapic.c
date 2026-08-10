@@ -18,7 +18,7 @@
 
 /*
  * XNU-like local APIC foundation, narrowed to xAPIC MMIO setup and fixed IPI
- * primitives. Timer/error payloads, full signal payloads, and x2APIC are
+ * primitives. Timer/error routing, signal rendezvous payloads, and x2APIC are
  * intentionally left for later SMP milestones.
  */
 

@@ -7,6 +7,7 @@
 #include <plane/compiler.h>
 #include <plane/mm.h>
 #include <plane/pmm.h>
+#include <plane/smp.h>
 #include <plane/vm_prot.h>
 
 #include "support/spinlock_stubs.h"
@@ -27,6 +28,8 @@ static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
 static uint64_t invalidate_lock_depth;
 static uint64_t flush_count;
+static uint32_t test_cpu_count;
+static uint32_t test_current_cpu_id;
 static bool test_pat_wc_ready;
 static plane_vaddr_t test_physmap_base;
 static uint64_t test_physmap_size;
@@ -96,6 +99,8 @@ static void reset_pmap_test(void)
 	invalidate_count = 0;
 	invalidate_lock_depth = 0;
 	flush_count = 0;
+	test_cpu_count = 4;
+	test_current_cpu_id = 0;
 	test_pat_wc_ready = true;
 	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
 	test_physmap_size = ARCH_HUGE_PAGE_SIZE;
@@ -142,6 +147,16 @@ void pmap_invalidate_tlb(plane_vaddr_t vaddr)
 void pmap_flush_tlb_all(void)
 {
 	flush_count++;
+}
+
+uint32_t plane_cpu_count(void)
+{
+	return test_cpu_count;
+}
+
+uint32_t plane_cpu_current_id(void)
+{
+	return test_current_cpu_id;
 }
 
 bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
@@ -785,6 +800,70 @@ static int test_active_kernel_translate_locks_snapshot(void)
 	failures += test_expect_u64("active translate no invalidate",
 				    invalidate_count, 0);
 
+	return failures;
+}
+
+static int test_pmap_update_interrupt_flushes_only_pending_cpu(void)
+{
+	int failures = 0;
+
+	pmap_update_interrupt();
+	failures += test_expect_u64("no pending update no flush",
+				    flush_count, 0);
+
+	failures += test_expect_bool("mark current cpu pending",
+				     x86_64_pmap_mark_tlb_flush_pending(0),
+				     true);
+	failures += test_expect_bool("mark current cpu pending twice",
+				     x86_64_pmap_mark_tlb_flush_pending(0),
+				     true);
+	failures += test_expect_u64("mark does not flush directly",
+				    flush_count, 0);
+
+	pmap_update_interrupt();
+	failures += test_expect_u64("pending update flushes once",
+				    flush_count, 1);
+	pmap_update_interrupt();
+	failures += test_expect_u64("cleared pending no repeat flush",
+				    flush_count, 1);
+	return failures;
+}
+
+static int test_pmap_update_interrupt_uses_current_cpu_pending_state(void)
+{
+	int failures = 0;
+
+	failures += test_expect_bool("mark remote cpu pending",
+				     x86_64_pmap_mark_tlb_flush_pending(2),
+				     true);
+	pmap_update_interrupt();
+	failures += test_expect_u64("other cpu pending does not flush current",
+				    flush_count, 0);
+
+	test_current_cpu_id = 2;
+	pmap_update_interrupt();
+	failures += test_expect_u64("marked cpu interrupt flushes",
+				    flush_count, 1);
+	pmap_update_interrupt();
+	failures += test_expect_u64("marked cpu pending clears",
+				    flush_count, 1);
+	return failures;
+}
+
+static int test_pmap_mark_tlb_flush_pending_rejects_invalid_cpu(void)
+{
+	int failures = 0;
+
+	test_cpu_count = 2;
+	failures += test_expect_bool("mark out of runtime cpu range",
+				     x86_64_pmap_mark_tlb_flush_pending(2),
+				     false);
+	failures += test_expect_bool("mark out of max cpu range",
+				     x86_64_pmap_mark_tlb_flush_pending(
+					     PLANE_MAX_CPUS),
+				     false);
+	failures += test_expect_u64("invalid cpu does not flush",
+				    flush_count, 0);
 	return failures;
 }
 
@@ -1566,6 +1645,9 @@ int main(void)
 		TEST_CASE(test_owned_root_protect_preserves_cache_bits_without_active_lock),
 		TEST_CASE(test_pmap_kernel_page_wrappers),
 		TEST_CASE(test_active_kernel_translate_locks_snapshot),
+		TEST_CASE(test_pmap_update_interrupt_flushes_only_pending_cpu),
+		TEST_CASE(test_pmap_update_interrupt_uses_current_cpu_pending_state),
+		TEST_CASE(test_pmap_mark_tlb_flush_pending_rejects_invalid_cpu),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_active_kernel_failures_release_lock_without_invalidate),
 		TEST_CASE(test_active_kernel_map_failure_rolls_back_and_unlocks),
