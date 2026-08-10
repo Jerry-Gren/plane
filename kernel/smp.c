@@ -270,6 +270,14 @@ bool plane_cpu_is_bsp(void)
 	return current_cpu_data != NULL && current_cpu_data->is_bsp;
 }
 
+bool plane_cpu_is_running(uint32_t logical_id)
+{
+	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
+
+	return smp_initialized && cpu != NULL && cpu->self == cpu &&
+	       cpu->present && cpu->online;
+}
+
 const struct plane_cpu_data *plane_cpu_current_data(void)
 {
 	return current_cpu_data;
@@ -312,19 +320,7 @@ static bool smp_signal_is_mode_supported(enum plane_smp_signal_mode mode)
 
 static bool smp_cpu_can_handle_signal(const struct plane_cpu_data *cpu)
 {
-	uint32_t state;
-
-	if (!smp_initialized || cpu == NULL || cpu->self != cpu ||
-	    !cpu->present) {
-		return false;
-	}
-	if (cpu->is_bsp) {
-		return cpu->online;
-	}
-
-	state = plane_atomic_load_u32(&cpu->startup_state);
-	return state == PLANE_CPU_STARTUP_PREPARED ||
-	       state == PLANE_CPU_STARTUP_PARKED;
+	return cpu != NULL && plane_cpu_is_running(cpu->logical_id);
 }
 
 static void smp_cpu_set_signal(struct plane_cpu_data *cpu,
@@ -415,6 +411,7 @@ bool plane_smp_signal_cpu(uint32_t logical_id,
 	}
 
 	smp_cpu_set_signal(cpu, event);
+	plane_atomic_fence_release();
 	if (ml_cpu_signal(logical_id)) {
 		return true;
 	}

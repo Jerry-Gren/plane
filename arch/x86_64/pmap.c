@@ -57,8 +57,8 @@ void __weak pmap_invalidate_tlb(plane_vaddr_t vaddr)
 	/*
 	 * INVLPG invalidates cached translations for one linear address on the
 	 * current CPU. Cross-CPU range shootdown and rendezvous come in a later
-	 * pmap milestone; the current signal payload only performs a full TLB
-	 * flush for CPUs with pending pmap update state.
+	 * pmap milestone; the current pmap update path performs a full TLB
+	 * flush for CPUs with pending pmap state.
 	 */
 	invlpg(vaddr);
 }
@@ -73,7 +73,8 @@ static bool pmap_cpu_is_valid(uint32_t logical_id)
 	return logical_id < PLANE_MAX_CPUS && logical_id < plane_cpu_count();
 }
 
-static bool pmap_cpu_mark_tlb_flush_pending(uint32_t logical_id)
+static bool pmap_cpu_mark_tlb_flush_pending(uint32_t logical_id,
+					    bool *was_pending)
 {
 	uint32_t old_pending;
 
@@ -84,11 +85,17 @@ static bool pmap_cpu_mark_tlb_flush_pending(uint32_t logical_id)
 	old_pending = plane_atomic_load_u32(&pmap_tlb_flush_pending[logical_id]);
 	do {
 		if (old_pending != 0) {
+			if (was_pending != NULL) {
+				*was_pending = true;
+			}
 			return true;
 		}
 	} while (!plane_atomic_compare_exchange_u32(
 		&pmap_tlb_flush_pending[logical_id], &old_pending, 1));
 
+	if (was_pending != NULL) {
+		*was_pending = false;
+	}
 	return true;
 }
 
@@ -113,7 +120,48 @@ static bool pmap_cpu_clear_tlb_flush_pending(uint32_t logical_id)
 
 bool x86_64_pmap_mark_tlb_flush_pending(uint32_t logical_id)
 {
-	return pmap_cpu_mark_tlb_flush_pending(logical_id);
+	return pmap_cpu_mark_tlb_flush_pending(logical_id, NULL);
+}
+
+static bool pmap_cpu_signal_tlb_flush(uint32_t logical_id)
+{
+	bool was_pending;
+
+	if (!pmap_cpu_mark_tlb_flush_pending(logical_id, &was_pending)) {
+		return false;
+	}
+
+	if (logical_id == plane_cpu_current_id()) {
+		pmap_update_interrupt();
+		return true;
+	}
+
+	if (plane_smp_signal_cpu(logical_id, PLANE_SMP_EVENT_TLB_FLUSH,
+				 PLANE_SMP_SIGNAL_ASYNC)) {
+		return true;
+	}
+
+	if (!was_pending) {
+		pmap_cpu_clear_tlb_flush_pending(logical_id);
+	}
+	return false;
+}
+
+static void pmap_signal_remote_tlb_flushes(void)
+{
+	uint32_t current_id = plane_cpu_current_id();
+	uint32_t cpu_count = plane_cpu_count();
+
+	for (uint32_t logical_id = 0; logical_id < cpu_count; logical_id++) {
+		if (logical_id == current_id ||
+		    !plane_cpu_is_running(logical_id)) {
+			continue;
+		}
+
+		BUG_ON_MSG(!pmap_cpu_signal_tlb_flush(logical_id),
+			   "failed to signal TLB flush to running CPU %u",
+			   logical_id);
+	}
 }
 
 void pmap_update_interrupt(void)
@@ -839,6 +887,9 @@ bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 		pmap_invalidate_tlb(vaddr);
 	}
 	pmap_unlock(state);
+	if (mapped) {
+		pmap_signal_remote_tlb_flushes();
+	}
 	return mapped;
 }
 
@@ -854,6 +905,9 @@ bool pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 		pmap_invalidate_tlb(vaddr);
 	}
 	pmap_unlock(state);
+	if (unmapped) {
+		pmap_signal_remote_tlb_flushes();
+	}
 	return unmapped;
 }
 
@@ -882,6 +936,9 @@ bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 		pmap_invalidate_tlb(vaddr);
 	}
 	pmap_unlock(state);
+	if (protected) {
+		pmap_signal_remote_tlb_flushes();
+	}
 	return protected;
 }
 

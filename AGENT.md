@@ -452,10 +452,12 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - Use `signal` for XNU-like cross-CPU delivery/pending state:
   `plane_smp_signal_cpu(logical_id, event, mode)`,
   `plane_smp_signal_handler()`, and `plane_cpu_data.cpu_signals`.
-  `plane_smp_signal_cpu()` sets an event bit, applies the signal mode policy,
-  and calls `ml_cpu_signal()`; `plane_smp_signal_handler()` drains pending
-  event bits from the current CPU. Keep `IPI` only for x86_64 LAPIC
-  implementation/tests and hardware-delivery descriptions.
+  `plane_smp_signal_cpu()` only targets running CPUs, sets an event bit,
+  publishes it with release ordering, applies the signal mode policy, and
+  calls `ml_cpu_signal()`; `plane_smp_signal_handler()` drains pending event
+  bits from the current CPU. Parked APs are not running TLB-flush targets.
+  Keep `IPI` only for x86_64 LAPIC implementation/tests and
+  hardware-delivery descriptions.
 
 ## Tests
 

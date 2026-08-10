@@ -238,6 +238,10 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 				    plane_cpu_current_id(), 0);
 	failures += test_expect_bool("current is bsp",
 				     plane_cpu_is_bsp(), true);
+	failures += test_expect_bool("bsp is running",
+				     plane_cpu_is_running(0), true);
+	failures += test_expect_bool("present ap is not running",
+				     plane_cpu_is_running(1), false);
 
 	const struct plane_cpu_data *current = plane_cpu_current_data();
 	const struct plane_cpu_data *bsp = plane_cpu_get_data(0);
@@ -403,6 +407,8 @@ static int test_signal_cpu_sets_pending_signal_and_sends_signal(void)
 					     PLANE_SMP_EVENT_AST,
 					     PLANE_SMP_SIGNAL_ASYNC),
 				     false);
+	failures += test_expect_bool("offline ap not running",
+				     plane_cpu_is_running(1), false);
 	failures += test_expect_bool("sync mode rejected",
 				     plane_smp_signal_cpu(
 					     0, PLANE_SMP_EVENT_AST,
@@ -462,6 +468,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_u32("ap1 state prepared",
 				    plane_cpu_startup_state(1),
 				    PLANE_CPU_STARTUP_PREPARED);
+	failures += test_expect_bool("prepared ap is not running",
+				     plane_cpu_is_running(1), false);
 	if (ap1 != NULL) {
 		failures += test_expect_u64("ap1 stack base",
 					    plane_vaddr_raw(ap1->ap_stack_base),
@@ -480,6 +488,8 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_u32("ap1 state starting",
 				    plane_cpu_startup_state(1),
 				    PLANE_CPU_STARTUP_STARTING);
+	failures += test_expect_bool("starting ap is not running",
+				     plane_cpu_is_running(1), false);
 	call_ap_park_entry(ap1);
 	failures += test_expect_u32("park entry installs context",
 				    machine_install_context_count, 1);
@@ -496,10 +506,20 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 	failures += test_expect_u32("ap1 state parked",
 				    plane_cpu_startup_state(1),
 				    PLANE_CPU_STARTUP_PARKED);
+	failures += test_expect_bool("parked ap is not running",
+				     plane_cpu_is_running(1), false);
 	failures += test_expect_u32("one parked ap",
 				    plane_cpu_parked_count(), 1);
 	failures += test_expect_bool("fail parked ap rejected",
 				     plane_smp_mark_ap_failed(ap1), false);
+	uint32_t signal_count = cpu_signal_count;
+	failures += test_expect_bool("parked ap signal rejected",
+				     plane_smp_signal_cpu(
+					     1, PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_ASYNC),
+				     false);
+	failures += test_expect_u32("parked ap signal does not send",
+				    cpu_signal_count, signal_count);
 
 	failures += test_expect_bool("prepare ap2",
 				     plane_smp_prepare_ap_stack(

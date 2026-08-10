@@ -30,6 +30,13 @@ static uint64_t invalidate_lock_depth;
 static uint64_t flush_count;
 static uint32_t test_cpu_count;
 static uint32_t test_current_cpu_id;
+static bool test_cpu_running[PLANE_MAX_CPUS];
+static bool cpu_signal_should_fail;
+static uint32_t cpu_signal_count;
+static uint32_t cpu_signal_last_logical_id;
+static enum plane_smp_event cpu_signal_last_event;
+static enum plane_smp_signal_mode cpu_signal_last_mode;
+static uint64_t cpu_signal_lock_depth;
 static bool test_pat_wc_ready;
 static plane_vaddr_t test_physmap_base;
 static uint64_t test_physmap_size;
@@ -101,6 +108,14 @@ static void reset_pmap_test(void)
 	flush_count = 0;
 	test_cpu_count = 4;
 	test_current_cpu_id = 0;
+	memset(test_cpu_running, 0, sizeof(test_cpu_running));
+	test_cpu_running[0] = true;
+	cpu_signal_should_fail = false;
+	cpu_signal_count = 0;
+	cpu_signal_last_logical_id = UINT32_MAX;
+	cpu_signal_last_event = PLANE_SMP_EVENT_COUNT;
+	cpu_signal_last_mode = PLANE_SMP_SIGNAL_SYNC;
+	cpu_signal_lock_depth = UINT64_MAX;
 	test_pat_wc_ready = true;
 	test_physmap_base = test_vaddr(X86_64_PHYSMAP_BASE);
 	test_physmap_size = ARCH_HUGE_PAGE_SIZE;
@@ -157,6 +172,24 @@ uint32_t plane_cpu_count(void)
 uint32_t plane_cpu_current_id(void)
 {
 	return test_current_cpu_id;
+}
+
+bool plane_cpu_is_running(uint32_t logical_id)
+{
+	return logical_id < test_cpu_count && logical_id < PLANE_MAX_CPUS &&
+	       test_cpu_running[logical_id];
+}
+
+bool plane_smp_signal_cpu(uint32_t logical_id,
+			  enum plane_smp_event event,
+			  enum plane_smp_signal_mode mode)
+{
+	cpu_signal_count++;
+	cpu_signal_last_logical_id = logical_id;
+	cpu_signal_last_event = event;
+	cpu_signal_last_mode = mode;
+	cpu_signal_lock_depth = test_spinlock_stub_irqsave_depth();
+	return !cpu_signal_should_fail;
 }
 
 bool plane_pmm_alloc_pages_phys_flags(uint64_t page_count,
@@ -415,6 +448,11 @@ static void reset_active_pmap_observation(void)
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
 	invalidate_lock_depth = 0;
+	cpu_signal_count = 0;
+	cpu_signal_last_logical_id = UINT32_MAX;
+	cpu_signal_last_event = PLANE_SMP_EVENT_COUNT;
+	cpu_signal_last_mode = PLANE_SMP_SIGNAL_SYNC;
+	cpu_signal_lock_depth = UINT64_MAX;
 	test_spinlock_stub_reset_counts();
 }
 
@@ -539,7 +577,71 @@ static int test_active_kernel_map_invalidates(void)
 				    test_spinlock_stub_irqsave_depth(), 0);
 	failures += test_expect_u64("active map invalidate under lock",
 				    invalidate_lock_depth, 1);
+	failures += test_expect_u32("active map no remote signal by default",
+				    cpu_signal_count, 0);
 
+	return failures;
+}
+
+static int test_active_kernel_map_signals_running_remote_tlb_flush(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	test_cpu_running[2] = true;
+	failures += test_expect_bool("active map with remote cpu",
+				     pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
+				     true);
+	failures += test_expect_u64("active map local invalidate",
+				    invalidate_count, 1);
+	failures += test_expect_u32("remote signal sent once",
+				    cpu_signal_count, 1);
+	failures += test_expect_u32("remote signal target",
+				    cpu_signal_last_logical_id, 2);
+	failures += test_expect_u32("remote signal event",
+				    cpu_signal_last_event,
+				    PLANE_SMP_EVENT_TLB_FLUSH);
+	failures += test_expect_u32("remote signal mode",
+				    cpu_signal_last_mode,
+				    PLANE_SMP_SIGNAL_ASYNC);
+	failures += test_expect_u64("remote signal after pmap unlock",
+				    cpu_signal_lock_depth, 0);
+
+	test_current_cpu_id = 2;
+	pmap_update_interrupt();
+	failures += test_expect_u64("remote pending flushes on target cpu",
+				    flush_count, 1);
+	pmap_update_interrupt();
+	failures += test_expect_u64("remote pending clears",
+				    flush_count, 1);
+	return failures;
+}
+
+static int test_active_kernel_map_skips_non_running_remote_cpus(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	test_cpu_running[1] = false;
+	test_cpu_running[2] = false;
+	failures += test_expect_bool("active map skips parked/offline cpus",
+				     pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ)),
+				     true);
+	failures += test_expect_u32("no remote signal",
+				    cpu_signal_count, 0);
+
+	test_current_cpu_id = 1;
+	pmap_update_interrupt();
+	test_current_cpu_id = 2;
+	pmap_update_interrupt();
+	failures += test_expect_u64("non-running cpus not marked pending",
+				    flush_count, 0);
 	return failures;
 }
 
@@ -591,6 +693,52 @@ static int test_active_kernel_protect_updates_writable_bit(void)
 				    invalidate_count, 1);
 	failures += test_expect_u64("protect writable locks",
 				    test_spinlock_stub_irqsave_count(), 1);
+	return failures;
+}
+
+static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
+{
+	uint64_t vaddr = 0xffff800000402000ull;
+	int failures = 0;
+
+	failures += test_expect_bool("remote signal setup map",
+				     pmap_map_kernel_page(
+					     vaddr, 0x12345000ull,
+					     test_default_options(
+						     PLANE_VM_PROT_READ |
+						     PLANE_VM_PROT_WRITE)),
+				     true);
+
+	test_cpu_running[2] = true;
+	reset_active_pmap_observation();
+	failures += test_expect_bool("protect signals remote",
+				     pmap_protect_kernel_page(
+					     vaddr, PLANE_VM_PROT_READ),
+				     true);
+	failures += test_expect_u32("protect signal count",
+				    cpu_signal_count, 1);
+	failures += test_expect_u32("protect signal target",
+				    cpu_signal_last_logical_id, 2);
+
+	test_current_cpu_id = 2;
+	pmap_update_interrupt();
+	failures += test_expect_u64("protect remote pending flushes",
+				    flush_count, 1);
+
+	test_current_cpu_id = 0;
+	reset_active_pmap_observation();
+	failures += test_expect_bool("unmap signals remote",
+				     pmap_unmap_kernel_page(vaddr),
+				     true);
+	failures += test_expect_u32("unmap signal count",
+				    cpu_signal_count, 1);
+	failures += test_expect_u32("unmap signal target",
+				    cpu_signal_last_logical_id, 2);
+
+	test_current_cpu_id = 2;
+	pmap_update_interrupt();
+	failures += test_expect_u64("unmap remote pending flushes",
+				    flush_count, 2);
 	return failures;
 }
 
@@ -1639,7 +1787,10 @@ int main(void)
 		TEST_CASE(test_map_page_allocates_missing_path),
 		TEST_CASE(test_map_page_reuses_existing_tables),
 		TEST_CASE(test_active_kernel_map_invalidates),
+		TEST_CASE(test_active_kernel_map_signals_running_remote_tlb_flush),
+		TEST_CASE(test_active_kernel_map_skips_non_running_remote_cpus),
 		TEST_CASE(test_active_kernel_protect_updates_writable_bit),
+		TEST_CASE(test_active_kernel_protect_and_unmap_signal_remote_tlb_flush),
 		TEST_CASE(test_mapping_attrs_encode_pte_cache_bits),
 		TEST_CASE(test_mapping_attrs_validate_and_protect_preserves_cache_bits),
 		TEST_CASE(test_owned_root_protect_preserves_cache_bits_without_active_lock),

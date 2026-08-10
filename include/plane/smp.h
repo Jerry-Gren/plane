@@ -14,10 +14,10 @@
  * arch current-data slot. APs may be started only far enough to install
  * per-CPU architecture context, current data, and CPU interrupt state before
  * parking in a halt loop. Plane has a minimal CPU signal dispatch scaffold for
- * architecture CPU-interrupt delivery, but APs remain parked/offline and
- * TLB-flush events enter pmap's current full-flush payload scaffold. Plane
- * does not expose a CPU-local fast accessor, range shootdown rendezvous,
- * scheduling, or general AP execution yet.
+ * architecture CPU-interrupt delivery, but APs remain parked/offline and are
+ * not running TLB-flush targets. TLB-flush events enter pmap's current
+ * full-flush pending path. Plane does not expose a CPU-local fast accessor,
+ * range shootdown rendezvous, scheduling, or general AP execution yet.
  */
 enum plane_cpu_startup_state {
 	PLANE_CPU_STARTUP_OFFLINE = 0,
@@ -88,6 +88,7 @@ uint32_t plane_cpu_parked_count(void);
 uint32_t plane_cpu_count(void);
 uint32_t plane_cpu_current_id(void);
 bool plane_cpu_is_bsp(void);
+bool plane_cpu_is_running(uint32_t logical_id);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);

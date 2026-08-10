@@ -23,4 +23,9 @@ static inline bool plane_atomic_compare_exchange_u32(uint32_t *ptr,
 					   __ATOMIC_RELAXED);
 }
 
+static inline void plane_atomic_fence_release(void)
+{
+	__atomic_thread_fence(__ATOMIC_RELEASE);
+}
+
 #endif /* PLANE_ATOMIC_H */
