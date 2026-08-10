@@ -9,6 +9,7 @@
 #include <plane/pmm.h>
 #include <plane/smp.h>
 #include <plane/vm_prot.h>
+#include <x86_64/proc_reg.h>
 
 #include "support/spinlock_stubs.h"
 #include "support/test.h"
@@ -28,6 +29,7 @@ static uintptr_t invalidated_vaddr;
 static uint64_t invalidate_count;
 static uint64_t invalidate_lock_depth;
 static uint64_t flush_count;
+static uint64_t cr3_raw = 0x12345000;
 static uint32_t test_cpu_count;
 static uint32_t test_current_cpu_id;
 static bool test_cpu_running[PLANE_MAX_CPUS];
@@ -108,6 +110,7 @@ static void reset_pmap_test(void)
 	invalidate_count = 0;
 	invalidate_lock_depth = 0;
 	flush_count = 0;
+	cr3_raw = 0x12345000;
 	test_cpu_count = 4;
 	test_current_cpu_id = 0;
 	memset(test_cpu_running, 0, sizeof(test_cpu_running));
@@ -156,16 +159,22 @@ plane_vaddr_t physmap_phys_to_virt(plane_paddr_t phys_addr)
 	return physmap_phys_range_to_virt(phys_addr, 1);
 }
 
-void pmap_invalidate_tlb(plane_vaddr_t vaddr)
+uint64_t get_cr3_raw(void)
+{
+	return cr3_raw;
+}
+
+void set_cr3_raw(uint64_t value)
+{
+	cr3_raw = value;
+	flush_count++;
+}
+
+void invlpg(plane_vaddr_t vaddr)
 {
 	invalidated_vaddr = plane_vaddr_raw(vaddr);
 	invalidate_lock_depth = test_spinlock_stub_irqsave_depth();
 	invalidate_count++;
-}
-
-void pmap_flush_tlb_all(void)
-{
-	flush_count++;
 }
 
 uint32_t plane_cpu_count(void)

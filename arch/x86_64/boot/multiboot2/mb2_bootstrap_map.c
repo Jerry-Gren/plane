@@ -1,9 +1,9 @@
 #include <x86_64/boot/multiboot2/mb2_bootstrap_map.h>
 
-#include <machine/pmap.h>
-
 #include <plane/overflow.h>
 #include <plane/util.h>
+#include <x86_64/pmap.h>
+#include <x86_64/proc_reg.h>
 
 /*
  * Boot-only framebuffer mapping.
@@ -129,7 +129,7 @@ bool x86_64_mb2_bootstrap_map_framebuffer(plane_paddr_t phys_addr,
 		uint64_t current_vaddr = X86_64_MB2_FRAMEBUFFER_VMA_BASE + offset;
 
 		target_pd[start_idx + i] = (phys_base + offset) | FB_PAGE_FLAGS;
-		pmap_invalidate_tlb(plane_vaddr_make(current_vaddr));
+		invlpg(plane_vaddr_make(current_vaddr));
 	}
 
 	if (!plane_checked_add_u64(X86_64_MB2_FRAMEBUFFER_VMA_BASE,
@@ -171,7 +171,7 @@ bool x86_64_mb2_bootstrap_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 			page * ARCH_LARGE_PAGE_SIZE;
 
 		target_pd[start_idx + i] = 0;
-		pmap_invalidate_tlb(plane_vaddr_make(current_vaddr));
+		invlpg(plane_vaddr_make(current_vaddr));
 	}
 
 	return true;
@@ -180,5 +180,5 @@ bool x86_64_mb2_bootstrap_unmap_framebuffer(plane_vaddr_t vaddr, uint64_t size)
 void x86_64_mb2_bootstrap_remove_identity_mapping(void)
 {
 	x86_64_mb2_bootstrap_pml4[0] = 0;
-	pmap_flush_tlb_all();
+	set_cr3_raw(get_cr3_raw());
 }

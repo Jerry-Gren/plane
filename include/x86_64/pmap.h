@@ -51,8 +51,6 @@ bool pmap_unmap_kernel_page(plane_vaddr_t vaddr);
 bool pmap_translate_kernel_page(plane_vaddr_t vaddr,
 				plane_paddr_t *phys_addr);
 bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot);
-void pmap_invalidate_tlb(plane_vaddr_t vaddr);
-void pmap_flush_tlb_all(void);
 
 /*
  * XNU-like pmap update interrupt landing pad for SMP TLB_FLUSH signals.

@@ -17,3 +17,25 @@ bool wrmsr64(uint32_t msr, uint64_t value)
 	__asm__ volatile ("wrmsr" : : "c"(msr), "a"(lo), "d"(hi) : "memory");
 	return true;
 }
+
+uint64_t get_cr3_raw(void)
+{
+	uint64_t cr3;
+
+	__asm__ volatile ("mov %%cr3, %0" : "=r" (cr3));
+	return cr3;
+}
+
+void set_cr3_raw(uint64_t value)
+{
+	__asm__ volatile ("mov %0, %%cr3" : : "r" (value) : "memory");
+}
+
+void invlpg(plane_vaddr_t vaddr)
+{
+	/*
+	 * INVLPG invalidates cached translations for one linear address on the
+	 * current CPU. Cross-CPU range shootdown and rendezvous stay in pmap.
+	 */
+	__asm__ volatile ("invlpg (%0)" : : "r" (plane_vaddr_raw(vaddr)) : "memory");
+}

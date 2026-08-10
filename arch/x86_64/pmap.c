@@ -51,28 +51,12 @@ bool pmap_kernel_vma_range(plane_vaddr_t *base, uint64_t *size)
 	return true;
 }
 
-void __weak pmap_invalidate_tlb(plane_vaddr_t vaddr)
-{
-	/*
-	 * INVLPG invalidates cached translations for one linear address on the
-	 * current CPU. Cross-CPU range shootdown and rendezvous come in a later
-	 * pmap milestone; the current pmap update path performs a full TLB
-	 * flush for CPUs with pmap-owned invalid state in CPU data.
-	 */
-	invlpg(vaddr);
-}
-
-void __weak pmap_flush_tlb_all(void)
-{
-	reload_cr3();
-}
-
 void pmap_update_interrupt(void)
 {
 	uint32_t logical_id = plane_cpu_current_id();
 
 	if (plane_cpu_clear_tlb_invalid(logical_id)) {
-		pmap_flush_tlb_all();
+		set_cr3_raw(get_cr3_raw());
 	}
 }
 
@@ -104,9 +88,9 @@ static bool pmap_flush_tlbs(plane_vaddr_t start,
 	*cpus_to_signal = 0;
 	current_id = plane_cpu_current_id();
 	if (page_count == 1) {
-		pmap_invalidate_tlb(start);
+		invlpg(start);
 	} else {
-		pmap_flush_tlb_all();
+		set_cr3_raw(get_cr3_raw());
 	}
 
 	cpu_count = plane_cpu_count();
@@ -967,6 +951,6 @@ bool pmap_take_kernel_page_table_ownership(void)
 	pmap_assert_page_table_phys(new_pml4_phys);
 	write_cr3_phys(new_pml4_phys);
 	x86_64_physmap_commit_owned();
-	pmap_flush_tlb_all();
+	set_cr3_raw(get_cr3_raw());
 	return true;
 }

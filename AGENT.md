@@ -52,7 +52,7 @@ Prefer small, manual patches that preserve surrounding style.
 - Use `serial_*` for the machine-selected serial primitive. Do not route
   serial calls through alternate machine serial wrappers.
 - Treat XNU prefixes as owner vocabulary, not aliases to import wholesale:
-  - `pmap_*` owns page-table mappings, active roots, TLB invalidation, and
+  - `pmap_*` owns page-table mappings, active roots, TLB update policy, and
     pmap-owned physmap construction.
   - `physmap_*` owns the RAM-only physical map subfacility under pmap.
   - `ml_*` owns machine routines exposed through `include/machine/`.
@@ -123,7 +123,7 @@ Use these words consistently:
   Do not add alternate page geometry wrappers.
 - `physmap`: Plane's RAM physical map. Do not use `direct_map` in new names.
 - `pmap`: page-table construction, active kernel mappings, root ownership, and
-  TLB invalidation.
+  TLB update policy.
 - `CPU interrupt`: machine-routine hooks for the current CPU's local
   interrupt controller. Keep x86-specific LAPIC terms inside x86_64 owners
   unless the interface is explicitly x86_64-only.
@@ -162,8 +162,9 @@ Preferred symbol order:
   `set_vendor_string()`, `set_brand_string()`, `collect_cpuid_raw()`,
   `sort_boundaries()`, and `choose_interval_type()` when the reversed form is
   less readable. Processor-register primitives in the `proc_reg` owner, such
-  as `read_cr2()`, `write_cr3_phys()`, `rdmsr64()`, and `invlpg()`, also keep
-  the XNU-like natural action-first form.
+  as `read_cr2()`, `write_cr3_phys()`, `get_cr3_raw()`, `set_cr3_raw()`,
+  `rdmsr64()`, and `invlpg()`, also keep the XNU-like natural action-first
+  form.
 - Predicate helpers should put the entity before the predicate word when that
   reads clearly. Public or cross-file predicates should read as
   `owner_is_property()`, such as `plane_vm_page_is_guard()`. File-local examples
@@ -407,7 +408,9 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   mappings. IO-map entries are VA reservations plus pmap mappings; they do not
   create anonymous VM objects and faults into them must fail.
 - pmap owns active root access, page-table mutation, pmap root cloning,
-  Plane-owned physmap construction, and local TLB invalidation.
+  Plane-owned physmap construction, and TLB update policy. Local processor
+  register/instruction primitives such as `invlpg()`, `get_cr3_raw()`, and
+  `set_cr3_raw()` belong to the x86_64 `proc_reg` service.
 - Mutating x86_64 pmap root helpers operate only on PMM-owned page-table roots.
   Read-only translation helpers may inspect any physmap-accessible root.
 - Active kernel pmap wrappers are responsible for local TLB invalidation.

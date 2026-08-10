@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <machine/pmap.h>
 #include <x86_64/boot/multiboot2/mb2_bootstrap_map.h>
+#include <x86_64/proc_reg.h>
 
 #include <plane/util.h>
 
@@ -15,6 +15,7 @@ uint64_t x86_64_mb2_bootstrap_pd_fb[X86_64_PAGING_TABLE_ENTRIES];
 static uintptr_t invalidated_vaddrs[X86_64_PAGING_TABLE_ENTRIES];
 static uint64_t invalidate_count;
 static uint64_t flush_count;
+static uint64_t cr3_raw = 0x12345000;
 static bool physmap_available;
 
 plane_vaddr_t physmap_phys_range_to_virt(plane_paddr_t phys_addr,
@@ -27,17 +28,23 @@ plane_vaddr_t physmap_phys_range_to_virt(plane_paddr_t phys_addr,
 	return plane_vaddr_make(plane_paddr_raw(phys_addr));
 }
 
-void pmap_invalidate_tlb(plane_vaddr_t vaddr)
+uint64_t get_cr3_raw(void)
+{
+	return cr3_raw;
+}
+
+void set_cr3_raw(uint64_t value)
+{
+	cr3_raw = value;
+	flush_count++;
+}
+
+void invlpg(plane_vaddr_t vaddr)
 {
 	if (invalidate_count < X86_64_PAGING_TABLE_ENTRIES) {
 		invalidated_vaddrs[invalidate_count] = plane_vaddr_raw(vaddr);
 	}
 	invalidate_count++;
-}
-
-void pmap_flush_tlb_all(void)
-{
-	flush_count++;
 }
 
 static void reset_state(void)
@@ -49,6 +56,7 @@ static void reset_state(void)
 	memset(invalidated_vaddrs, 0, sizeof(invalidated_vaddrs));
 	invalidate_count = 0;
 	flush_count = 0;
+	cr3_raw = 0x12345000;
 	physmap_available = true;
 }
 
