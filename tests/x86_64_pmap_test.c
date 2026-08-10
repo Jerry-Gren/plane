@@ -19,6 +19,8 @@
 #define TEST_PAGE_COUNT 720
 #define TEST_ALLOC_START_PAGE 16
 #define TEST_PHYS_SIZE (TEST_PAGE_COUNT * PAGE_SIZE)
+#define TEST_CPU_TLB_INVALID_LOCAL  (1u << 0)
+#define TEST_CPU_TLB_INVALID_GLOBAL (1u << 1)
 
 static uint8_t phys_storage[TEST_PHYS_SIZE] __aligned(PAGE_SIZE);
 static bool page_allocated[TEST_PAGE_COUNT];
@@ -193,12 +195,14 @@ bool plane_cpu_is_running(uint32_t logical_id)
 	       test_cpu_running[logical_id];
 }
 
-bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
+static bool test_cpu_mark_tlb_invalid_bits(uint32_t logical_id,
+					   uint32_t bits,
+					   bool *was_invalid)
 {
 	if (logical_id >= test_cpu_count || logical_id >= PLANE_MAX_CPUS) {
 		return false;
 	}
-	if (test_cpu_tlb_invalid[logical_id] != 0) {
+	if ((test_cpu_tlb_invalid[logical_id] & bits) == bits) {
 		if (was_invalid != NULL) {
 			*was_invalid = true;
 		}
@@ -206,11 +210,25 @@ bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
 	}
 
 	cpu_tlb_invalid_mark_lock_depth = test_spinlock_stub_irqsave_depth();
-	test_cpu_tlb_invalid[logical_id] = 1;
+	test_cpu_tlb_invalid[logical_id] |= bits;
 	if (was_invalid != NULL) {
 		*was_invalid = false;
 	}
 	return true;
+}
+
+bool plane_cpu_mark_tlb_invalid_local(uint32_t logical_id, bool *was_invalid)
+{
+	return test_cpu_mark_tlb_invalid_bits(logical_id,
+					      TEST_CPU_TLB_INVALID_LOCAL,
+					      was_invalid);
+}
+
+bool plane_cpu_mark_tlb_invalid_global(uint32_t logical_id, bool *was_invalid)
+{
+	return test_cpu_mark_tlb_invalid_bits(logical_id,
+					      TEST_CPU_TLB_INVALID_GLOBAL,
+					      was_invalid);
 }
 
 bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
@@ -224,10 +242,18 @@ bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
 	return true;
 }
 
-bool plane_cpu_is_tlb_invalid(uint32_t logical_id)
+uint32_t plane_cpu_tlb_invalid_snapshot(uint32_t logical_id)
 {
-	return logical_id < test_cpu_count && logical_id < PLANE_MAX_CPUS &&
-	       test_cpu_tlb_invalid[logical_id] != 0;
+	if (logical_id >= test_cpu_count || logical_id >= PLANE_MAX_CPUS) {
+		return 0;
+	}
+
+	return test_cpu_tlb_invalid[logical_id];
+}
+
+bool plane_cpu_tlb_is_invalid(uint32_t logical_id)
+{
+	return plane_cpu_tlb_invalid_snapshot(logical_id) != 0;
 }
 
 bool plane_smp_signal_cpu(uint32_t logical_id,
@@ -663,14 +689,17 @@ static int test_active_kernel_map_signals_running_remote_tlb_flush(void)
 	failures += test_expect_u64("remote invalid mark under pmap lock",
 				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("remote cpu marked tlb invalid",
-				     plane_cpu_is_tlb_invalid(2), true);
+				     plane_cpu_tlb_is_invalid(2), true);
+	failures += test_expect_u32("remote cpu marked global invalid",
+				    plane_cpu_tlb_invalid_snapshot(2),
+				    TEST_CPU_TLB_INVALID_GLOBAL);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
 	failures += test_expect_u64("remote invalid flushes on target cpu",
 				    flush_count, 1);
 	failures += test_expect_bool("remote cpu invalid clears",
-				     plane_cpu_is_tlb_invalid(2), false);
+				     plane_cpu_tlb_is_invalid(2), false);
 	pmap_update_interrupt();
 	failures += test_expect_u64("remote invalid does not flush twice",
 				    flush_count, 1);
@@ -782,14 +811,17 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 	failures += test_expect_u64("protect invalid mark under pmap lock",
 				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("protect marks remote invalid",
-				     plane_cpu_is_tlb_invalid(2), true);
+				     plane_cpu_tlb_is_invalid(2), true);
+	failures += test_expect_u32("protect marks remote global invalid",
+				    plane_cpu_tlb_invalid_snapshot(2),
+				    TEST_CPU_TLB_INVALID_GLOBAL);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
 	failures += test_expect_u64("protect remote invalid flushes",
 				    flush_count, 1);
 	failures += test_expect_bool("protect remote invalid clears",
-				     plane_cpu_is_tlb_invalid(2), false);
+				     plane_cpu_tlb_is_invalid(2), false);
 
 	test_current_cpu_id = 0;
 	reset_active_pmap_observation();
@@ -803,7 +835,10 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 	failures += test_expect_u64("unmap invalid mark under pmap lock",
 				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("unmap marks remote invalid",
-				     plane_cpu_is_tlb_invalid(2), true);
+				     plane_cpu_tlb_is_invalid(2), true);
+	failures += test_expect_u32("unmap marks remote global invalid",
+				    plane_cpu_tlb_invalid_snapshot(2),
+				    TEST_CPU_TLB_INVALID_GLOBAL);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
@@ -1023,10 +1058,10 @@ static int test_pmap_update_interrupt_flushes_only_invalid_cpu(void)
 				    flush_count, 0);
 
 	failures += test_expect_bool("mark current cpu invalid",
-				     x86_64_pmap_mark_tlb_invalid(0),
+				     x86_64_pmap_mark_tlb_invalid_global(0),
 				     true);
 	failures += test_expect_bool("mark current cpu invalid twice",
-				     x86_64_pmap_mark_tlb_invalid(0),
+				     x86_64_pmap_mark_tlb_invalid_global(0),
 				     true);
 	failures += test_expect_u64("mark does not flush directly",
 				    flush_count, 0);
@@ -1045,34 +1080,41 @@ static int test_pmap_update_interrupt_uses_current_cpu_invalid_state(void)
 	int failures = 0;
 
 	failures += test_expect_bool("mark remote cpu invalid",
-				     x86_64_pmap_mark_tlb_invalid(2),
+				     x86_64_pmap_mark_tlb_invalid_local(2),
 				     true);
 	pmap_update_interrupt();
 	failures += test_expect_u64("other cpu invalid does not flush current",
 				    flush_count, 0);
 
 	test_current_cpu_id = 2;
+	failures += test_expect_bool("add remote global invalid",
+				     x86_64_pmap_mark_tlb_invalid_global(2),
+				     true);
+	failures += test_expect_u32(
+		"remote local and global pending",
+		plane_cpu_tlb_invalid_snapshot(2),
+		TEST_CPU_TLB_INVALID_LOCAL | TEST_CPU_TLB_INVALID_GLOBAL);
 	pmap_update_interrupt();
 	failures += test_expect_u64("marked cpu interrupt flushes",
 				    flush_count, 1);
 	failures += test_expect_bool("marked cpu invalid clears",
-				     plane_cpu_is_tlb_invalid(2), false);
+				     plane_cpu_tlb_is_invalid(2), false);
 	pmap_update_interrupt();
 	failures += test_expect_u64("marked cpu invalid does not flush twice",
 				    flush_count, 1);
 	return failures;
 }
 
-static int test_pmap_mark_tlb_invalid_rejects_invalid_cpu(void)
+static int test_pmap_mark_tlb_invalid_global_rejects_invalid_cpu(void)
 {
 	int failures = 0;
 
 	test_cpu_count = 2;
 	failures += test_expect_bool("mark out of runtime cpu range",
-				     x86_64_pmap_mark_tlb_invalid(2),
+				     x86_64_pmap_mark_tlb_invalid_global(2),
 				     false);
 	failures += test_expect_bool("mark out of max cpu range",
-				     x86_64_pmap_mark_tlb_invalid(
+				     x86_64_pmap_mark_tlb_invalid_global(
 					     PLANE_MAX_CPUS),
 				     false);
 	failures += test_expect_u64("invalid cpu does not flush",
@@ -1872,7 +1914,7 @@ int main(void)
 		TEST_CASE(test_active_kernel_translate_locks_snapshot),
 		TEST_CASE(test_pmap_update_interrupt_flushes_only_invalid_cpu),
 		TEST_CASE(test_pmap_update_interrupt_uses_current_cpu_invalid_state),
-		TEST_CASE(test_pmap_mark_tlb_invalid_rejects_invalid_cpu),
+		TEST_CASE(test_pmap_mark_tlb_invalid_global_rejects_invalid_cpu),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_active_kernel_failures_release_lock_without_invalidate),
 		TEST_CASE(test_active_kernel_map_failure_rolls_back_and_unlocks),

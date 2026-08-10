@@ -442,7 +442,7 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
   the frame and vector, the CPU interrupt controller owns EOI and dispatch
   glue, SMP owns inter-processor event meaning and CPU pending signal bits, and
-  pmap owns the TLB-flush update hook and CPU-local invalid state
+  pmap owns the TLB-flush update hook and CPU-local aggregate invalid bitmask
   (`plane_cpu_data.cpu_tlb_invalid`). Generic SMP may call
   `pmap_update_interrupt()` through `<machine/pmap.h>`, but must not include
   architecture-specific pmap headers. Do not put pmap shootdown policy in the
@@ -463,11 +463,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   Keep `IPI` only for x86_64 LAPIC implementation/tests and
   hardware-delivery descriptions.
 - Keep `cpu_signals` and `cpu_tlb_invalid` separate. `cpu_signals` is the SMP
-  event delivery bitmap; `cpu_tlb_invalid` is pmap-owned CPU-local state.
-  Active pmap mutation uses the internal `pmap_flush_tlbs()` sender while
-  holding the pmap lock to perform the local flush and mark remote running CPUs
-  invalid; the remote `PLANE_SMP_EVENT_TLB_FLUSH` signals are sent only after
-  the pmap lock is released.
+  event delivery bitmap; `cpu_tlb_invalid` is pmap-owned CPU-local aggregate
+  invalid state. Active pmap mutation uses the internal `pmap_flush_tlbs()`
+  sender while holding the pmap lock to perform the local flush and mark remote
+  running CPUs globally invalid; the remote `PLANE_SMP_EVENT_TLB_FLUSH`
+  signals are sent only after the pmap lock is released.
 
 ## Tests
 

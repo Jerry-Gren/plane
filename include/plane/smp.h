@@ -67,7 +67,7 @@ struct plane_cpu_data {
 	uint64_t ap_stack_pages;
 	uint32_t startup_state;
 	uint32_t cpu_signals;
-	/* Pmap-owned CPU-local TLB invalid state; not an SMP event bit. */
+	/* Pmap-owned aggregate CPU-local TLB invalid bitmask; not an SMP event bit. */
 	uint32_t cpu_tlb_invalid;
 };
 
@@ -94,9 +94,11 @@ bool plane_cpu_is_running(uint32_t logical_id);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
-bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid);
+bool plane_cpu_mark_tlb_invalid_local(uint32_t logical_id, bool *was_invalid);
+bool plane_cpu_mark_tlb_invalid_global(uint32_t logical_id, bool *was_invalid);
 bool plane_cpu_clear_tlb_invalid(uint32_t logical_id);
-bool plane_cpu_is_tlb_invalid(uint32_t logical_id);
+bool plane_cpu_tlb_is_invalid(uint32_t logical_id);
+uint32_t plane_cpu_tlb_invalid_snapshot(uint32_t logical_id);
 bool plane_smp_signal_cpu(uint32_t logical_id,
 			  enum plane_smp_event event,
 			  enum plane_smp_signal_mode mode);

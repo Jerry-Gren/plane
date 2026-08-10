@@ -9,6 +9,8 @@
 #include "smp_internal.h"
 
 #define CPU_INVALID_ID UINT32_MAX
+#define CPU_TLB_INVALID_LOCAL  (1u << 0)
+#define CPU_TLB_INVALID_GLOBAL (1u << 1)
 
 static struct plane_cpu_data cpu_data[PLANE_MAX_CPUS];
 static struct plane_cpu_data *current_cpu_data;
@@ -309,30 +311,47 @@ enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 	return plane_atomic_load_u32(&cpu->startup_state);
 }
 
-bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
+static bool cpu_mark_tlb_invalid_bits(uint32_t logical_id,
+				      uint32_t bits,
+				      bool *was_invalid)
 {
 	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
 	uint32_t old_invalid;
+	uint32_t new_invalid;
 
-	if (cpu == NULL) {
+	if (cpu == NULL || bits == 0) {
 		return false;
 	}
 
 	old_invalid = plane_atomic_load_u32(&cpu->cpu_tlb_invalid);
 	do {
-		if (old_invalid != 0) {
+		if ((old_invalid & bits) == bits) {
 			if (was_invalid != NULL) {
 				*was_invalid = true;
 			}
 			return true;
 		}
+		new_invalid = old_invalid | bits;
 	} while (!plane_atomic_compare_exchange_u32(&cpu->cpu_tlb_invalid,
-						    &old_invalid, 1));
+						    &old_invalid,
+						    new_invalid));
 
 	if (was_invalid != NULL) {
 		*was_invalid = false;
 	}
 	return true;
+}
+
+bool plane_cpu_mark_tlb_invalid_local(uint32_t logical_id, bool *was_invalid)
+{
+	return cpu_mark_tlb_invalid_bits(logical_id, CPU_TLB_INVALID_LOCAL,
+					 was_invalid);
+}
+
+bool plane_cpu_mark_tlb_invalid_global(uint32_t logical_id, bool *was_invalid)
+{
+	return cpu_mark_tlb_invalid_bits(logical_id, CPU_TLB_INVALID_GLOBAL,
+					 was_invalid);
 }
 
 bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
@@ -355,11 +374,20 @@ bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
 	return true;
 }
 
-bool plane_cpu_is_tlb_invalid(uint32_t logical_id)
+uint32_t plane_cpu_tlb_invalid_snapshot(uint32_t logical_id)
 {
 	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
 
-	return cpu != NULL && plane_atomic_load_u32(&cpu->cpu_tlb_invalid) != 0;
+	if (cpu == NULL) {
+		return 0;
+	}
+
+	return plane_atomic_load_u32(&cpu->cpu_tlb_invalid);
+}
+
+bool plane_cpu_tlb_is_invalid(uint32_t logical_id)
+{
+	return plane_cpu_tlb_invalid_snapshot(logical_id) != 0;
 }
 
 static bool smp_event_is_valid(enum plane_smp_event event)

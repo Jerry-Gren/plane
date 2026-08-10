@@ -44,6 +44,7 @@ bool x86_64_pmap_translate_in_root(plane_paddr_t root_pml4_phys,
 bool x86_64_pmap_protect_page_in_owned_root(plane_paddr_t root_pml4_phys,
 					    plane_vaddr_t vaddr,
 					    uint32_t prot);
-bool x86_64_pmap_mark_tlb_invalid(uint32_t logical_id);
+bool x86_64_pmap_mark_tlb_invalid_local(uint32_t logical_id);
+bool x86_64_pmap_mark_tlb_invalid_global(uint32_t logical_id);
 
 #endif /* X86_64_PMAP_INTERNAL_H */

@@ -55,14 +55,20 @@ void pmap_update_interrupt(void)
 {
 	uint32_t logical_id = plane_cpu_current_id();
 
-	if (plane_cpu_clear_tlb_invalid(logical_id)) {
+	if (plane_cpu_tlb_invalid_snapshot(logical_id) != 0 &&
+	    plane_cpu_clear_tlb_invalid(logical_id)) {
 		set_cr3_raw(get_cr3_raw());
 	}
 }
 
-bool x86_64_pmap_mark_tlb_invalid(uint32_t logical_id)
+bool x86_64_pmap_mark_tlb_invalid_local(uint32_t logical_id)
 {
-	return plane_cpu_mark_tlb_invalid(logical_id, NULL);
+	return plane_cpu_mark_tlb_invalid_local(logical_id, NULL);
+}
+
+bool x86_64_pmap_mark_tlb_invalid_global(uint32_t logical_id)
+{
+	return plane_cpu_mark_tlb_invalid_global(logical_id, NULL);
 }
 
 /*
@@ -102,7 +108,7 @@ static bool pmap_flush_tlbs(plane_vaddr_t start,
 			continue;
 		}
 
-		if (!plane_cpu_mark_tlb_invalid(logical_id, NULL)) {
+		if (!plane_cpu_mark_tlb_invalid_global(logical_id, NULL)) {
 			return false;
 		}
 		*cpus_to_signal |= BIT_ULL(logical_id);

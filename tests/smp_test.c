@@ -283,48 +283,68 @@ static int test_cpu_tlb_invalid_primitives(void)
 	bool was_invalid = true;
 
 	failures += test_expect_bool("bsp tlb starts valid",
-				     plane_cpu_is_tlb_invalid(0), false);
-	failures += test_expect_bool("mark bsp tlb invalid",
-				     plane_cpu_mark_tlb_invalid(0,
-								&was_invalid),
+				     plane_cpu_tlb_is_invalid(0), false);
+	failures += test_expect_u32("bsp tlb snapshot starts clear",
+				    plane_cpu_tlb_invalid_snapshot(0), 0);
+	failures += test_expect_bool("mark bsp local tlb invalid",
+				     plane_cpu_mark_tlb_invalid_local(
+					     0, &was_invalid),
 				     true);
-	failures += test_expect_bool("first mark reports not invalid",
+	failures += test_expect_bool("first local mark reports not invalid",
 				     was_invalid, false);
 	failures += test_expect_bool("bsp tlb is invalid",
-				     plane_cpu_is_tlb_invalid(0), true);
+				     plane_cpu_tlb_is_invalid(0), true);
 
 	was_invalid = false;
-	failures += test_expect_bool("mark bsp tlb invalid twice",
-				     plane_cpu_mark_tlb_invalid(0,
-								&was_invalid),
+	failures += test_expect_bool("mark bsp local tlb invalid twice",
+				     plane_cpu_mark_tlb_invalid_local(
+					     0, &was_invalid),
 				     true);
-	failures += test_expect_bool("second mark reports invalid",
+	failures += test_expect_bool("second local mark reports invalid",
 				     was_invalid, true);
+	was_invalid = true;
+	failures += test_expect_bool("mark bsp global tlb invalid",
+				     plane_cpu_mark_tlb_invalid_global(
+					     0, &was_invalid),
+				     true);
+	failures += test_expect_bool("first global mark reports not invalid",
+				     was_invalid, false);
+	failures += test_expect_bool("local and global pending",
+				     plane_cpu_tlb_is_invalid(0), true);
 	failures += test_expect_bool("clear bsp tlb invalid",
 				     plane_cpu_clear_tlb_invalid(0), true);
 	failures += test_expect_bool("bsp tlb invalid cleared",
-				     plane_cpu_is_tlb_invalid(0), false);
+				     plane_cpu_tlb_is_invalid(0), false);
+	failures += test_expect_u32("bsp tlb snapshot clears all",
+				    plane_cpu_tlb_invalid_snapshot(0), 0);
 	failures += test_expect_bool("clear already valid tlb rejected",
 				     plane_cpu_clear_tlb_invalid(0), false);
 
-	failures += test_expect_bool("mark ap tlb invalid",
-				     plane_cpu_mark_tlb_invalid(1, NULL),
+	failures += test_expect_bool("mark ap global tlb invalid",
+				     plane_cpu_mark_tlb_invalid_global(1, NULL),
 				     true);
 	failures += test_expect_bool("ap tlb invalid set",
-				     plane_cpu_is_tlb_invalid(1), true);
+				     plane_cpu_tlb_is_invalid(1), true);
 	failures += test_expect_bool("clear ap tlb invalid",
 				     plane_cpu_clear_tlb_invalid(1), true);
 
-	failures += test_expect_bool("mark invalid cpu rejected",
-				     plane_cpu_mark_tlb_invalid(PLANE_MAX_CPUS,
-								NULL),
-				     false);
+	failures += test_expect_bool(
+		"mark invalid local cpu rejected",
+		plane_cpu_mark_tlb_invalid_local(PLANE_MAX_CPUS, NULL),
+		false);
+	failures += test_expect_bool(
+		"mark invalid global cpu rejected",
+		plane_cpu_mark_tlb_invalid_global(PLANE_MAX_CPUS, NULL),
+		false);
 	failures += test_expect_bool("clear invalid cpu rejected",
 				     plane_cpu_clear_tlb_invalid(PLANE_MAX_CPUS),
 				     false);
 	failures += test_expect_bool("invalid cpu tlb is not invalid",
-				     plane_cpu_is_tlb_invalid(PLANE_MAX_CPUS),
+				     plane_cpu_tlb_is_invalid(PLANE_MAX_CPUS),
 				     false);
+	failures += test_expect_u32(
+		"invalid cpu tlb snapshot is clear",
+		plane_cpu_tlb_invalid_snapshot(PLANE_MAX_CPUS), 0);
 	return failures;
 }
 
