@@ -24,20 +24,19 @@ bool ml_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	return data != NULL;
 }
 
-bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_cpu_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
+bool ml_cpu_interrupt_init_ap(struct plane_cpu_data *data)
 {
 	return data != NULL;
 }
 
-bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+bool ml_cpu_signal(uint32_t logical_id)
 {
 	(void)logical_id;
-	(void)vector;
 	return false;
 }
 

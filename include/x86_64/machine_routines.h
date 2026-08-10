@@ -31,10 +31,8 @@ bool ml_get_interrupts_enabled(void);
 plane_irq_state_t ml_irq_save(void);
 void ml_irq_restore(plane_irq_state_t state);
 
-bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info);
-bool ml_local_interrupt_init_ap(struct plane_cpu_data *data);
-bool ml_local_interrupt_dispatch(uint32_t vector);
-bool ml_local_interrupt_end_of_interrupt(void);
-bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector);
+bool ml_cpu_interrupt_init_bsp(const struct plane_smp_info *info);
+bool ml_cpu_interrupt_init_ap(struct plane_cpu_data *data);
+bool ml_cpu_signal(uint32_t logical_id);
 
 #endif /* X86_64_MACHINE_ROUTINES_H */

@@ -1,10 +1,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <x86_64/trap.h>
-#include <machine/machine_routines.h>
 #include <plane/kmem.h>
 #include <plane/vm_prot.h>
+#include <x86_64/lapic.h>
+#include <x86_64/trap.h>
 
 #include "support/test.h"
 
@@ -15,9 +15,9 @@ static bool kmem_fault_result;
 static uint64_t kmem_fault_calls;
 static plane_vaddr_t last_fault_addr;
 static uint32_t last_fault_type;
-static bool local_interrupt_dispatch_result;
-static uint32_t local_interrupt_dispatch_calls;
-static uint32_t last_local_interrupt_vector;
+static bool cpu_interrupt_dispatch_result;
+static uint32_t cpu_interrupt_dispatch_calls;
+static uint32_t last_cpu_interrupt_vector;
 
 static void reset_trap_test(void)
 {
@@ -25,9 +25,9 @@ static void reset_trap_test(void)
 	kmem_fault_calls = 0;
 	last_fault_addr = plane_vaddr_make(0);
 	last_fault_type = 0;
-	local_interrupt_dispatch_result = true;
-	local_interrupt_dispatch_calls = 0;
-	last_local_interrupt_vector = 0;
+	cpu_interrupt_dispatch_result = true;
+	cpu_interrupt_dispatch_calls = 0;
+	last_cpu_interrupt_vector = 0;
 }
 
 bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type)
@@ -38,11 +38,11 @@ bool plane_kmem_fault_page(plane_vaddr_t vaddr, uint32_t fault_type)
 	return kmem_fault_result;
 }
 
-bool ml_local_interrupt_dispatch(uint32_t vector)
+bool lapic_interrupt(uint32_t vector)
 {
-	local_interrupt_dispatch_calls++;
-	last_local_interrupt_vector = vector;
-	return local_interrupt_dispatch_result;
+	cpu_interrupt_dispatch_calls++;
+	last_cpu_interrupt_vector = vector;
+	return cpu_interrupt_dispatch_result;
 }
 
 static bool test_trap_try_handle_page_fault(uint64_t int_no,
@@ -150,7 +150,7 @@ static int test_non_page_fault_vector_is_ignored(void)
 	return failures;
 }
 
-static int test_external_interrupt_dispatches_local_interrupt(void)
+static int test_external_interrupt_dispatches_cpu_interrupt(void)
 {
 	struct x86_64_intr_frame frame = {
 		.int_no = 33,
@@ -160,9 +160,9 @@ static int test_external_interrupt_dispatches_local_interrupt(void)
 	x86_64_trap_handler(&frame);
 
 	failures += test_expect_u32("external dispatch calls",
-				    local_interrupt_dispatch_calls, 1);
+				    cpu_interrupt_dispatch_calls, 1);
 	failures += test_expect_u32("external dispatch vector",
-				    last_local_interrupt_vector, 33);
+				    last_cpu_interrupt_vector, 33);
 	failures += test_expect_u64("external no kmem fault",
 				    kmem_fault_calls, 0);
 	return failures;
@@ -175,13 +175,13 @@ static int test_external_interrupt_dispatch_failure_is_not_panic(void)
 	};
 	int failures = 0;
 
-	local_interrupt_dispatch_result = false;
+	cpu_interrupt_dispatch_result = false;
 	x86_64_trap_handler(&frame);
 
 	failures += test_expect_u32("failed dispatch calls",
-				    local_interrupt_dispatch_calls, 1);
+				    cpu_interrupt_dispatch_calls, 1);
 	failures += test_expect_u32("failed dispatch vector",
-				    last_local_interrupt_vector,
+				    last_cpu_interrupt_vector,
 				    X86_64_INTR_VECTOR_EXTERNAL_MAX);
 	failures += test_expect_u64("failed dispatch no kmem fault",
 				    kmem_fault_calls, 0);
@@ -198,7 +198,7 @@ static int test_invalid_non_exception_vector_is_ignored(void)
 	x86_64_trap_handler(&frame);
 
 	failures += test_expect_u32("invalid vector no dispatch",
-				    local_interrupt_dispatch_calls, 0);
+				    cpu_interrupt_dispatch_calls, 0);
 	failures += test_expect_u64("invalid vector no kmem fault",
 				    kmem_fault_calls, 0);
 	return failures;
@@ -212,7 +212,7 @@ int main(void)
 		TEST_CASE(test_kmem_fault_failure_is_not_swallowed),
 		TEST_CASE(test_unsupported_page_faults_are_rejected),
 		TEST_CASE(test_non_page_fault_vector_is_ignored),
-		TEST_CASE(test_external_interrupt_dispatches_local_interrupt),
+		TEST_CASE(test_external_interrupt_dispatches_cpu_interrupt),
 		TEST_CASE(test_external_interrupt_dispatch_failure_is_not_panic),
 		TEST_CASE(test_invalid_non_exception_vector_is_ignored),
 	};

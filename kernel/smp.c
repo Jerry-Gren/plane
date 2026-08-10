@@ -305,6 +305,11 @@ static bool smp_event_is_valid(enum plane_smp_event event)
 	return event >= PLANE_SMP_EVENT_AST && event < PLANE_SMP_EVENT_COUNT;
 }
 
+static bool smp_signal_is_mode_supported(enum plane_smp_signal_mode mode)
+{
+	return mode == PLANE_SMP_SIGNAL_ASYNC;
+}
+
 static bool smp_cpu_can_handle_signal(const struct plane_cpu_data *cpu)
 {
 	uint32_t state;
@@ -320,44 +325,6 @@ static bool smp_cpu_can_handle_signal(const struct plane_cpu_data *cpu)
 	state = plane_atomic_load_u32(&cpu->startup_state);
 	return state == PLANE_CPU_STARTUP_PREPARED ||
 	       state == PLANE_CPU_STARTUP_PARKED;
-}
-
-static bool smp_signal_event_from_vector(uint8_t vector,
-					 enum plane_smp_event *event)
-{
-	if (event == NULL) {
-		return false;
-	}
-
-	switch (vector) {
-	case PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST:
-		*event = PLANE_SMP_EVENT_AST;
-		return true;
-	case PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH:
-		*event = PLANE_SMP_EVENT_TLB_FLUSH;
-		return true;
-	default:
-		return false;
-	}
-}
-
-static bool smp_signal_vector_for_event(enum plane_smp_event event,
-					uint8_t *vector)
-{
-	if (vector == NULL) {
-		return false;
-	}
-
-	switch (event) {
-	case PLANE_SMP_EVENT_AST:
-		*vector = PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST;
-		return true;
-	case PLANE_SMP_EVENT_TLB_FLUSH:
-		*vector = PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH;
-		return true;
-	default:
-		return false;
-	}
 }
 
 static void smp_cpu_set_signal(struct plane_cpu_data *cpu,
@@ -427,33 +394,28 @@ static bool smp_cpu_handle_pending_signals(struct plane_cpu_data *cpu)
 	return handled;
 }
 
-bool plane_smp_signal_handler(uint8_t vector)
+bool plane_smp_signal_handler(void)
 {
-	enum plane_smp_event event;
-
 	if (!smp_cpu_can_handle_signal(current_cpu_data)) {
 		return false;
 	}
-	if (!smp_signal_event_from_vector(vector, &event)) {
-		return false;
-	}
 
-	smp_cpu_set_signal(current_cpu_data, event);
 	return smp_cpu_handle_pending_signals(current_cpu_data);
 }
 
-bool plane_smp_signal_cpu(uint32_t logical_id, enum plane_smp_event event)
+bool plane_smp_signal_cpu(uint32_t logical_id,
+			  enum plane_smp_event event,
+			  enum plane_smp_signal_mode mode)
 {
 	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
-	uint8_t vector;
 
-	if (!smp_event_is_valid(event) || !smp_cpu_can_handle_signal(cpu) ||
-	    !smp_signal_vector_for_event(event, &vector)) {
+	if (!smp_event_is_valid(event) || !smp_signal_is_mode_supported(mode) ||
+	    !smp_cpu_can_handle_signal(cpu)) {
 		return false;
 	}
 
 	smp_cpu_set_signal(cpu, event);
-	if (ml_local_interrupt_send_ipi(logical_id, vector)) {
+	if (ml_cpu_signal(logical_id)) {
 		return true;
 	}
 
@@ -480,7 +442,7 @@ void plane_smp_ap_park_entry(struct plane_cpu_data *data)
 	if (data == NULL || data->self != data ||
 	    !ml_cpu_install_ap_startup_context(data) ||
 	    !ml_cpu_set_current_data(data) ||
-	    !ml_local_interrupt_init_ap(data) ||
+	    !ml_cpu_interrupt_init_ap(data) ||
 	    !plane_smp_mark_ap_parked(data)) {
 		if (data != NULL) {
 			plane_smp_mark_ap_failed(data);

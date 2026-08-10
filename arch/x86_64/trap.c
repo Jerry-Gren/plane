@@ -3,6 +3,7 @@
 #include <machine/machine_routines.h>
 #include <plane/kmem.h>
 #include <plane/printk.h>
+#include <x86_64/lapic.h>
 #include <x86_64/proc_reg.h>
 
 #define CODE_DUMP_BYTES 16
@@ -125,7 +126,7 @@ void x86_64_trap_handler(struct x86_64_intr_frame *frame)
 	uint64_t cr2 = 0;
 
 	if (x86_64_intr_vector_is_external(frame->int_no)) {
-		ml_local_interrupt_dispatch((uint32_t)frame->int_no);
+		lapic_interrupt((uint32_t)frame->int_no);
 		return;
 	}
 

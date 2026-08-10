@@ -36,7 +36,6 @@ static uint32_t test_irq_restore_count;
 static uint32_t test_relax_count;
 static bool test_smp_signal_handler_result;
 static uint32_t test_smp_signal_handler_count;
-static uint8_t test_smp_last_signal_vector;
 
 #include <x86_64/lapic.c>
 
@@ -126,10 +125,9 @@ void cpu_pause(void)
 		~X86_64_LAPIC_ICR_PENDING;
 }
 
-bool plane_smp_signal_handler(uint8_t vector)
+bool plane_smp_signal_handler(void)
 {
 	test_smp_signal_handler_count++;
-	test_smp_last_signal_vector = vector;
 	return test_smp_signal_handler_result;
 }
 
@@ -161,7 +159,6 @@ static void reset_lapic_test(void)
 	test_relax_count = 0;
 	test_smp_signal_handler_result = true;
 	test_smp_signal_handler_count = 0;
-	test_smp_last_signal_vector = 0;
 	lapic_mmio_base = plane_vaddr_make(0);
 	lapic_cpu_count = 0;
 	lapic_initialized = false;
@@ -209,7 +206,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("null topology rejected",
-				     ml_local_interrupt_init_bsp(NULL),
+				     lapic_init_bsp(NULL),
 				     false);
 	failures += test_expect_bool("null topology leaves uninitialized",
 				     lapic_initialized, false);
@@ -219,7 +216,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_has_apic = false;
 	failures += test_expect_bool("missing apic rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -227,7 +224,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_has_msr = false;
 	failures += test_expect_bool("missing msr rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -235,7 +232,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_io_map_should_fail = true;
 	failures += test_expect_bool("io map failure rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -244,7 +241,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	test_apic_base_msr =
 		TEST_APIC_PHYS | X86_64_MSR_IA32_APIC_BASE_X2APIC;
 	failures += test_expect_bool("x2apic rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 
 	reset_lapic_test();
@@ -252,7 +249,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	info.cpus[2].physical_id = UINT8_MAX + 1u;
 	failures += test_expect_bool("large xapic id rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 	failures += test_expect_u32("large id does not write msr",
 				    test_msr_write_count, 0);
@@ -262,7 +259,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_msr_write_should_fail = true;
 	failures += test_expect_bool("apic enable write failure rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 	failures += test_expect_bool("write failure leaves uninitialized",
 				     lapic_initialized, false);
@@ -274,7 +271,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 				     build_topology(&info), true);
 	test_io_map_should_fail = true;
 	failures += test_expect_bool("mmio map failure rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 	failures += test_expect_bool("map failure leaves uninitialized",
 				     lapic_initialized, false);
@@ -285,7 +282,7 @@ static int test_bsp_init_rejects_invalid_inputs(void)
 	test_regs[reg_index(X86_64_LAPIC_REG_VERSION)] =
 		X86_64_LAPIC_MIN_VERSION - 1;
 	failures += test_expect_bool("unsupported lapic version rejected",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     false);
 	failures += test_expect_bool("unsupported version leaves uninitialized",
 				     lapic_initialized, false);
@@ -311,7 +308,7 @@ static int test_bsp_init_configures_xapic_and_cpu_map(void)
 				     build_topology(&info), true);
 	test_apic_base_msr = TEST_APIC_PHYS;
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
 	failures += test_expect_bool("lapic initialized",
 				     lapic_initialized, true);
@@ -374,17 +371,17 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("ap init before runtime rejected",
-				     ml_local_interrupt_init_ap(&ap),
+				     lapic_init_ap(&ap),
 				     false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
 	test_regs[reg_index(X86_64_LAPIC_REG_ID)] =
 		(ap.physical_id << X86_64_LAPIC_ID_SHIFT) | 0x00ffffffu;
 	failures += test_expect_bool("ap lapic init",
-				     ml_local_interrupt_init_ap(&ap),
+				     lapic_init_ap(&ap),
 				     true);
 	failures += test_expect_u32("ap svr configured",
 				    test_regs[reg_index(X86_64_LAPIC_REG_SVR)],
@@ -393,11 +390,11 @@ static int test_ap_init_validates_data_and_configures_current_lapic(void)
 
 	bad_self.self = NULL;
 	failures += test_expect_bool("bad self rejected",
-				     ml_local_interrupt_init_ap(&bad_self),
+				     lapic_init_ap(&bad_self),
 				     false);
 	ap.physical_id = 7;
 	failures += test_expect_bool("wrong mapped lapic rejected",
-				     ml_local_interrupt_init_ap(&ap),
+				     lapic_init_ap(&ap),
 				     false);
 	return failures;
 }
@@ -409,16 +406,16 @@ static int test_end_of_interrupt_requires_initialization(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("end-of-interrupt before init rejected",
-				     ml_local_interrupt_end_of_interrupt(), false);
+				     lapic_end_of_interrupt(), false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
 	test_regs[reg_index(X86_64_LAPIC_REG_ID)] =
 		0x22u << X86_64_LAPIC_ID_SHIFT;
 	test_regs[reg_index(X86_64_LAPIC_REG_EOI)] = 0xfeedface;
-	failures += test_expect_bool("end-of-interrupt succeeds", ml_local_interrupt_end_of_interrupt(), true);
+	failures += test_expect_bool("end-of-interrupt succeeds", lapic_end_of_interrupt(), true);
 	failures += test_expect_u32("end-of-interrupt written",
 				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
 				    0);
@@ -435,26 +432,26 @@ static int test_dispatch_forwards_to_smp_and_ends_interrupt(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("dispatch before init rejected",
-				     ml_local_interrupt_dispatch(0xf0),
+				     lapic_interrupt(
+					     X86_64_LAPIC_VECTOR_INTERPROCESSOR),
 				     false);
 	failures += test_expect_u32("dispatch before init no smp",
 				    test_smp_signal_handler_count, 0);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
 	test_regs[reg_index(X86_64_LAPIC_REG_ID)] =
 		0x33u << X86_64_LAPIC_ID_SHIFT;
 	test_regs[reg_index(X86_64_LAPIC_REG_EOI)] = 0xfeedface;
 
 	failures += test_expect_bool("dispatch handled",
-				     ml_local_interrupt_dispatch(0xf0),
+				     lapic_interrupt(
+					     X86_64_LAPIC_VECTOR_INTERPROCESSOR),
 				     true);
 	failures += test_expect_u32("dispatch calls smp",
 				    test_smp_signal_handler_count, 1);
-	failures += test_expect_u32("dispatch vector",
-				    test_smp_last_signal_vector, 0xf0);
 	failures += test_expect_u32("dispatch ends interrupt",
 				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
 				    0);
@@ -473,25 +470,24 @@ static int test_dispatch_unknown_vector_still_ends_interrupt(void)
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
-	test_smp_signal_handler_result = false;
 	test_regs[reg_index(X86_64_LAPIC_REG_EOI)] = 0xfeedface;
 
 	failures += test_expect_bool("unknown dispatch unhandled",
-				     ml_local_interrupt_dispatch(0xf2),
+				     lapic_interrupt(0xf2),
 				     false);
-	failures += test_expect_u32("unknown calls smp",
-				    test_smp_signal_handler_count, 1);
+	failures += test_expect_u32("unknown skips smp",
+				    test_smp_signal_handler_count, 0);
 	failures += test_expect_u32("unknown ends interrupt",
 				    test_regs[reg_index(X86_64_LAPIC_REG_EOI)],
 				    0);
 	failures += test_expect_bool("low external rejected",
-				     ml_local_interrupt_dispatch(31), false);
+				     lapic_interrupt(31), false);
 	failures += test_expect_bool("past idt rejected",
-				     ml_local_interrupt_dispatch(256), false);
+				     lapic_interrupt(256), false);
 	failures += test_expect_u32("invalid vectors no extra smp",
-				    test_smp_signal_handler_count, 1);
+				    test_smp_signal_handler_count, 0);
 	return failures;
 }
 
@@ -502,24 +498,30 @@ static int test_fixed_ipi_validates_and_writes_icr(void)
 
 	reset_lapic_test();
 	failures += test_expect_bool("ipi before init rejected",
-				     ml_local_interrupt_send_ipi(1, 0xf0),
+				     lapic_send_ipi(
+					     1,
+					     X86_64_LAPIC_VECTOR_INTERPROCESSOR),
 				     false);
 	failures += test_expect_bool("build topology",
 				     build_topology(&info), true);
 	failures += test_expect_bool("bsp lapic init",
-				     ml_local_interrupt_init_bsp(&info),
+				     lapic_init_bsp(&info),
 				     true);
 	failures += test_expect_bool("low vector rejected",
-				     ml_local_interrupt_send_ipi(1, 31),
+				     lapic_send_ipi(1, 31),
 				     false);
 	failures += test_expect_bool("bad cpu rejected",
-				     ml_local_interrupt_send_ipi(3, 0xf0),
+				     lapic_send_ipi(
+					     3,
+					     X86_64_LAPIC_VECTOR_INTERPROCESSOR),
 				     false);
 
 	test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)] =
 		X86_64_LAPIC_ICR_PENDING;
 	failures += test_expect_bool("send fixed ipi",
-				     ml_local_interrupt_send_ipi(2, 0xf0),
+				     lapic_send_ipi(
+					     2,
+					     X86_64_LAPIC_VECTOR_INTERPROCESSOR),
 				     true);
 	failures += test_expect_u32("waits while pending", test_relax_count, 1);
 	failures += test_expect_u32("irq saved", test_irq_save_count, 1);
@@ -530,7 +532,16 @@ static int test_fixed_ipi_validates_and_writes_icr(void)
 				    x86_64_lapic_icr_dest_high(3));
 	failures += test_expect_u32("icr low vector",
 				    test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)],
-				    x86_64_lapic_icr_fixed_low(0xf0));
+				    x86_64_lapic_icr_fixed_low(
+					    X86_64_LAPIC_VECTOR_INTERPROCESSOR));
+
+	test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)] = 0;
+	failures += test_expect_bool("machine signal sends interprocessor vector",
+				     ml_cpu_signal(2), true);
+	failures += test_expect_u32("machine signal icr low vector",
+				    test_regs[reg_index(X86_64_LAPIC_REG_ICR_LOW)],
+				    x86_64_lapic_icr_fixed_low(
+					    X86_64_LAPIC_VECTOR_INTERPROCESSOR));
 	return failures;
 }
 

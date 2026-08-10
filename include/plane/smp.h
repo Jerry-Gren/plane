@@ -12,9 +12,9 @@
 /*
  * Initial SMP foundation records topology and installs BSP CPU data into the
  * arch current-data slot. APs may be started only far enough to install
- * per-CPU architecture context, current data, and local interrupt state before
+ * per-CPU architecture context, current data, and CPU interrupt state before
  * parking in a halt loop. Plane has a minimal CPU signal dispatch scaffold for
- * architecture local-interrupt delivery, but APs remain parked/offline and
+ * architecture CPU-interrupt delivery, but APs remain parked/offline and
  * TLB-flush events only acknowledge receipt. Plane does not expose a
  * CPU-local fast accessor, remote TLB shootdown, scheduling, or general AP
  * execution yet.
@@ -79,7 +79,7 @@ bool plane_cpu_is_bsp(void);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
-bool plane_smp_signal_handler(uint8_t vector);
+bool plane_smp_signal_handler(void);
 
 /*
  * Bootloader-specific AP launch code uses these helpers to publish AP start

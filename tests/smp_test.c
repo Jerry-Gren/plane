@@ -11,21 +11,20 @@
 static bool machine_current_data_should_fail;
 static bool machine_prepare_context_should_fail;
 static bool machine_install_context_should_fail;
-static bool local_interrupts_should_fail;
-static bool local_interrupt_send_ipi_should_fail;
+static bool cpu_interrupts_should_fail;
+static bool cpu_signal_should_fail;
 static uint32_t machine_current_data_count;
 static uint32_t machine_prepare_context_count;
 static uint32_t machine_install_context_count;
-static uint32_t local_interrupts_count;
-static uint32_t local_interrupt_send_ipi_count;
-static uint32_t local_interrupt_last_send_ipi_logical_id;
-static uint8_t local_interrupt_last_send_ipi_vector;
+static uint32_t cpu_interrupts_count;
+static uint32_t cpu_signal_count;
+static uint32_t cpu_interrupt_last_signal_logical_id;
 static uint32_t machine_halt_count;
 static uint32_t pmap_update_interrupt_count;
 static struct plane_cpu_data *machine_last_current_data;
 static struct plane_cpu_data *machine_last_prepare_context_data;
 static struct plane_cpu_data *machine_last_install_context_data;
-static struct plane_cpu_data *local_interrupts_last_data;
+static struct plane_cpu_data *cpu_interrupts_last_data;
 static jmp_buf machine_halt_env;
 static bool machine_halt_trap_enabled;
 
@@ -50,24 +49,23 @@ bool ml_cpu_install_ap_startup_context(struct plane_cpu_data *data)
 	return !machine_install_context_should_fail;
 }
 
-bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_cpu_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
 
-bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
+bool ml_cpu_interrupt_init_ap(struct plane_cpu_data *data)
 {
-	local_interrupts_count++;
-	local_interrupts_last_data = data;
-	return !local_interrupts_should_fail;
+	cpu_interrupts_count++;
+	cpu_interrupts_last_data = data;
+	return !cpu_interrupts_should_fail;
 }
 
-bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+bool ml_cpu_signal(uint32_t logical_id)
 {
-	local_interrupt_send_ipi_count++;
-	local_interrupt_last_send_ipi_logical_id = logical_id;
-	local_interrupt_last_send_ipi_vector = vector;
-	return !local_interrupt_send_ipi_should_fail;
+	cpu_signal_count++;
+	cpu_interrupt_last_signal_logical_id = logical_id;
+	return !cpu_signal_should_fail;
 }
 
 void pmap_update_interrupt(void)
@@ -195,8 +193,7 @@ static int test_runtime_rejects_invalid_before_init(void)
 	failures += test_expect_ptr("uninitialized cpu data get",
 				    plane_cpu_get_data(0), NULL);
 	failures += test_expect_bool("uninitialized signal rejected",
-				     plane_smp_signal_handler(
-					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH),
+				     plane_smp_signal_handler(),
 				     false);
 	failures += test_expect_u64("uninitialized event count",
 				    plane_smp_event_count(
@@ -275,19 +272,17 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 static int test_signal_handler_counts_known_events(void)
 {
 	int failures = 0;
-	const struct plane_cpu_data *current = plane_cpu_current_data();
+	struct plane_cpu_data *current = plane_cpu_get_startup_data(0);
 	uint32_t pmap_updates = pmap_update_interrupt_count;
 
-	failures += test_expect_bool("AST event handled",
-				     plane_smp_signal_handler(
-					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
-				     true);
-	failures += test_expect_bool("TLB flush event handled",
-				     plane_smp_signal_handler(
-					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_TLB_FLUSH),
-				     true);
-	failures += test_expect_bool("unknown signal rejected",
-				     plane_smp_signal_handler(0xef), false);
+	if (current != NULL) {
+		current->cpu_signals = (1u << PLANE_SMP_EVENT_AST) |
+				       (1u << PLANE_SMP_EVENT_TLB_FLUSH);
+	}
+	failures += test_expect_bool("pending events handled",
+				     plane_smp_signal_handler(), true);
+	failures += test_expect_bool("empty signal rejected",
+				     plane_smp_signal_handler(), false);
 	if (current != NULL) {
 		failures += test_expect_u32("signals consumed",
 					    current->cpu_signals, 0);
@@ -300,11 +295,11 @@ static int test_signal_handler_counts_known_events(void)
 				    plane_smp_event_count(
 					    PLANE_SMP_EVENT_TLB_FLUSH),
 				    1);
-	failures += test_expect_u64("unknown preserves AST event",
+	failures += test_expect_u64("empty preserves AST event",
 				    plane_smp_event_count(
 					    PLANE_SMP_EVENT_AST),
 				    1);
-	failures += test_expect_u64("unknown preserves TLB flush event",
+	failures += test_expect_u64("empty preserves TLB flush event",
 				    plane_smp_event_count(
 					    PLANE_SMP_EVENT_TLB_FLUSH),
 				    1);
@@ -314,24 +309,22 @@ static int test_signal_handler_counts_known_events(void)
 	return failures;
 }
 
-static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
+static int test_signal_cpu_sets_pending_signal_and_sends_signal(void)
 {
 	int failures = 0;
 	struct plane_cpu_data *bsp = plane_cpu_get_startup_data(0);
 	uint64_t ast_count = plane_smp_event_count(PLANE_SMP_EVENT_AST);
 
-	local_interrupt_send_ipi_should_fail = false;
+	cpu_signal_should_fail = false;
 	failures += test_expect_bool("signal cpu sends AST",
 				     plane_smp_signal_cpu(
-					     0, PLANE_SMP_EVENT_AST),
+					     0, PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_ASYNC),
 				     true);
 	failures += test_expect_u32("signal cpu sends once",
-				    local_interrupt_send_ipi_count, 1);
+				    cpu_signal_count, 1);
 	failures += test_expect_u32("signal cpu target",
-				    local_interrupt_last_send_ipi_logical_id, 0);
-	failures += test_expect_u32("signal cpu vector",
-				    local_interrupt_last_send_ipi_vector,
-				    PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST);
+				    cpu_interrupt_last_signal_logical_id, 0);
 	if (bsp != NULL) {
 		failures += test_expect_u32("signal cpu sets pending bit",
 					    bsp->cpu_signals,
@@ -339,8 +332,7 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 	}
 
 	failures += test_expect_bool("handler consumes pending AST",
-				     plane_smp_signal_handler(
-					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
+				     plane_smp_signal_handler(),
 				     true);
 	failures += test_expect_u64("handler updates AST count",
 				    plane_smp_event_count(PLANE_SMP_EVENT_AST),
@@ -356,7 +348,8 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 
 	failures += test_expect_bool("signal cpu sends TLB flush",
 				     plane_smp_signal_cpu(
-					     0, PLANE_SMP_EVENT_TLB_FLUSH),
+					     0, PLANE_SMP_EVENT_TLB_FLUSH,
+					     PLANE_SMP_SIGNAL_ASYNC),
 				     true);
 	if (bsp != NULL) {
 		failures += test_expect_u32("TLB flush pending bit set",
@@ -364,12 +357,11 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 					    1u << PLANE_SMP_EVENT_TLB_FLUSH);
 	}
 	failures += test_expect_bool("handler drains pending signals",
-				     plane_smp_signal_handler(
-					     PLANE_SMP_LOCAL_INTERRUPT_VECTOR_AST),
+				     plane_smp_signal_handler(),
 				     true);
-	failures += test_expect_u64("pending AST handled",
+	failures += test_expect_u64("pending AST unchanged",
 				    plane_smp_event_count(PLANE_SMP_EVENT_AST),
-				    next_ast_count + 1);
+				    next_ast_count);
 	failures += test_expect_u64("pending TLB flush handled",
 				    plane_smp_event_count(
 					    PLANE_SMP_EVENT_TLB_FLUSH),
@@ -382,33 +374,47 @@ static int test_signal_cpu_sets_pending_signal_and_sends_vector(void)
 					    bsp->cpu_signals, 0);
 	}
 
-	local_interrupt_send_ipi_should_fail = true;
+	cpu_signal_should_fail = true;
 	failures += test_expect_bool("send failure rejects signal",
 				     plane_smp_signal_cpu(
-					     0, PLANE_SMP_EVENT_TLB_FLUSH),
+					     0, PLANE_SMP_EVENT_TLB_FLUSH,
+					     PLANE_SMP_SIGNAL_ASYNC),
 				     false);
-	local_interrupt_send_ipi_should_fail = false;
+	cpu_signal_should_fail = false;
 	if (bsp != NULL) {
 		failures += test_expect_u32("send failure rolls back signal",
 					    bsp->cpu_signals, 0);
 	}
-	uint32_t send_count = local_interrupt_send_ipi_count;
+	uint32_t send_count = cpu_signal_count;
 
 	failures += test_expect_bool("offline ap signal rejected",
 				     plane_smp_signal_cpu(
-					     1, PLANE_SMP_EVENT_AST),
+					     1, PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_ASYNC),
 				     false);
 	failures += test_expect_bool("bad event rejected",
 				     plane_smp_signal_cpu(
-					     0, PLANE_SMP_EVENT_COUNT),
+					     0, PLANE_SMP_EVENT_COUNT,
+					     PLANE_SMP_SIGNAL_ASYNC),
 				     false);
 	failures += test_expect_bool("bad cpu rejected",
 				     plane_smp_signal_cpu(
 					     PLANE_MAX_CPUS,
-					     PLANE_SMP_EVENT_AST),
+					     PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_ASYNC),
+				     false);
+	failures += test_expect_bool("sync mode rejected",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_SYNC),
+				     false);
+	failures += test_expect_bool("nosync mode rejected",
+				     plane_smp_signal_cpu(
+					     0, PLANE_SMP_EVENT_AST,
+					     PLANE_SMP_SIGNAL_NOSYNC),
 				     false);
 	failures += test_expect_u32("invalid signal does not send",
-				    local_interrupt_send_ipi_count, send_count);
+				    cpu_signal_count, send_count);
 	return failures;
 }
 
@@ -483,10 +489,10 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				    machine_current_data_count, 3);
 	failures += test_expect_ptr("current data sees ap1",
 				    machine_last_current_data, ap1);
-	failures += test_expect_u32("park entry initializes local interrupts",
-				    local_interrupts_count, 1);
-	failures += test_expect_ptr("local interrupts sees ap1",
-				    local_interrupts_last_data, ap1);
+	failures += test_expect_u32("park entry initializes CPU interrupts",
+				    cpu_interrupts_count, 1);
+	failures += test_expect_ptr("CPU interrupts sees ap1",
+				    cpu_interrupts_last_data, ap1);
 	failures += test_expect_u32("ap1 state parked",
 				    plane_cpu_startup_state(1),
 				    PLANE_CPU_STARTUP_PARKED);
@@ -518,16 +524,16 @@ static int test_ap_stack_prepare_and_state_transitions(void)
 				     true);
 	failures += test_expect_bool("start ap3",
 				     plane_smp_mark_ap_starting(3), true);
-	local_interrupts_should_fail = true;
+	cpu_interrupts_should_fail = true;
 	call_ap_park_entry(ap3);
-	local_interrupts_should_fail = false;
-	failures += test_expect_u32("ap3 state failed after local interrupts",
+	cpu_interrupts_should_fail = false;
+	failures += test_expect_u32("ap3 state failed after CPU interrupts",
 				    plane_cpu_startup_state(3),
 				    PLANE_CPU_STARTUP_FAILED);
-	failures += test_expect_u32("local interrupts called for ap3",
-				    local_interrupts_count, 2);
-	failures += test_expect_ptr("local interrupts sees ap3",
-				    local_interrupts_last_data, ap3);
+	failures += test_expect_u32("CPU interrupts called for ap3",
+				    cpu_interrupts_count, 2);
+	failures += test_expect_ptr("CPU interrupts sees ap3",
+				    cpu_interrupts_last_data, ap3);
 	failures += test_expect_u32("parked count still unchanged",
 				    plane_cpu_parked_count(), 1);
 	return failures;
@@ -617,7 +623,7 @@ int main(void)
 		TEST_CASE(test_runtime_rejects_invalid_before_init),
 		TEST_CASE(test_runtime_accepts_multi_cpu_bsp_topology),
 		TEST_CASE(test_signal_handler_counts_known_events),
-		TEST_CASE(test_signal_cpu_sets_pending_signal_and_sends_vector),
+		TEST_CASE(test_signal_cpu_sets_pending_signal_and_sends_signal),
 		TEST_CASE(test_ap_stack_prepare_and_state_transitions),
 		TEST_CASE(test_ap_stack_prepare_rejects_after_context_failure_path),
 		TEST_CASE(test_runtime_rejects_reinit_without_state_change),

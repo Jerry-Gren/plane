@@ -42,8 +42,8 @@ void kmain(struct plane_boot_info *info)
 		   "failed to initialize kernel IO mapper");
 	BUG_ON_MSG(!plane_framebuffer_remap(&info->framebuffer),
 		   "failed to remap framebuffer through IO map");
-	BUG_ON_MSG(!ml_local_interrupt_init_bsp(&info->smp),
-		   "failed to initialize BSP local interrupts");
+	BUG_ON_MSG(!ml_cpu_interrupt_init_bsp(&info->smp),
+		   "failed to initialize BSP CPU interrupts");
 	plane_pmm_log_stats();
 
 	BUG_ON_MSG(!plane_smp_startup_prepare_ap_stacks(),

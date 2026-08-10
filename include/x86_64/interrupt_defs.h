@@ -9,7 +9,7 @@
  * Intel SDM Vol.3 Chapters 7 and 8 plus AMD APM Vol.2 Chapter 8 define the
  * IDT gate format, exception vector assignments, external interrupt vector
  * range, and page-fault error-code bits. Keep this header scoped to the
- * current minimal exception/local-interrupt path: IST routing, syscall/user
+ * current minimal exception and CPU-interrupt path: IST routing, syscall/user
  * traps, IOAPIC/PIC routing, and full interrupt dispatch are later milestones.
  */
 #define X86_64_INTR_IDT_ENTRIES 256

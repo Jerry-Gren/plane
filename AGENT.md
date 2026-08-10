@@ -44,7 +44,7 @@ Prefer small, manual patches that preserve surrounding style.
   wrappers after a machine-facing owner exists.
 - Use `ml_*` for machine routines: current-machine services that generic kernel
   code calls through `include/machine/`, such as startup, interrupt state, CPU
-  data installation, local interrupt controller hooks, IO/physical access, and
+  data installation, CPU interrupt controller hooks, IO/physical access, and
   later machine-level hooks.
 - Use `cpu_*` for CPU-local primitives and CPU data operations that name the
   processor action itself, such as `cpu_pause()`. Do not force these into
@@ -124,7 +124,7 @@ Use these words consistently:
 - `physmap`: Plane's RAM physical map. Do not use `direct_map` in new names.
 - `pmap`: page-table construction, active kernel mappings, root ownership, and
   TLB invalidation.
-- `local interrupt`: machine-routine hooks for the current CPU's local
+- `CPU interrupt`: machine-routine hooks for the current CPU's local
   interrupt controller. Keep x86-specific LAPIC terms inside x86_64 owners
   unless the interface is explicitly x86_64-only.
 
@@ -430,14 +430,14 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
 - BSP startup installs current CPU data through the arch hook before exposing
   initialized SMP state.
 - AP park sequence should remain: disable IRQ, install descriptor/TSS context,
-  install current CPU data, initialize local interrupts, mark parked, halt.
+  install current CPU data, initialize CPU interrupts, mark parked, halt.
 - `plane_smp_startup_*` names are for AP startup launch helpers. Do not revive
   `plane_smp_boot_*`.
 - Local APIC/xAPIC details stay in the x86_64 LAPIC implementation. Generic
-  callers use `<machine/machine_routines.h>` and the
-  `ml_local_interrupt_*` machine-routine hooks.
+  callers use `<machine/machine_routines.h>` and the CPU-interrupt
+  machine-routine hooks.
 - Interrupt dispatch ownership is layered: x86_64 trap/interrupt code parses
-  the frame and vector, the local interrupt controller owns EOI and dispatch
+  the frame and vector, the CPU interrupt controller owns EOI and dispatch
   glue, SMP owns inter-processor event meaning and CPU pending signal bits, and
   pmap owns the TLB-flush update hook and later shootdown payload. Generic SMP
   may call `pmap_update_interrupt()` through `<machine/pmap.h>`, but must not
@@ -445,15 +445,16 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   in the architecture trap handler or in LAPIC register code.
 - Keep SMP event names separate from hardware vector allocation. Use durable
   semantic names such as `PLANE_SMP_EVENT_AST` or
-  `PLANE_SMP_EVENT_TLB_FLUSH`; use explicit vector-allocation names such as
-  `PLANE_SMP_LOCAL_INTERRUPT_VECTOR_*` for x86_64 local interrupt vectors.
-  Do not encode vector numbers into the event enum unless the event and vector
-  are intentionally the same ABI.
+  `PLANE_SMP_EVENT_TLB_FLUSH`. SMP must not own per-event hardware vector
+  allocation; x86_64 LAPIC owns the single interprocessor vector
+  `X86_64_LAPIC_VECTOR_INTERPROCESSOR`.
 - Use `signal` for XNU-like cross-CPU delivery/pending state:
-  `plane_smp_signal_cpu()`, `plane_smp_signal_handler()`, and
-  `plane_cpu_data.cpu_signals`. Keep `IPI` only for machine local-interrupt
-  hardware send primitives and x86_64 LAPIC implementation/tests, such as
-  `ml_local_interrupt_send_ipi()`.
+  `plane_smp_signal_cpu(logical_id, event, mode)`,
+  `plane_smp_signal_handler()`, and `plane_cpu_data.cpu_signals`.
+  `plane_smp_signal_cpu()` sets an event bit, applies the signal mode policy,
+  and calls `ml_cpu_signal()`; `plane_smp_signal_handler()` drains pending
+  event bits from the current CPU. Keep `IPI` only for x86_64 LAPIC
+  implementation/tests and hardware-delivery descriptions.
 
 ## Tests
 

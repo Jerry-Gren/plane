@@ -12,6 +12,7 @@
 #include <plane/printk.h>
 #include <plane/smp.h>
 
+#include <x86_64/lapic.h>
 #include "lapic_regs.h"
 #include <x86_64/proc_reg.h>
 
@@ -126,7 +127,7 @@ static void lapic_configure_current(void)
 		    x86_64_lapic_svr_enable(X86_64_LAPIC_SPURIOUS_VECTOR));
 }
 
-bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool lapic_init_bsp(const struct plane_smp_info *info)
 {
 	plane_vaddr_t mmio_base;
 
@@ -157,7 +158,7 @@ bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
 	return true;
 }
 
-bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
+bool lapic_init_ap(struct plane_cpu_data *data)
 {
 	uint32_t expected_lapic_id;
 	uint32_t local_lapic_id;
@@ -183,7 +184,7 @@ bool ml_local_interrupt_init_ap(struct plane_cpu_data *data)
 	return true;
 }
 
-bool ml_local_interrupt_end_of_interrupt(void)
+bool lapic_end_of_interrupt(void)
 {
 	if (!lapic_initialized) {
 		return false;
@@ -193,7 +194,7 @@ bool ml_local_interrupt_end_of_interrupt(void)
 	return true;
 }
 
-bool ml_local_interrupt_dispatch(uint32_t vector)
+bool lapic_interrupt(uint32_t vector)
 {
 	bool handled;
 	bool end_of_interrupt_sent;
@@ -202,16 +203,20 @@ bool ml_local_interrupt_dispatch(uint32_t vector)
 		return false;
 	}
 
-	handled = plane_smp_signal_handler((uint8_t)vector);
+	if (vector == X86_64_LAPIC_VECTOR_INTERPROCESSOR) {
+		handled = plane_smp_signal_handler();
+	} else {
+		handled = false;
+	}
 	if (!handled) {
-		pr_warn("Unhandled local interrupt vector %u\n", vector);
+		pr_warn("Unhandled LAPIC interrupt vector %u\n", vector);
 	}
 
-	end_of_interrupt_sent = ml_local_interrupt_end_of_interrupt();
+	end_of_interrupt_sent = lapic_end_of_interrupt();
 	return handled && end_of_interrupt_sent;
 }
 
-bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
+bool lapic_send_ipi(uint32_t logical_id, uint8_t vector)
 {
 	plane_irq_state_t irq_state;
 	uint32_t lapic_id;
@@ -222,7 +227,7 @@ bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 	}
 
 	/*
-	 * Machine local-interrupt send is a hardware IPI primitive. The x86_64
+	 * Machine CPU interrupt send is a hardware IPI primitive. The x86_64
 	 * backend implements that as a physical-destination fixed IPI.
 	 */
 	lapic_id = lapic_id_by_logical_id[logical_id];
@@ -238,4 +243,19 @@ bool ml_local_interrupt_send_ipi(uint32_t logical_id, uint8_t vector)
 		    x86_64_lapic_icr_fixed_low(vector));
 	ml_irq_restore(irq_state);
 	return true;
+}
+
+bool ml_cpu_interrupt_init_bsp(const struct plane_smp_info *info)
+{
+	return lapic_init_bsp(info);
+}
+
+bool ml_cpu_interrupt_init_ap(struct plane_cpu_data *data)
+{
+	return lapic_init_ap(data);
+}
+
+bool ml_cpu_signal(uint32_t logical_id)
+{
+	return lapic_send_ipi(logical_id, X86_64_LAPIC_VECTOR_INTERPROCESSOR);
 }

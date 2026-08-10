@@ -78,7 +78,7 @@ bool plane_framebuffer_remap(struct plane_framebuffer_info *framebuffer_info)
 	return framebuffer_info != NULL;
 }
 
-bool ml_local_interrupt_init_bsp(const struct plane_smp_info *info)
+bool ml_cpu_interrupt_init_bsp(const struct plane_smp_info *info)
 {
 	return info != NULL;
 }
