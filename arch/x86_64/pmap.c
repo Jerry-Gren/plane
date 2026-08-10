@@ -24,7 +24,6 @@
  * take this lock. Current lock order: pmap -> PMM -> VM page.
  */
 static struct plane_spinlock kernel_pmap_lock = PLANE_SPINLOCK_INIT;
-static uint32_t pmap_tlb_flush_pending[PLANE_MAX_CPUS];
 
 static plane_irq_state_t pmap_lock(void)
 {
@@ -58,7 +57,7 @@ void __weak pmap_invalidate_tlb(plane_vaddr_t vaddr)
 	 * INVLPG invalidates cached translations for one linear address on the
 	 * current CPU. Cross-CPU range shootdown and rendezvous come in a later
 	 * pmap milestone; the current pmap update path performs a full TLB
-	 * flush for CPUs with pending pmap state.
+	 * flush for CPUs with pmap-owned invalid state in CPU data.
 	 */
 	invlpg(vaddr);
 }
@@ -68,66 +67,16 @@ void __weak pmap_flush_tlb_all(void)
 	reload_cr3();
 }
 
-static bool pmap_cpu_is_valid(uint32_t logical_id)
+bool x86_64_pmap_mark_tlb_invalid(uint32_t logical_id)
 {
-	return logical_id < PLANE_MAX_CPUS && logical_id < plane_cpu_count();
-}
-
-static bool pmap_cpu_mark_tlb_flush_pending(uint32_t logical_id,
-					    bool *was_pending)
-{
-	uint32_t old_pending;
-
-	if (!pmap_cpu_is_valid(logical_id)) {
-		return false;
-	}
-
-	old_pending = plane_atomic_load_u32(&pmap_tlb_flush_pending[logical_id]);
-	do {
-		if (old_pending != 0) {
-			if (was_pending != NULL) {
-				*was_pending = true;
-			}
-			return true;
-		}
-	} while (!plane_atomic_compare_exchange_u32(
-		&pmap_tlb_flush_pending[logical_id], &old_pending, 1));
-
-	if (was_pending != NULL) {
-		*was_pending = false;
-	}
-	return true;
-}
-
-static bool pmap_cpu_clear_tlb_flush_pending(uint32_t logical_id)
-{
-	uint32_t old_pending;
-
-	if (!pmap_cpu_is_valid(logical_id)) {
-		return false;
-	}
-
-	old_pending = plane_atomic_load_u32(&pmap_tlb_flush_pending[logical_id]);
-	do {
-		if (old_pending == 0) {
-			return false;
-		}
-	} while (!plane_atomic_compare_exchange_u32(
-		&pmap_tlb_flush_pending[logical_id], &old_pending, 0));
-
-	return true;
-}
-
-bool x86_64_pmap_mark_tlb_flush_pending(uint32_t logical_id)
-{
-	return pmap_cpu_mark_tlb_flush_pending(logical_id, NULL);
+	return plane_cpu_mark_tlb_invalid(logical_id, NULL);
 }
 
 static bool pmap_cpu_signal_tlb_flush(uint32_t logical_id)
 {
-	bool was_pending;
+	bool was_invalid;
 
-	if (!pmap_cpu_mark_tlb_flush_pending(logical_id, &was_pending)) {
+	if (!plane_cpu_mark_tlb_invalid(logical_id, &was_invalid)) {
 		return false;
 	}
 
@@ -141,8 +90,8 @@ static bool pmap_cpu_signal_tlb_flush(uint32_t logical_id)
 		return true;
 	}
 
-	if (!was_pending) {
-		pmap_cpu_clear_tlb_flush_pending(logical_id);
+	if (!was_invalid) {
+		plane_cpu_clear_tlb_invalid(logical_id);
 	}
 	return false;
 }
@@ -168,7 +117,7 @@ void pmap_update_interrupt(void)
 {
 	uint32_t logical_id = plane_cpu_current_id();
 
-	if (pmap_cpu_clear_tlb_flush_pending(logical_id)) {
+	if (plane_cpu_clear_tlb_invalid(logical_id)) {
 		pmap_flush_tlb_all();
 	}
 }

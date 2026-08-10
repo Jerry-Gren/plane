@@ -135,7 +135,8 @@ bool plane_smp_init_bsp(const struct plane_smp_info *info)
 			.present = src->present,
 			.online = false,
 			.startup_state = PLANE_CPU_STARTUP_OFFLINE,
-			.cpu_signals = 0
+			.cpu_signals = 0,
+			.cpu_tlb_invalid = 0
 		};
 	}
 
@@ -306,6 +307,59 @@ enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id)
 	}
 
 	return plane_atomic_load_u32(&cpu->startup_state);
+}
+
+bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
+{
+	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
+	uint32_t old_invalid;
+
+	if (cpu == NULL) {
+		return false;
+	}
+
+	old_invalid = plane_atomic_load_u32(&cpu->cpu_tlb_invalid);
+	do {
+		if (old_invalid != 0) {
+			if (was_invalid != NULL) {
+				*was_invalid = true;
+			}
+			return true;
+		}
+	} while (!plane_atomic_compare_exchange_u32(&cpu->cpu_tlb_invalid,
+						    &old_invalid, 1));
+
+	if (was_invalid != NULL) {
+		*was_invalid = false;
+	}
+	return true;
+}
+
+bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
+{
+	struct plane_cpu_data *cpu = plane_cpu_get_startup_data(logical_id);
+	uint32_t old_invalid;
+
+	if (cpu == NULL) {
+		return false;
+	}
+
+	old_invalid = plane_atomic_load_u32(&cpu->cpu_tlb_invalid);
+	do {
+		if (old_invalid == 0) {
+			return false;
+		}
+	} while (!plane_atomic_compare_exchange_u32(&cpu->cpu_tlb_invalid,
+						    &old_invalid, 0));
+
+	return true;
+}
+
+bool plane_cpu_is_tlb_invalid(uint32_t logical_id)
+{
+	const struct plane_cpu_data *cpu = plane_cpu_get_data(logical_id);
+
+	return cpu != NULL && plane_atomic_load_u32(&cpu->cpu_tlb_invalid) != 0;
 }
 
 static bool smp_event_is_valid(enum plane_smp_event event)

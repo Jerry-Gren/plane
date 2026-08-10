@@ -259,6 +259,8 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 		failures += test_expect_bool("bsp marked", bsp->is_bsp, true);
 		failures += test_expect_bool("bsp present", bsp->present, true);
 		failures += test_expect_bool("bsp online", bsp->online, true);
+		failures += test_expect_u32("bsp tlb invalid init",
+					    bsp->cpu_tlb_invalid, 0);
 	}
 	if (ap != NULL) {
 		failures += test_expect_ptr("ap self", ap->self, ap);
@@ -267,9 +269,62 @@ static int test_runtime_accepts_multi_cpu_bsp_topology(void)
 		failures += test_expect_bool("ap not bsp", ap->is_bsp, false);
 		failures += test_expect_bool("ap present", ap->present, true);
 		failures += test_expect_bool("ap offline", ap->online, false);
+		failures += test_expect_u32("ap tlb invalid init",
+					    ap->cpu_tlb_invalid, 0);
 	}
 	failures += test_expect_ptr("out of range cpu data get",
 				    plane_cpu_get_data(5), NULL);
+	return failures;
+}
+
+static int test_cpu_tlb_invalid_primitives(void)
+{
+	int failures = 0;
+	bool was_invalid = true;
+
+	failures += test_expect_bool("bsp tlb starts valid",
+				     plane_cpu_is_tlb_invalid(0), false);
+	failures += test_expect_bool("mark bsp tlb invalid",
+				     plane_cpu_mark_tlb_invalid(0,
+								&was_invalid),
+				     true);
+	failures += test_expect_bool("first mark reports not invalid",
+				     was_invalid, false);
+	failures += test_expect_bool("bsp tlb is invalid",
+				     plane_cpu_is_tlb_invalid(0), true);
+
+	was_invalid = false;
+	failures += test_expect_bool("mark bsp tlb invalid twice",
+				     plane_cpu_mark_tlb_invalid(0,
+								&was_invalid),
+				     true);
+	failures += test_expect_bool("second mark reports invalid",
+				     was_invalid, true);
+	failures += test_expect_bool("clear bsp tlb invalid",
+				     plane_cpu_clear_tlb_invalid(0), true);
+	failures += test_expect_bool("bsp tlb invalid cleared",
+				     plane_cpu_is_tlb_invalid(0), false);
+	failures += test_expect_bool("clear already valid tlb rejected",
+				     plane_cpu_clear_tlb_invalid(0), false);
+
+	failures += test_expect_bool("mark ap tlb invalid",
+				     plane_cpu_mark_tlb_invalid(1, NULL),
+				     true);
+	failures += test_expect_bool("ap tlb invalid set",
+				     plane_cpu_is_tlb_invalid(1), true);
+	failures += test_expect_bool("clear ap tlb invalid",
+				     plane_cpu_clear_tlb_invalid(1), true);
+
+	failures += test_expect_bool("mark invalid cpu rejected",
+				     plane_cpu_mark_tlb_invalid(PLANE_MAX_CPUS,
+								NULL),
+				     false);
+	failures += test_expect_bool("clear invalid cpu rejected",
+				     plane_cpu_clear_tlb_invalid(PLANE_MAX_CPUS),
+				     false);
+	failures += test_expect_bool("invalid cpu tlb is not invalid",
+				     plane_cpu_is_tlb_invalid(PLANE_MAX_CPUS),
+				     false);
 	return failures;
 }
 
@@ -642,6 +697,7 @@ int main(void)
 		TEST_CASE(test_builder_truncates_extra_cpus),
 		TEST_CASE(test_runtime_rejects_invalid_before_init),
 		TEST_CASE(test_runtime_accepts_multi_cpu_bsp_topology),
+		TEST_CASE(test_cpu_tlb_invalid_primitives),
 		TEST_CASE(test_signal_handler_counts_known_events),
 		TEST_CASE(test_signal_cpu_sets_pending_signal_and_sends_signal),
 		TEST_CASE(test_ap_stack_prepare_and_state_transitions),

@@ -15,9 +15,9 @@
  * per-CPU architecture context, current data, and CPU interrupt state before
  * parking in a halt loop. Plane has a minimal CPU signal dispatch scaffold for
  * architecture CPU-interrupt delivery, but APs remain parked/offline and are
- * not running TLB-flush targets. TLB-flush events enter pmap's current
- * full-flush pending path. Plane does not expose a CPU-local fast accessor,
- * range shootdown rendezvous, scheduling, or general AP execution yet.
+ * not running TLB-flush targets. TLB-flush events enter pmap's CPU-local
+ * invalid state path. Plane does not expose a CPU-local fast accessor, range
+ * shootdown rendezvous, scheduling, or general AP execution yet.
  */
 enum plane_cpu_startup_state {
 	PLANE_CPU_STARTUP_OFFLINE = 0,
@@ -67,6 +67,8 @@ struct plane_cpu_data {
 	uint64_t ap_stack_pages;
 	uint32_t startup_state;
 	uint32_t cpu_signals;
+	/* Pmap-owned CPU-local TLB invalid state; not an SMP event bit. */
+	uint32_t cpu_tlb_invalid;
 };
 
 struct plane_smp_ap_launch {
@@ -92,6 +94,9 @@ bool plane_cpu_is_running(uint32_t logical_id);
 const struct plane_cpu_data *plane_cpu_current_data(void);
 const struct plane_cpu_data *plane_cpu_get_data(uint32_t logical_id);
 enum plane_cpu_startup_state plane_cpu_startup_state(uint32_t logical_id);
+bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid);
+bool plane_cpu_clear_tlb_invalid(uint32_t logical_id);
+bool plane_cpu_is_tlb_invalid(uint32_t logical_id);
 bool plane_smp_signal_cpu(uint32_t logical_id,
 			  enum plane_smp_event event,
 			  enum plane_smp_signal_mode mode);

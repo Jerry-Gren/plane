@@ -31,6 +31,7 @@ static uint64_t flush_count;
 static uint32_t test_cpu_count;
 static uint32_t test_current_cpu_id;
 static bool test_cpu_running[PLANE_MAX_CPUS];
+static uint32_t test_cpu_tlb_invalid[PLANE_MAX_CPUS];
 static bool cpu_signal_should_fail;
 static uint32_t cpu_signal_count;
 static uint32_t cpu_signal_last_logical_id;
@@ -109,6 +110,7 @@ static void reset_pmap_test(void)
 	test_cpu_count = 4;
 	test_current_cpu_id = 0;
 	memset(test_cpu_running, 0, sizeof(test_cpu_running));
+	memset(test_cpu_tlb_invalid, 0, sizeof(test_cpu_tlb_invalid));
 	test_cpu_running[0] = true;
 	cpu_signal_should_fail = false;
 	cpu_signal_count = 0;
@@ -178,6 +180,42 @@ bool plane_cpu_is_running(uint32_t logical_id)
 {
 	return logical_id < test_cpu_count && logical_id < PLANE_MAX_CPUS &&
 	       test_cpu_running[logical_id];
+}
+
+bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
+{
+	if (logical_id >= test_cpu_count || logical_id >= PLANE_MAX_CPUS) {
+		return false;
+	}
+	if (test_cpu_tlb_invalid[logical_id] != 0) {
+		if (was_invalid != NULL) {
+			*was_invalid = true;
+		}
+		return true;
+	}
+
+	test_cpu_tlb_invalid[logical_id] = 1;
+	if (was_invalid != NULL) {
+		*was_invalid = false;
+	}
+	return true;
+}
+
+bool plane_cpu_clear_tlb_invalid(uint32_t logical_id)
+{
+	if (logical_id >= test_cpu_count || logical_id >= PLANE_MAX_CPUS ||
+	    test_cpu_tlb_invalid[logical_id] == 0) {
+		return false;
+	}
+
+	test_cpu_tlb_invalid[logical_id] = 0;
+	return true;
+}
+
+bool plane_cpu_is_tlb_invalid(uint32_t logical_id)
+{
+	return logical_id < test_cpu_count && logical_id < PLANE_MAX_CPUS &&
+	       test_cpu_tlb_invalid[logical_id] != 0;
 }
 
 bool plane_smp_signal_cpu(uint32_t logical_id,
@@ -609,13 +647,17 @@ static int test_active_kernel_map_signals_running_remote_tlb_flush(void)
 				    PLANE_SMP_SIGNAL_ASYNC);
 	failures += test_expect_u64("remote signal after pmap unlock",
 				    cpu_signal_lock_depth, 0);
+	failures += test_expect_bool("remote cpu marked tlb invalid",
+				     plane_cpu_is_tlb_invalid(2), true);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
-	failures += test_expect_u64("remote pending flushes on target cpu",
+	failures += test_expect_u64("remote invalid flushes on target cpu",
 				    flush_count, 1);
+	failures += test_expect_bool("remote cpu invalid clears",
+				     plane_cpu_is_tlb_invalid(2), false);
 	pmap_update_interrupt();
-	failures += test_expect_u64("remote pending clears",
+	failures += test_expect_u64("remote invalid does not flush twice",
 				    flush_count, 1);
 	return failures;
 }
@@ -640,7 +682,7 @@ static int test_active_kernel_map_skips_non_running_remote_cpus(void)
 	pmap_update_interrupt();
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
-	failures += test_expect_u64("non-running cpus not marked pending",
+	failures += test_expect_u64("non-running cpus not marked invalid",
 				    flush_count, 0);
 	return failures;
 }
@@ -719,11 +761,15 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 				    cpu_signal_count, 1);
 	failures += test_expect_u32("protect signal target",
 				    cpu_signal_last_logical_id, 2);
+	failures += test_expect_bool("protect marks remote invalid",
+				     plane_cpu_is_tlb_invalid(2), true);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
-	failures += test_expect_u64("protect remote pending flushes",
+	failures += test_expect_u64("protect remote invalid flushes",
 				    flush_count, 1);
+	failures += test_expect_bool("protect remote invalid clears",
+				     plane_cpu_is_tlb_invalid(2), false);
 
 	test_current_cpu_id = 0;
 	reset_active_pmap_observation();
@@ -734,10 +780,12 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 				    cpu_signal_count, 1);
 	failures += test_expect_u32("unmap signal target",
 				    cpu_signal_last_logical_id, 2);
+	failures += test_expect_bool("unmap marks remote invalid",
+				     plane_cpu_is_tlb_invalid(2), true);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
-	failures += test_expect_u64("unmap remote pending flushes",
+	failures += test_expect_u64("unmap remote invalid flushes",
 				    flush_count, 2);
 	return failures;
 }
@@ -951,63 +999,65 @@ static int test_active_kernel_translate_locks_snapshot(void)
 	return failures;
 }
 
-static int test_pmap_update_interrupt_flushes_only_pending_cpu(void)
+static int test_pmap_update_interrupt_flushes_only_invalid_cpu(void)
 {
 	int failures = 0;
 
 	pmap_update_interrupt();
-	failures += test_expect_u64("no pending update no flush",
+	failures += test_expect_u64("no invalid update no flush",
 				    flush_count, 0);
 
-	failures += test_expect_bool("mark current cpu pending",
-				     x86_64_pmap_mark_tlb_flush_pending(0),
+	failures += test_expect_bool("mark current cpu invalid",
+				     x86_64_pmap_mark_tlb_invalid(0),
 				     true);
-	failures += test_expect_bool("mark current cpu pending twice",
-				     x86_64_pmap_mark_tlb_flush_pending(0),
+	failures += test_expect_bool("mark current cpu invalid twice",
+				     x86_64_pmap_mark_tlb_invalid(0),
 				     true);
 	failures += test_expect_u64("mark does not flush directly",
 				    flush_count, 0);
 
 	pmap_update_interrupt();
-	failures += test_expect_u64("pending update flushes once",
+	failures += test_expect_u64("invalid update flushes once",
 				    flush_count, 1);
 	pmap_update_interrupt();
-	failures += test_expect_u64("cleared pending no repeat flush",
+	failures += test_expect_u64("cleared invalid no repeat flush",
 				    flush_count, 1);
 	return failures;
 }
 
-static int test_pmap_update_interrupt_uses_current_cpu_pending_state(void)
+static int test_pmap_update_interrupt_uses_current_cpu_invalid_state(void)
 {
 	int failures = 0;
 
-	failures += test_expect_bool("mark remote cpu pending",
-				     x86_64_pmap_mark_tlb_flush_pending(2),
+	failures += test_expect_bool("mark remote cpu invalid",
+				     x86_64_pmap_mark_tlb_invalid(2),
 				     true);
 	pmap_update_interrupt();
-	failures += test_expect_u64("other cpu pending does not flush current",
+	failures += test_expect_u64("other cpu invalid does not flush current",
 				    flush_count, 0);
 
 	test_current_cpu_id = 2;
 	pmap_update_interrupt();
 	failures += test_expect_u64("marked cpu interrupt flushes",
 				    flush_count, 1);
+	failures += test_expect_bool("marked cpu invalid clears",
+				     plane_cpu_is_tlb_invalid(2), false);
 	pmap_update_interrupt();
-	failures += test_expect_u64("marked cpu pending clears",
+	failures += test_expect_u64("marked cpu invalid does not flush twice",
 				    flush_count, 1);
 	return failures;
 }
 
-static int test_pmap_mark_tlb_flush_pending_rejects_invalid_cpu(void)
+static int test_pmap_mark_tlb_invalid_rejects_invalid_cpu(void)
 {
 	int failures = 0;
 
 	test_cpu_count = 2;
 	failures += test_expect_bool("mark out of runtime cpu range",
-				     x86_64_pmap_mark_tlb_flush_pending(2),
+				     x86_64_pmap_mark_tlb_invalid(2),
 				     false);
 	failures += test_expect_bool("mark out of max cpu range",
-				     x86_64_pmap_mark_tlb_flush_pending(
+				     x86_64_pmap_mark_tlb_invalid(
 					     PLANE_MAX_CPUS),
 				     false);
 	failures += test_expect_u64("invalid cpu does not flush",
@@ -1796,9 +1846,9 @@ int main(void)
 		TEST_CASE(test_owned_root_protect_preserves_cache_bits_without_active_lock),
 		TEST_CASE(test_pmap_kernel_page_wrappers),
 		TEST_CASE(test_active_kernel_translate_locks_snapshot),
-		TEST_CASE(test_pmap_update_interrupt_flushes_only_pending_cpu),
-		TEST_CASE(test_pmap_update_interrupt_uses_current_cpu_pending_state),
-		TEST_CASE(test_pmap_mark_tlb_flush_pending_rejects_invalid_cpu),
+		TEST_CASE(test_pmap_update_interrupt_flushes_only_invalid_cpu),
+		TEST_CASE(test_pmap_update_interrupt_uses_current_cpu_invalid_state),
+		TEST_CASE(test_pmap_mark_tlb_invalid_rejects_invalid_cpu),
 		TEST_CASE(test_protect_page_rejects_invalid_paths),
 		TEST_CASE(test_active_kernel_failures_release_lock_without_invalidate),
 		TEST_CASE(test_active_kernel_map_failure_rolls_back_and_unlocks),
