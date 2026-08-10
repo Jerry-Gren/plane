@@ -32,6 +32,7 @@ static uint32_t test_cpu_count;
 static uint32_t test_current_cpu_id;
 static bool test_cpu_running[PLANE_MAX_CPUS];
 static uint32_t test_cpu_tlb_invalid[PLANE_MAX_CPUS];
+static uint64_t cpu_tlb_invalid_mark_lock_depth;
 static bool cpu_signal_should_fail;
 static uint32_t cpu_signal_count;
 static uint32_t cpu_signal_last_logical_id;
@@ -111,6 +112,7 @@ static void reset_pmap_test(void)
 	test_current_cpu_id = 0;
 	memset(test_cpu_running, 0, sizeof(test_cpu_running));
 	memset(test_cpu_tlb_invalid, 0, sizeof(test_cpu_tlb_invalid));
+	cpu_tlb_invalid_mark_lock_depth = UINT64_MAX;
 	test_cpu_running[0] = true;
 	cpu_signal_should_fail = false;
 	cpu_signal_count = 0;
@@ -194,6 +196,7 @@ bool plane_cpu_mark_tlb_invalid(uint32_t logical_id, bool *was_invalid)
 		return true;
 	}
 
+	cpu_tlb_invalid_mark_lock_depth = test_spinlock_stub_irqsave_depth();
 	test_cpu_tlb_invalid[logical_id] = 1;
 	if (was_invalid != NULL) {
 		*was_invalid = false;
@@ -486,6 +489,7 @@ static void reset_active_pmap_observation(void)
 	invalidated_vaddr = UINTPTR_MAX;
 	invalidate_count = 0;
 	invalidate_lock_depth = 0;
+	cpu_tlb_invalid_mark_lock_depth = UINT64_MAX;
 	cpu_signal_count = 0;
 	cpu_signal_last_logical_id = UINT32_MAX;
 	cpu_signal_last_event = PLANE_SMP_EVENT_COUNT;
@@ -647,6 +651,8 @@ static int test_active_kernel_map_signals_running_remote_tlb_flush(void)
 				    PLANE_SMP_SIGNAL_ASYNC);
 	failures += test_expect_u64("remote signal after pmap unlock",
 				    cpu_signal_lock_depth, 0);
+	failures += test_expect_u64("remote invalid mark under pmap lock",
+				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("remote cpu marked tlb invalid",
 				     plane_cpu_is_tlb_invalid(2), true);
 
@@ -677,6 +683,9 @@ static int test_active_kernel_map_skips_non_running_remote_cpus(void)
 				     true);
 	failures += test_expect_u32("no remote signal",
 				    cpu_signal_count, 0);
+	failures += test_expect_u64("non-running cpus not marked under lock",
+				    cpu_tlb_invalid_mark_lock_depth,
+				    UINT64_MAX);
 
 	test_current_cpu_id = 1;
 	pmap_update_interrupt();
@@ -761,6 +770,8 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 				    cpu_signal_count, 1);
 	failures += test_expect_u32("protect signal target",
 				    cpu_signal_last_logical_id, 2);
+	failures += test_expect_u64("protect invalid mark under pmap lock",
+				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("protect marks remote invalid",
 				     plane_cpu_is_tlb_invalid(2), true);
 
@@ -780,6 +791,8 @@ static int test_active_kernel_protect_and_unmap_signal_remote_tlb_flush(void)
 				    cpu_signal_count, 1);
 	failures += test_expect_u32("unmap signal target",
 				    cpu_signal_last_logical_id, 2);
+	failures += test_expect_u64("unmap invalid mark under pmap lock",
+				    cpu_tlb_invalid_mark_lock_depth, 1);
 	failures += test_expect_bool("unmap marks remote invalid",
 				     plane_cpu_is_tlb_invalid(2), true);
 
@@ -842,13 +855,6 @@ static int test_mapping_attrs_validate_and_protect_preserves_cache_bits(void)
 	uint64_t *pte;
 	int failures = 0;
 
-	failures += test_expect_bool("reject pmap invalid attr",
-				     pmap_map_kernel_page(
-					     vaddr, 0x12345000ull,
-					     test_map_options(
-						     PLANE_VM_PROT_READ,
-						     (enum pmap_mapping_attr)99)),
-				     false);
 	failures += test_expect_bool("reject pmap invalid attr",
 				     pmap_map_kernel_page(
 					     vaddr, 0x12345000ull,
@@ -1115,6 +1121,9 @@ static int test_active_kernel_failures_release_lock_without_invalidate(void)
 				    test_spinlock_stub_irqrestore_count(), 1);
 	failures += test_expect_u64("active map failure no invalidate",
 				    invalidate_count, 0);
+	failures += test_expect_u64("active map failure no remote invalid",
+				    cpu_tlb_invalid_mark_lock_depth,
+				    UINT64_MAX);
 	failures += test_expect_u64("active map failure releases lock",
 				    test_spinlock_stub_irqsave_depth(), 0);
 
@@ -1128,6 +1137,9 @@ static int test_active_kernel_failures_release_lock_without_invalidate(void)
 				    test_spinlock_stub_irqrestore_count(), 1);
 	failures += test_expect_u64("active unmap failure no invalidate",
 				    invalidate_count, 0);
+	failures += test_expect_u64("active unmap failure no remote invalid",
+				    cpu_tlb_invalid_mark_lock_depth,
+				    UINT64_MAX);
 
 	reset_active_pmap_observation();
 	failures += test_expect_bool("active protect failure",
@@ -1140,6 +1152,9 @@ static int test_active_kernel_failures_release_lock_without_invalidate(void)
 				    test_spinlock_stub_irqrestore_count(), 1);
 	failures += test_expect_u64("active protect failure no invalidate",
 				    invalidate_count, 0);
+	failures += test_expect_u64("active protect failure no remote invalid",
+				    cpu_tlb_invalid_mark_lock_depth,
+				    UINT64_MAX);
 
 	reset_active_pmap_observation();
 	failures += test_expect_bool("active translate failure",

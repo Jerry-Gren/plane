@@ -460,8 +460,11 @@ not let a boot parser include arch-private MM/pmap/physmap internals directly.
   Keep `IPI` only for x86_64 LAPIC implementation/tests and
   hardware-delivery descriptions.
 - Keep `cpu_signals` and `cpu_tlb_invalid` separate. `cpu_signals` is the SMP
-  event delivery bitmap; `cpu_tlb_invalid` is pmap-owned CPU-local state. Pmap
-  sets `cpu_tlb_invalid` before signaling `PLANE_SMP_EVENT_TLB_FLUSH`.
+  event delivery bitmap; `cpu_tlb_invalid` is pmap-owned CPU-local state.
+  Active pmap mutation uses the internal `pmap_flush_tlbs()` sender while
+  holding the pmap lock to perform the local flush and mark remote running CPUs
+  invalid; the remote `PLANE_SMP_EVENT_TLB_FLUSH` signals are sent only after
+  the pmap lock is released.
 
 ## Tests
 

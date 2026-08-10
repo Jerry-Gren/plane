@@ -67,58 +67,78 @@ void __weak pmap_flush_tlb_all(void)
 	reload_cr3();
 }
 
-bool x86_64_pmap_mark_tlb_invalid(uint32_t logical_id)
-{
-	return plane_cpu_mark_tlb_invalid(logical_id, NULL);
-}
-
-static bool pmap_cpu_signal_tlb_flush(uint32_t logical_id)
-{
-	bool was_invalid;
-
-	if (!plane_cpu_mark_tlb_invalid(logical_id, &was_invalid)) {
-		return false;
-	}
-
-	if (logical_id == plane_cpu_current_id()) {
-		pmap_update_interrupt();
-		return true;
-	}
-
-	if (plane_smp_signal_cpu(logical_id, PLANE_SMP_EVENT_TLB_FLUSH,
-				 PLANE_SMP_SIGNAL_ASYNC)) {
-		return true;
-	}
-
-	if (!was_invalid) {
-		plane_cpu_clear_tlb_invalid(logical_id);
-	}
-	return false;
-}
-
-static void pmap_signal_remote_tlb_flushes(void)
-{
-	uint32_t current_id = plane_cpu_current_id();
-	uint32_t cpu_count = plane_cpu_count();
-
-	for (uint32_t logical_id = 0; logical_id < cpu_count; logical_id++) {
-		if (logical_id == current_id ||
-		    !plane_cpu_is_running(logical_id)) {
-			continue;
-		}
-
-		BUG_ON_MSG(!pmap_cpu_signal_tlb_flush(logical_id),
-			   "failed to signal TLB flush to running CPU %u",
-			   logical_id);
-	}
-}
-
 void pmap_update_interrupt(void)
 {
 	uint32_t logical_id = plane_cpu_current_id();
 
 	if (plane_cpu_clear_tlb_invalid(logical_id)) {
 		pmap_flush_tlb_all();
+	}
+}
+
+bool x86_64_pmap_mark_tlb_invalid(uint32_t logical_id)
+{
+	return plane_cpu_mark_tlb_invalid(logical_id, NULL);
+}
+
+/*
+ * XNU-like pmap TLB update sender. The caller must hold the active pmap lock:
+ * local TLB invalidation is part of active root mutation ordering, while
+ * remote CPU signal delivery is deferred until after the lock is released.
+ */
+static bool pmap_flush_tlbs(plane_vaddr_t start,
+			    uint64_t page_count,
+			    uint64_t *cpus_to_signal)
+{
+	uint64_t size;
+	uint32_t current_id;
+	uint32_t cpu_count;
+
+	if (cpus_to_signal == NULL || page_count == 0 ||
+	    !plane_vaddr_is_page_aligned(start) ||
+	    !plane_checked_page_offset(page_count, &size) ||
+	    plane_vaddr_raw(start) > UINT64_MAX - size) {
+		return false;
+	}
+
+	*cpus_to_signal = 0;
+	current_id = plane_cpu_current_id();
+	if (page_count == 1) {
+		pmap_invalidate_tlb(start);
+	} else {
+		pmap_flush_tlb_all();
+	}
+
+	cpu_count = plane_cpu_count();
+	for (uint32_t logical_id = 0;
+	     logical_id < cpu_count && logical_id < PLANE_MAX_CPUS;
+	     logical_id++) {
+		if (logical_id == current_id ||
+		    !plane_cpu_is_running(logical_id)) {
+			continue;
+		}
+
+		if (!plane_cpu_mark_tlb_invalid(logical_id, NULL)) {
+			return false;
+		}
+		*cpus_to_signal |= BIT_ULL(logical_id);
+	}
+	return true;
+}
+
+static void pmap_signal_tlb_flushes(uint64_t cpus_to_signal)
+{
+	for (uint32_t logical_id = 0; logical_id < PLANE_MAX_CPUS;
+	     logical_id++) {
+		if ((cpus_to_signal & BIT_ULL(logical_id)) == 0) {
+			continue;
+		}
+
+		BUG_ON_MSG(!plane_smp_signal_cpu(logical_id,
+						 PLANE_SMP_EVENT_TLB_FLUSH,
+						 PLANE_SMP_SIGNAL_ASYNC),
+			   "failed to signal TLB flush to running CPU %u",
+			   logical_id);
 	}
 }
 
@@ -826,36 +846,44 @@ bool pmap_map_kernel_page(plane_vaddr_t vaddr,
 			  plane_paddr_t phys_addr,
 			  struct pmap_map_options options)
 {
+	uint64_t cpus_to_signal = 0;
 	plane_irq_state_t state;
 	bool mapped;
+	bool flushed = false;
 
 	state = pmap_lock();
 	mapped = x86_64_pmap_map_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr, phys_addr, options);
 	if (mapped) {
-		pmap_invalidate_tlb(vaddr);
+		flushed = pmap_flush_tlbs(vaddr, 1, &cpus_to_signal);
 	}
 	pmap_unlock(state);
 	if (mapped) {
-		pmap_signal_remote_tlb_flushes();
+		BUG_ON_MSG(!flushed,
+			   "failed to flush TLBs after kernel pmap map");
+		pmap_signal_tlb_flushes(cpus_to_signal);
 	}
 	return mapped;
 }
 
 bool pmap_unmap_kernel_page(plane_vaddr_t vaddr)
 {
+	uint64_t cpus_to_signal = 0;
 	plane_irq_state_t state;
 	bool unmapped;
+	bool flushed = false;
 
 	state = pmap_lock();
 	unmapped = x86_64_pmap_unmap_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr);
 	if (unmapped) {
-		pmap_invalidate_tlb(vaddr);
+		flushed = pmap_flush_tlbs(vaddr, 1, &cpus_to_signal);
 	}
 	pmap_unlock(state);
 	if (unmapped) {
-		pmap_signal_remote_tlb_flushes();
+		BUG_ON_MSG(!flushed,
+			   "failed to flush TLBs after kernel pmap unmap");
+		pmap_signal_tlb_flushes(cpus_to_signal);
 	}
 	return unmapped;
 }
@@ -875,18 +903,22 @@ bool pmap_translate_kernel_page(plane_vaddr_t vaddr,
 
 bool pmap_protect_kernel_page(plane_vaddr_t vaddr, uint32_t prot)
 {
+	uint64_t cpus_to_signal = 0;
 	plane_irq_state_t state;
 	bool protected;
+	bool flushed = false;
 
 	state = pmap_lock();
 	protected = x86_64_pmap_protect_page_in_owned_root(
 		x86_64_pmap_current_root_phys(), vaddr, prot);
 	if (protected) {
-		pmap_invalidate_tlb(vaddr);
+		flushed = pmap_flush_tlbs(vaddr, 1, &cpus_to_signal);
 	}
 	pmap_unlock(state);
 	if (protected) {
-		pmap_signal_remote_tlb_flushes();
+		BUG_ON_MSG(!flushed,
+			   "failed to flush TLBs after kernel pmap protect");
+		pmap_signal_tlb_flushes(cpus_to_signal);
 	}
 	return protected;
 }
